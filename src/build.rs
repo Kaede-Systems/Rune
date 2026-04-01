@@ -1456,6 +1456,20 @@ char* rune_rt_string_concat(const char* left_ptr, int64_t left_len, const char* 
     memcpy(out + left_len, right_ptr, (size_t)right_len);
     return rune_rt_store_heap_string(out, total);
 }
+int32_t rune_rt_string_compare(const char* left_ptr, int64_t left_len, const char* right_ptr, int64_t right_len) {
+    int64_t limit = left_len < right_len ? left_len : right_len;
+    int cmp = memcmp(left_ptr, right_ptr, (size_t)limit);
+    if (cmp != 0) {
+        return cmp < 0 ? -1 : 1;
+    }
+    if (left_len < right_len) {
+        return -1;
+    }
+    if (left_len > right_len) {
+        return 1;
+    }
+    return 0;
+}
 char* rune_rt_string_from_i64(int64_t value) {
     char buffer[64];
     int written = snprintf(buffer, sizeof(buffer), "%" PRId64, value);
@@ -2240,6 +2254,22 @@ pub extern "C" fn rune_rt_string_concat(
     let left = std::str::from_utf8(left).expect("left Rune string must be valid UTF-8");
     let right = std::str::from_utf8(right).expect("right Rune string must be valid UTF-8");
     rune_rt_store_string(format!("{left}{right}"))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_compare(
+    left_ptr: *const u8,
+    left_len: i64,
+    right_ptr: *const u8,
+    right_len: i64,
+) -> i32 {
+    let left = unsafe { std::slice::from_raw_parts(left_ptr, left_len as usize) };
+    let right = unsafe { std::slice::from_raw_parts(right_ptr, right_len as usize) };
+    match left.cmp(right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
 }
 
 #[unsafe(no_mangle)]

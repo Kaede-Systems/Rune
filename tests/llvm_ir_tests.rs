@@ -148,3 +148,14 @@ fn emits_int_string_runtime_call() {
 
     assert!(ir.contains("declare i64 @rune_rt_string_to_i64(ptr, i64)"));
 }
+
+#[test]
+fn emits_string_compare_runtime_call() {
+    let ir = emit_llvm_ir_source(
+        "def main(op: String) -> bool:\n    return op == \"+\"\n",
+    )
+    .expect("llvm ir should generate for string comparisons");
+
+    assert!(ir.contains("declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)"));
+    assert!(ir.contains("call i32 @rune_rt_string_compare"));
+}

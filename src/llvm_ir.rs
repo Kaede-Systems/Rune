@@ -573,6 +573,42 @@ impl<'a> FunctionEmitter<'a> {
                 .insert(dst.to_string(), format!("ptr {ptr_reg}, i64 {len_reg}"));
             return Ok(());
         }
+        if matches!(
+            op,
+            BinaryOp::EqualEqual
+                | BinaryOp::NotEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+        ) && left_ty == IrType::String
+            && right_ty == IrType::String
+        {
+            let left_val = self.resolve_value(left, &IrType::String, out)?;
+            let right_val = self.resolve_value(right, &IrType::String, out)?;
+            let (left_ptr, left_len) = split_string_value(&left_val)?;
+            let (right_ptr, right_len) = split_string_value(&right_val)?;
+            self.declared_runtime.insert(
+                "declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)\n".into(),
+            );
+            let cmp_reg = self.next_reg();
+            out.push_str(&format!(
+                "  {cmp_reg} = call i32 @rune_rt_string_compare({left_ptr}, {left_len}, {right_ptr}, {right_len})\n"
+            ));
+            let reg = self.next_reg();
+            let predicate = match op {
+                BinaryOp::EqualEqual => "eq",
+                BinaryOp::NotEqual => "ne",
+                BinaryOp::Greater => "sgt",
+                BinaryOp::GreaterEqual => "sge",
+                BinaryOp::Less => "slt",
+                BinaryOp::LessEqual => "sle",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("  {reg} = icmp {predicate} i32 {cmp_reg}, 0\n"));
+            self.value_map.insert(dst.to_string(), reg);
+            return Ok(());
+        }
         if matches!(op, BinaryOp::And | BinaryOp::Or)
             && (left_ty == IrType::Dynamic || right_ty == IrType::Dynamic)
         {
