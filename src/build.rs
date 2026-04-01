@@ -653,6 +653,7 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
 
     Ok(format!(
         "#include <Arduino.h>\n#include <stdint.h>\n\n\
+static char rune_input_buffer[96];\n\n\
 static void rune_serial_write_cstr(const char* text) {{\n\
     Serial.print(text);\n\
 }}\n\n\
@@ -681,6 +682,27 @@ static void rune_serial_write_i64(int64_t value) {{\n\
 static void rune_serial_newline(void) {{\n\
     Serial.write('\\r');\n\
     Serial.write('\\n');\n\
+}}\n\n\
+static const char* rune_serial_read_line(void) {{\n\
+    size_t index = 0;\n\
+    for (;;) {{\n\
+        while (Serial.available() <= 0) {{}}\n\
+        int value = Serial.read();\n\
+        if (value < 0) {{\n\
+            continue;\n\
+        }}\n\
+        if (value == '\\r') {{\n\
+            continue;\n\
+        }}\n\
+        if (value == '\\n') {{\n\
+            break;\n\
+        }}\n\
+        if (index + 1 < sizeof(rune_input_buffer)) {{\n\
+            rune_input_buffer[index++] = (char)value;\n\
+        }}\n\
+    }}\n\
+    rune_input_buffer[index] = '\\0';\n\
+    return rune_input_buffer;\n\
 }}\n\n\
 void setup() {{\n\
     Serial.begin(115200);\n\
@@ -813,6 +835,7 @@ fn emit_arduino_uno_stmt_expr(
     scope: &HashMap<String, ArduinoUnoType>,
     indent: usize,
 ) -> Result<(), CodegenError> {
+    let prefix = "    ".repeat(indent);
     let ExprKind::Call { callee, args } = &expr.kind else {
         return Err(CodegenError {
             message: "Arduino Uno target supports only call statements in `main`".into(),
@@ -825,23 +848,86 @@ fn emit_arduino_uno_stmt_expr(
             span: callee.span,
         });
     };
-    if args.len() != 1 {
-        return Err(CodegenError {
-            message: format!("`{name}` expects exactly one argument on the Arduino Uno target"),
-            span: expr.span,
-        });
-    }
-    let CallArg::Positional(value) = &args[0] else {
-        return Err(CodegenError {
-            message: format!("`{name}` does not accept keyword arguments on the Arduino Uno target"),
-            span: expr.span,
-        });
-    };
     match name.as_str() {
-        "print" => emit_arduino_uno_print_expr(out, value, false, scope, indent),
-        "println" => emit_arduino_uno_print_expr(out, value, true, scope, indent),
+        "print" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`print` expects exactly one positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            emit_arduino_uno_print_expr(out, value, false, scope, indent)
+        }
+        "println" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`println` expects exactly one positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            emit_arduino_uno_print_expr(out, value, true, scope, indent)
+        }
+        "pin_mode" => {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(mode_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`pin_mode` expects 2 positional arguments on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let pin_rendered = emit_arduino_uno_expr(scope, pin_expr)?;
+            let mode_rendered = emit_arduino_uno_expr(scope, mode_expr)?;
+            if pin_rendered.1 != ArduinoUnoType::I64 || mode_rendered.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer pin and mode for `pin_mode`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}pinMode((uint8_t)({}), (uint8_t)({}));\n",
+                pin_rendered.0, mode_rendered.0
+            ));
+            Ok(())
+        }
+        "digital_write" => {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`digital_write` expects 2 positional arguments on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let pin_rendered = emit_arduino_uno_expr(scope, pin_expr)?;
+            let value_rendered = emit_arduino_uno_expr(scope, value_expr)?;
+            if pin_rendered.1 != ArduinoUnoType::I64 || value_rendered.1 != ArduinoUnoType::Bool {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer pin and bool value for `digital_write`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}digitalWrite((uint8_t)({}), {} ? HIGH : LOW);\n",
+                pin_rendered.0, value_rendered.0
+            ));
+            Ok(())
+        }
+        "delay_ms" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`delay_ms` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let delay_rendered = emit_arduino_uno_expr(scope, value)?;
+            if delay_rendered.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer milliseconds for `delay_ms`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!("{prefix}delay((unsigned long)({}));\n", delay_rendered.0));
+            Ok(())
+        }
         _ => Err(CodegenError {
-            message: "current Arduino Uno target supports only `print` and `println` calls".into(),
+            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, and `delay_ms` statements".into(),
             span: callee.span,
         }),
     }
@@ -985,6 +1071,70 @@ fn emit_arduino_uno_expr(
             if *value { "true".into() } else { "false".into() },
             ArduinoUnoType::Bool,
         )),
+        ExprKind::Call { callee, args } => {
+            let ExprKind::Identifier(name) = &callee.kind else {
+                return Err(CodegenError {
+                    message: "Arduino Uno target supports only direct builtin-style calls in expressions".into(),
+                    span: callee.span,
+                });
+            };
+            match name.as_str() {
+                "digital_read" => {
+                    let [CallArg::Positional(pin_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`digital_read` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let pin_rendered = emit_arduino_uno_expr(scope, pin_expr)?;
+                    if pin_rendered.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer pin for `digital_read`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("(digitalRead((uint8_t)({})) == HIGH)", pin_rendered.0), ArduinoUnoType::Bool))
+                }
+                "analog_read" => {
+                    let [CallArg::Positional(pin_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`analog_read` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let pin_rendered = emit_arduino_uno_expr(scope, pin_expr)?;
+                    if pin_rendered.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer pin for `analog_read`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("((int64_t)analogRead((uint8_t)({})))", pin_rendered.0), ArduinoUnoType::I64))
+                }
+                "millis" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`millis` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)millis())".into(), ArduinoUnoType::I64))
+                }
+                "input" | "read_line" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: format!("`{name}` takes no arguments on the Arduino Uno target"),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
+                }
+                _ => Err(CodegenError {
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `millis`, `input`, and `read_line` expressions".into(),
+                    span: expr.span,
+                }),
+            }
+        }
         ExprKind::Unary { op, expr: inner } => {
             let rendered = emit_arduino_uno_expr(scope, inner)?;
             match op {
@@ -2989,7 +3139,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 thread_local! {
     static RUNE_OWNED_STRINGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static RUNE_LAST_STRING_LEN: Cell<i64> = const { Cell::new(0) };
+    static RUNE_ARDUINO_DIGITAL_PINS: RefCell<[u8; 64]> = const { RefCell::new([0; 64]) };
+    static RUNE_ARDUINO_ANALOG_PINS: RefCell<[i64; 64]> = const { RefCell::new([0; 64]) };
 }
+
+static RUNE_ARDUINO_START: OnceLock<Instant> = OnceLock::new();
 
 fn rune_rt_store_string(value: String) -> *const u8 {
     let len = value.len();
@@ -3077,6 +3231,60 @@ pub extern "C" fn rune_rt_input_line() -> *const u8 {
         line.pop();
     }
     rune_rt_store_string(line)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_pin_mode(_pin: i32, _mode: i32) {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_digital_write(pin: i32, value: bool) {
+    if let Ok(index) = usize::try_from(pin) {
+        RUNE_ARDUINO_DIGITAL_PINS.with(|pins| {
+            let mut pins = pins.borrow_mut();
+            if index < pins.len() {
+                pins[index] = value as u8;
+            }
+        });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_digital_read(pin: i32) -> bool {
+    usize::try_from(pin)
+        .ok()
+        .and_then(|index| {
+            RUNE_ARDUINO_DIGITAL_PINS.with(|pins| pins.borrow().get(index).copied())
+        })
+        .unwrap_or(0)
+        != 0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_analog_read(pin: i32) -> i64 {
+    usize::try_from(pin)
+        .ok()
+        .and_then(|index| {
+            RUNE_ARDUINO_ANALOG_PINS.with(|pins| pins.borrow().get(index).copied())
+        })
+        .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_delay_ms(ms: i32) {
+    if ms > 0 {
+        std::thread::sleep(Duration::from_millis(ms as u64));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_millis() -> i64 {
+    let start = RUNE_ARDUINO_START.get_or_init(Instant::now);
+    start.elapsed().as_millis() as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_read_line() -> *const u8 {
+    rune_rt_input_line()
 }
 
 #[unsafe(no_mangle)]

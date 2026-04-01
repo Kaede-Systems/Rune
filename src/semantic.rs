@@ -1972,6 +1972,113 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
                     Ok(Type::Bool)
                 }
+                "__rune_builtin_arduino_pin_mode" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_pin_mode` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(mode_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_pin_mode` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino pin")?;
+                    let mode_ty = self.check_expr(mode_expr, scope, in_async)?;
+                    self.expect_type(&mode_ty, &Type::I32, mode_expr.span, "Arduino pin mode")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_digital_write" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_digital_write` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_digital_write` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino pin")?;
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_type(&value_ty, &Type::Bool, value_expr.span, "Arduino digital value")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_digital_read" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_digital_read` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_digital_read` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino pin")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_arduino_analog_read" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_analog_read` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_analog_read` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino analog pin")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_delay_ms" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_delay_ms` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(ms_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_delay_ms` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let ms_ty = self.check_expr(ms_expr, scope, in_async)?;
+                    self.expect_type(&ms_ty, &Type::I32, ms_expr.span, "Arduino delay milliseconds")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_millis" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_millis` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_read_line" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_read_line` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::String)
+                }
                 "__rune_builtin_terminal_clear" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -2329,6 +2436,13 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_json_to_string" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_json_to_i64" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_json_to_bool" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_pin_mode" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_digital_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_digital_read" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_analog_read" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_delay_ms" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_millis" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_read_line" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_clear" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_move_to" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_hide_cursor" => Some(Type::Unknown("builtin".to_string())),

@@ -1705,6 +1705,102 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_arduino_pin_mode" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let mode = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_pin_mode(i32, i32)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_pin_mode(i32 {pin}, i32 {mode})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_digital_write" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let value = self.resolve_value(&args[1].value, &IrType::Bool, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_digital_write(i32, i1)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_digital_write(i32 {pin}, i1 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_digital_read" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_arduino_digital_read(i32)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_arduino_digital_read(i32 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_analog_read" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_analog_read(i32)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_arduino_analog_read(i32 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_delay_ms" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let ms = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_delay_ms(i32)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_delay_ms(i32 {ms})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_millis" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_millis()\n".into());
+                out.push_str(&format!("  {reg} = call i64 @rune_rt_arduino_millis()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_read_line" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_arduino_read_line()\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!("  {ptr_reg} = call ptr @rune_rt_arduino_read_line()\n"));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             "__rune_builtin_terminal_clear" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 self.declared_runtime
@@ -2469,7 +2565,7 @@ fn field_call_return_type(
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
-        "input" => Some(IrType::String),
+        "input" | "__rune_builtin_arduino_read_line" => Some(IrType::String),
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
@@ -2477,8 +2573,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_json_stringify"
         | "__rune_builtin_json_kind"
         | "__rune_builtin_json_to_string" => Some(IrType::String),
-        "__rune_builtin_json_is_null" | "__rune_builtin_json_to_bool" => Some(IrType::Bool),
-        "__rune_builtin_json_len" | "__rune_builtin_json_to_i64" => Some(IrType::I64),
+        "__rune_builtin_json_is_null"
+        | "__rune_builtin_json_to_bool"
+        | "__rune_builtin_arduino_digital_read" => Some(IrType::Bool),
+        "__rune_builtin_json_len"
+        | "__rune_builtin_json_to_i64"
+        | "__rune_builtin_arduino_analog_read"
+        | "__rune_builtin_arduino_millis" => Some(IrType::I64),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
@@ -2487,7 +2588,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_terminal_move_to"
         | "__rune_builtin_terminal_hide_cursor"
         | "__rune_builtin_terminal_show_cursor"
-        | "__rune_builtin_terminal_set_title" => Some(IrType::Unit),
+        | "__rune_builtin_terminal_set_title"
+        | "__rune_builtin_arduino_pin_mode"
+        | "__rune_builtin_arduino_digital_write"
+        | "__rune_builtin_arduino_delay_ms" => Some(IrType::Unit),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"

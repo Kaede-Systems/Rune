@@ -1,0 +1,23 @@
+def pin_mode(pin: i32, mode: i32) -> unit:
+    __rune_builtin_arduino_pin_mode(pin, mode)
+    return
+
+def digital_write(pin: i32, value: bool) -> unit:
+    __rune_builtin_arduino_digital_write(pin, value)
+    return
+
+def digital_read(pin: i32) -> bool:
+    return __rune_builtin_arduino_digital_read(pin)
+
+def analog_read(pin: i32) -> i64:
+    return __rune_builtin_arduino_analog_read(pin)
+
+def delay_ms(ms: i32) -> unit:
+    __rune_builtin_arduino_delay_ms(ms)
+    return
+
+def millis() -> i64:
+    return __rune_builtin_arduino_millis()
+
+def read_line() -> String:
+    return __rune_builtin_arduino_read_line()

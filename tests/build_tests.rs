@@ -513,6 +513,30 @@ fn builds_arduino_uno_hex_with_locals_and_control_flow() {
 }
 
 #[test]
+fn builds_arduino_uno_hex_with_arduino_stdlib_runtime_calls() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_runtime.rn");
+    let output_path = dir.join("arduino_uno_runtime.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import pin_mode, digital_write, digital_read, analog_read, delay_ms, millis\n\n\
+         def main() -> i32:\n    pin_mode(13, 1)\n    digital_write(13, true)\n    let started = millis()\n    let level = digital_read(13)\n    let analog = analog_read(0)\n    if level:\n        println(analog)\n    delay_ms(1)\n    println(millis() >= started)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno stdlib runtime hex build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno runtime hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_and_runs_program_with_c_ffi_on_windows() {
     let _guard = build_lock()
         .lock()

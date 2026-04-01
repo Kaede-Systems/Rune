@@ -1860,6 +1860,99 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_arduino_pin_mode" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(mode_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_pin_mode` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", pin_expr)?;
+            self.emit_into_reg(out, "edx", mode_expr)?;
+            out.push_str("    call rune_rt_arduino_pin_mode\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_digital_write" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_digital_write` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", pin_expr)?;
+            self.emit_into_reg(out, "edx", value_expr)?;
+            out.push_str("    call rune_rt_arduino_digital_write\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_digital_read" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_digital_read` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", pin_expr)?;
+            out.push_str("    call rune_rt_arduino_digital_read\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_analog_read" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_analog_read` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", pin_expr)?;
+            out.push_str("    call rune_rt_arduino_analog_read\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_delay_ms" {
+            let [CallArg::Positional(ms_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_delay_ms` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", ms_expr)?;
+            out.push_str("    call rune_rt_arduino_delay_ms\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_millis" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_millis` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_arduino_millis\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_read_line" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_read_line` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_arduino_read_line\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_terminal_clear" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -3828,51 +3921,37 @@ fn type_ref_to_ir_type(ty: Option<&crate::parser::TypeRef>) -> IrType {
     }
 }
 
-fn collect_struct_layouts(program: &Program) -> HashMap<String, Vec<(String, IrType)>> {
-    program
-        .items
-        .iter()
-        .filter_map(|item| {
-            let Item::Struct(StructDecl { name, fields, .. }) = item else {
-                return None;
-            };
-            Some((
-                name.clone(),
-                fields
-                    .iter()
-                    .map(|field| (field.name.clone(), type_ref_to_ir_type(Some(&field.ty))))
-                    .collect::<Vec<_>>(),
-            ))
-        })
-        .collect()
-}
-
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
-        "print"
-        | "println"
-        | "eprint"
-        | "eprintln"
-        | "flush"
-        | "eflush"
-        | "__rune_builtin_time_sleep_ms"
+        "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
+        "input" | "__rune_builtin_arduino_read_line" => Some(IrType::String),
+        "panic" => Some(IrType::Unit),
+        "str" => Some(IrType::String),
+        "int" => Some(IrType::I64),
+        "__rune_builtin_json_parse" => Some(IrType::Json),
+        "__rune_builtin_json_stringify"
+        | "__rune_builtin_json_kind"
+        | "__rune_builtin_json_to_string" => Some(IrType::String),
+        "__rune_builtin_json_is_null"
+        | "__rune_builtin_json_to_bool"
+        | "__rune_builtin_arduino_digital_read" => Some(IrType::Bool),
+        "__rune_builtin_json_len"
+        | "__rune_builtin_json_to_i64"
+        | "__rune_builtin_arduino_analog_read"
+        | "__rune_builtin_arduino_millis" => Some(IrType::I64),
+        "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
+        "__rune_builtin_time_now_unix"
+        | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
+        "__rune_builtin_time_sleep_ms"
         | "__rune_builtin_system_exit"
         | "__rune_builtin_terminal_clear"
         | "__rune_builtin_terminal_move_to"
         | "__rune_builtin_terminal_hide_cursor"
         | "__rune_builtin_terminal_show_cursor"
-        | "__rune_builtin_terminal_set_title" => Some(IrType::Unit),
-        "str" => Some(IrType::String),
-        "__rune_builtin_fs_read_string" => Some(IrType::String),
-        "__rune_builtin_json_parse" => Some(IrType::Json),
-        "__rune_builtin_json_stringify"
-        | "__rune_builtin_json_kind"
-        | "__rune_builtin_json_to_string" => Some(IrType::String),
-        "__rune_builtin_json_is_null" | "__rune_builtin_json_to_bool" => Some(IrType::Bool),
-        "__rune_builtin_json_len" | "__rune_builtin_json_to_i64" => Some(IrType::I64),
-        "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
-        "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
-        "int" => Some(IrType::I64),
+        | "__rune_builtin_terminal_set_title"
+        | "__rune_builtin_arduino_pin_mode"
+        | "__rune_builtin_arduino_digital_write"
+        | "__rune_builtin_arduino_delay_ms" => Some(IrType::Unit),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"
@@ -3893,9 +3972,28 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_fs_create_dir"
         | "__rune_builtin_fs_create_dir_all"
         | "__rune_builtin_audio_bell" => Some(IrType::Bool),
-        "input" => Some(IrType::String),
+        "__rune_builtin_fs_read_string" => Some(IrType::String),
         _ => None,
     }
+}
+
+fn collect_struct_layouts(program: &Program) -> HashMap<String, Vec<(String, IrType)>> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| {
+            let Item::Struct(StructDecl { name, fields, .. }) = item else {
+                return None;
+            };
+            Some((
+                name.clone(),
+                fields
+                    .iter()
+                    .map(|field| (field.name.clone(), type_ref_to_ir_type(Some(&field.ty))))
+                    .collect::<Vec<_>>(),
+            ))
+        })
+        .collect()
 }
 
 fn escape_ascii(value: &str) -> String {
