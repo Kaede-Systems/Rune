@@ -30,6 +30,7 @@ pub enum IrType {
     Dynamic,
     I32,
     I64,
+    Json,
     String,
     Struct(String),
     Unit,
@@ -90,46 +91,107 @@ pub struct IrArg {
 
 pub fn lower_program(program: &Program) -> IrProgram {
     let struct_layouts = collect_struct_layouts(program);
-    let functions = program
-        .items
-        .iter()
-        .filter_map(|item| {
-            let Item::Function(function) = item else {
-                return None;
-            };
-            if function.is_extern {
-                return None;
+    let struct_methods = collect_struct_methods(program);
+    let function_returns = collect_function_returns(program);
+    let mut functions = Vec::new();
+    for item in &program.items {
+        match item {
+            Item::Function(function) => {
+                if function.is_extern {
+                    continue;
+                }
+                let locals = analyze_locals(function, None, &struct_layouts, &struct_methods, &function_returns);
+                let local_types = locals
+                    .iter()
+                    .map(|local| (local.name.clone(), local.ty.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                let mut lowerer = Lowerer::new(
+                    function.name.clone(),
+                    local_types,
+                    &struct_layouts,
+                    &struct_methods,
+                    &function_returns,
+                );
+                lowerer.lower_block(&function.body);
+                functions.push(IrFunction {
+                    name: function.name.clone(),
+                    locals,
+                    instructions: lowerer.instructions,
+                });
             }
-            let locals = analyze_locals(function, &struct_layouts);
-            let mut lowerer = Lowerer::new(function.name.clone());
-            lowerer.lower_block(&function.body);
-            Some(IrFunction {
-                name: function.name.clone(),
-                locals,
-                instructions: lowerer.instructions,
-            })
-        })
-        .collect();
+            Item::Struct(decl) => {
+                for method in &decl.methods {
+                    if method.is_extern {
+                        continue;
+                    }
+                    let method_name = struct_method_symbol(&decl.name, &method.name);
+                    let locals = analyze_locals(
+                        method,
+                        Some(&decl.name),
+                        &struct_layouts,
+                        &struct_methods,
+                        &function_returns,
+                    );
+                    let local_types = locals
+                        .iter()
+                        .map(|local| (local.name.clone(), local.ty.clone()))
+                        .collect::<BTreeMap<_, _>>();
+                    let mut lowerer = Lowerer::new(
+                        method_name.clone(),
+                        local_types,
+                        &struct_layouts,
+                        &struct_methods,
+                        &function_returns,
+                    );
+                    lowerer.lower_block(&method.body);
+                    functions.push(IrFunction {
+                        name: method_name,
+                        locals,
+                        instructions: lowerer.instructions,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
     IrProgram { functions }
 }
 
 fn analyze_locals(
     function: &Function,
+    method_owner: Option<&str>,
     struct_layouts: &BTreeMap<String, BTreeMap<String, IrType>>,
+    struct_methods: &BTreeMap<String, BTreeMap<String, MethodSig>>,
+    function_returns: &BTreeMap<String, IrType>,
 ) -> Vec<IrLocal> {
     let mut infos = BTreeMap::<String, LocalInfo>::new();
 
-    for param in &function.params {
+    for (index, param) in function.params.iter().enumerate() {
+        let ty = if let Some(owner) = method_owner {
+            if index == 0 && param.name == "self" {
+                IrType::Struct(owner.to_string())
+            } else {
+                ir_type_from_type_ref(Some(&param.ty))
+            }
+        } else {
+            ir_type_from_type_ref(Some(&param.ty))
+        };
         infos.insert(
             param.name.clone(),
             LocalInfo {
-                ty: LocalType::Known(ir_type_from_type_ref(Some(&param.ty))),
+                ty: LocalType::Known(ty),
                 reassigned: false,
             },
         );
     }
 
-    collect_local_infos(&function.body, struct_layouts, &mut infos);
+    collect_local_infos(
+        &function.body,
+        struct_layouts,
+        struct_methods,
+        function_returns,
+        &mut infos,
+    );
 
     infos
         .into_iter()
@@ -143,6 +205,8 @@ fn analyze_locals(
 fn collect_local_infos(
     block: &Block,
     struct_layouts: &BTreeMap<String, BTreeMap<String, IrType>>,
+    struct_methods: &BTreeMap<String, BTreeMap<String, MethodSig>>,
+    function_returns: &BTreeMap<String, IrType>,
     infos: &mut BTreeMap<String, LocalInfo>,
 ) {
     for stmt in &block.statements {
@@ -152,11 +216,13 @@ fn collect_local_infos(
                     stmt.name.clone(),
                     LocalInfo {
                         ty: infer_declared_or_expr_type(
-                            stmt.ty.as_ref(),
-                            &stmt.value,
-                            infos,
-                            struct_layouts,
-                        ),
+                    stmt.ty.as_ref(),
+                    &stmt.value,
+                    infos,
+                    struct_layouts,
+                    struct_methods,
+                    function_returns,
+                ),
                         reassigned: false,
                     },
                 );
@@ -167,15 +233,17 @@ fn collect_local_infos(
                 }
             }
             Stmt::If(stmt) => {
-                collect_local_infos(&stmt.then_block, struct_layouts, infos);
+                collect_local_infos(&stmt.then_block, struct_layouts, struct_methods, function_returns, infos);
                 for elif in &stmt.elif_blocks {
-                    collect_local_infos(&elif.block, struct_layouts, infos);
+                    collect_local_infos(&elif.block, struct_layouts, struct_methods, function_returns, infos);
                 }
                 if let Some(block) = &stmt.else_block {
-                    collect_local_infos(block, struct_layouts, infos);
+                    collect_local_infos(block, struct_layouts, struct_methods, function_returns, infos);
                 }
             }
-            Stmt::While(stmt) => collect_local_infos(&stmt.body, struct_layouts, infos),
+            Stmt::While(stmt) => {
+                collect_local_infos(&stmt.body, struct_layouts, struct_methods, function_returns, infos)
+            }
             Stmt::Return(_) | Stmt::Raise(_) | Stmt::Panic(_) | Stmt::Expr(_) => {}
         }
     }
@@ -186,19 +254,21 @@ fn infer_declared_or_expr_type(
     expr: &Expr,
     infos: &BTreeMap<String, LocalInfo>,
     struct_layouts: &BTreeMap<String, BTreeMap<String, IrType>>,
+    struct_methods: &BTreeMap<String, BTreeMap<String, MethodSig>>,
+    function_returns: &BTreeMap<String, IrType>,
 ) -> LocalType {
     match declared {
         Some(ty) => {
             let declared_ir = ir_type_from_type_ref(Some(ty));
             if declared_ir == IrType::Dynamic {
-                infer_expr_type(expr, infos, struct_layouts)
+                infer_expr_type(expr, infos, struct_layouts, struct_methods, function_returns)
                     .map(LocalType::Candidate)
                     .unwrap_or(LocalType::Known(IrType::Dynamic))
             } else {
                 LocalType::Known(declared_ir)
             }
         }
-        None => infer_expr_type(expr, infos, struct_layouts)
+        None => infer_expr_type(expr, infos, struct_layouts, struct_methods, function_returns)
             .map(LocalType::Candidate)
             .unwrap_or(LocalType::Known(IrType::Dynamic)),
     }
@@ -208,6 +278,8 @@ fn infer_expr_type(
     expr: &Expr,
     infos: &BTreeMap<String, LocalInfo>,
     struct_layouts: &BTreeMap<String, BTreeMap<String, IrType>>,
+    struct_methods: &BTreeMap<String, BTreeMap<String, MethodSig>>,
+    function_returns: &BTreeMap<String, IrType>,
 ) -> Option<IrType> {
     match &expr.kind {
         ExprKind::Identifier(name) => infos.get(name).map(|info| info.ty.specialized(true)),
@@ -223,17 +295,43 @@ fn infer_expr_type(
         ExprKind::Unary {
             op: UnaryOp::Negate,
             expr,
-        } => infer_expr_type(expr, infos, struct_layouts),
+        } => infer_expr_type(expr, infos, struct_layouts, struct_methods, function_returns),
         ExprKind::Unary {
             op: UnaryOp::Not, ..
         } => Some(IrType::Bool),
         ExprKind::Binary { left, op, right } => {
-            let left_ty = infer_expr_type(left, infos, struct_layouts)?;
-            let right_ty = infer_expr_type(right, infos, struct_layouts)?;
+            let left_ty = infer_expr_type(left, infos, struct_layouts, struct_methods, function_returns)?;
+            let right_ty = infer_expr_type(right, infos, struct_layouts, struct_methods, function_returns)?;
             match op {
                 BinaryOp::And | BinaryOp::Or => Some(IrType::Bool),
-                BinaryOp::Add
-                | BinaryOp::Subtract
+                BinaryOp::Add => {
+                    if left_ty == right_ty && matches!(left_ty, IrType::I32 | IrType::I64) {
+                        Some(left_ty)
+                    } else if matches!(
+                        (&left_ty, &right_ty),
+                        (
+                            IrType::Dynamic,
+                            IrType::Bool
+                                | IrType::Dynamic
+                                | IrType::I32
+                                | IrType::I64
+                                | IrType::Json
+                                | IrType::String
+                        ) | (
+                            IrType::Bool
+                                | IrType::I32
+                                | IrType::I64
+                                | IrType::Json
+                                | IrType::String,
+                            IrType::Dynamic
+                        )
+                    ) {
+                        Some(IrType::Dynamic)
+                    } else {
+                        None
+                    }
+                }
+                BinaryOp::Subtract
                 | BinaryOp::Multiply
                 | BinaryOp::Divide
                 | BinaryOp::Modulo => {
@@ -247,9 +345,9 @@ fn infer_expr_type(
                                 | IrType::Dynamic
                                 | IrType::I32
                                 | IrType::I64
-                                | IrType::String
+                                | IrType::Json
                         ) | (
-                            IrType::Bool | IrType::I32 | IrType::I64 | IrType::String,
+                            IrType::Bool | IrType::I32 | IrType::I64 | IrType::Json,
                             IrType::Dynamic
                         )
                     ) {
@@ -267,14 +365,29 @@ fn infer_expr_type(
             }
         }
         ExprKind::Call { callee, .. } => match &callee.kind {
+            ExprKind::Field { base, name } => {
+                let IrType::Struct(struct_name) =
+                    infer_expr_type(base, infos, struct_layouts, struct_methods, function_returns)?
+                else {
+                    return None;
+                };
+                struct_methods
+                    .get(&struct_name)
+                    .and_then(|methods| methods.get(name))
+                    .map(|sig| sig.return_type.clone())
+            }
             ExprKind::Identifier(name) if struct_layouts.contains_key(name) => {
                 Some(IrType::Struct(name.clone()))
             }
+            ExprKind::Identifier(name) => builtin_return_type(name)
+                .or_else(|| function_returns.get(name).cloned()),
             _ => None,
         },
         ExprKind::Await { .. } => None,
         ExprKind::Field { base, name } => {
-            let IrType::Struct(struct_name) = infer_expr_type(base, infos, struct_layouts)? else {
+            let IrType::Struct(struct_name) =
+                infer_expr_type(base, infos, struct_layouts, struct_methods, function_returns)?
+            else {
                 return None;
             };
             struct_layouts
@@ -290,6 +403,7 @@ fn ir_type_from_type_ref(ty: Option<&TypeRef>) -> IrType {
         Some("bool") => IrType::Bool,
         Some("i32") => IrType::I32,
         Some("i64") => IrType::I64,
+        Some("Json") => IrType::Json,
         Some("String") | Some("str") => IrType::String,
         Some("unit") => IrType::Unit,
         Some("dynamic") | None => IrType::Dynamic,
@@ -340,15 +454,29 @@ impl LocalType {
 
 struct Lowerer {
     function_name: String,
+    local_types: BTreeMap<String, IrType>,
+    struct_layouts: BTreeMap<String, BTreeMap<String, IrType>>,
+    struct_methods: BTreeMap<String, BTreeMap<String, MethodSig>>,
+    function_returns: BTreeMap<String, IrType>,
     instructions: Vec<IrInst>,
     temp_counter: usize,
     label_counter: usize,
 }
 
 impl Lowerer {
-    fn new(function_name: String) -> Self {
+    fn new(
+        function_name: String,
+        local_types: BTreeMap<String, IrType>,
+        struct_layouts: &BTreeMap<String, BTreeMap<String, IrType>>,
+        struct_methods: &BTreeMap<String, BTreeMap<String, MethodSig>>,
+        function_returns: &BTreeMap<String, IrType>,
+    ) -> Self {
         Self {
             function_name,
+            local_types,
+            struct_layouts: struct_layouts.clone(),
+            struct_methods: struct_methods.clone(),
+            function_returns: function_returns.clone(),
             instructions: Vec::new(),
             temp_counter: 0,
             label_counter: 0,
@@ -523,24 +651,74 @@ impl Lowerer {
                 dst
             }
             ExprKind::Call { callee, args } => {
-                let callee = match &callee.kind {
-                    ExprKind::Identifier(name) => name.clone(),
-                    ExprKind::Field { name, .. } => name.clone(),
-                    _ => "<expr>".to_string(),
-                };
-                let args = args
-                    .iter()
-                    .map(|arg| match arg {
-                        CallArg::Positional(expr) => IrArg {
+                let (callee, args) = match &callee.kind {
+                    ExprKind::Identifier(name) => (
+                        name.clone(),
+                        args.iter()
+                            .map(|arg| match arg {
+                                CallArg::Positional(expr) => IrArg {
+                                    name: None,
+                                    value: self.lower_expr(expr),
+                                },
+                                CallArg::Keyword { name, value, .. } => IrArg {
+                                    name: Some(name.clone()),
+                                    value: self.lower_expr(value),
+                                },
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                    ExprKind::Field { base, name } => {
+                        let base_value = self.lower_expr(base);
+                        let base_expr_ty = infer_expr_type(
+                            base,
+                            &self
+                                .local_types
+                                .iter()
+                                .map(|(name, ty)| {
+                                    (
+                                        name.clone(),
+                                        LocalInfo {
+                                            ty: LocalType::Known(ty.clone()),
+                                            reassigned: false,
+                                        },
+                                    )
+                                })
+                                .collect::<BTreeMap<_, _>>(),
+                            &self.struct_layouts,
+                            &self.struct_methods,
+                            &self.function_returns,
+                        );
+                        let callee_name = if let Some(IrType::Struct(struct_name)) = base_expr_ty {
+                            if self
+                                .struct_methods
+                                .get(&struct_name)
+                                .is_some_and(|methods| methods.contains_key(name))
+                            {
+                                struct_method_symbol(&struct_name, name)
+                            } else {
+                                name.clone()
+                            }
+                        } else {
+                            name.clone()
+                        };
+                        let mut lowered_args = vec![IrArg {
                             name: None,
-                            value: self.lower_expr(expr),
-                        },
-                        CallArg::Keyword { name, value, .. } => IrArg {
-                            name: Some(name.clone()),
-                            value: self.lower_expr(value),
-                        },
-                    })
-                    .collect::<Vec<_>>();
+                            value: base_value,
+                        }];
+                        lowered_args.extend(args.iter().map(|arg| match arg {
+                            CallArg::Positional(expr) => IrArg {
+                                name: None,
+                                value: self.lower_expr(expr),
+                            },
+                            CallArg::Keyword { name, value, .. } => IrArg {
+                                name: Some(name.clone()),
+                                value: self.lower_expr(value),
+                            },
+                        }));
+                        (callee_name, lowered_args)
+                    }
+                    _ => ("<expr>".to_string(), Vec::new()),
+                };
                 let dst = self.next_temp();
                 self.instructions.push(IrInst::Call {
                     dst: Some(dst.clone()),
@@ -656,9 +834,126 @@ impl fmt::Display for IrType {
             IrType::Dynamic => write!(f, "dynamic"),
             IrType::I32 => write!(f, "i32"),
             IrType::I64 => write!(f, "i64"),
+            IrType::Json => write!(f, "Json"),
             IrType::String => write!(f, "String"),
             IrType::Struct(name) => write!(f, "{name}"),
             IrType::Unit => write!(f, "unit"),
         }
+    }
+}
+
+fn collect_function_returns(program: &Program) -> BTreeMap<String, IrType> {
+    let mut out = BTreeMap::new();
+    for item in &program.items {
+        match item {
+            Item::Function(function) => {
+                let ty = function
+                    .return_type
+                    .as_ref()
+                    .map(|ty| ir_type_from_type_ref(Some(ty)))
+                    .unwrap_or(IrType::Unit);
+                out.insert(function.name.clone(), ty);
+            }
+            Item::Struct(decl) => {
+                for method in &decl.methods {
+                    let ty = method
+                        .return_type
+                        .as_ref()
+                        .map(|ty| ir_type_from_type_ref(Some(ty)))
+                        .unwrap_or(IrType::Unit);
+                    out.insert(struct_method_symbol(&decl.name, &method.name), ty);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MethodSig {
+    return_type: IrType,
+}
+
+fn collect_struct_methods(program: &Program) -> BTreeMap<String, BTreeMap<String, MethodSig>> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| {
+            let Item::Struct(decl) = item else {
+                return None;
+            };
+            Some((
+                decl.name.clone(),
+                decl.methods
+                    .iter()
+                    .map(|method| {
+                        (
+                            method.name.clone(),
+                            MethodSig {
+                                return_type: method
+                                    .return_type
+                                    .as_ref()
+                                    .map(|ty| ir_type_from_type_ref(Some(ty)))
+                                    .unwrap_or(IrType::Unit),
+                            },
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>(),
+            ))
+        })
+        .collect()
+}
+
+fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {
+    format!("{struct_name}__{method_name}")
+}
+
+fn builtin_return_type(name: &str) -> Option<IrType> {
+    match name {
+        "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
+        "input" => Some(IrType::String),
+        "panic" => Some(IrType::Unit),
+        "str" => Some(IrType::String),
+        "int" => Some(IrType::I64),
+        "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
+        "__rune_builtin_time_sleep_ms"
+        | "__rune_builtin_system_exit"
+        | "__rune_builtin_terminal_clear"
+        | "__rune_builtin_terminal_move_to"
+        | "__rune_builtin_terminal_hide_cursor"
+        | "__rune_builtin_terminal_show_cursor"
+        | "__rune_builtin_terminal_set_title" => Some(IrType::Unit),
+        "__rune_builtin_system_pid"
+        | "__rune_builtin_system_cpu_count"
+        | "__rune_builtin_env_get_i32"
+        | "__rune_builtin_env_arg_count" => Some(IrType::I32),
+        "__rune_builtin_env_exists"
+        | "__rune_builtin_env_get_bool"
+        | "__rune_builtin_network_tcp_connect"
+        | "__rune_builtin_network_tcp_listen"
+        | "__rune_builtin_network_tcp_send"
+        | "__rune_builtin_network_tcp_connect_timeout"
+        | "__rune_builtin_network_udp_bind"
+        | "__rune_builtin_network_udp_send"
+        | "__rune_builtin_fs_exists"
+        | "__rune_builtin_fs_write_string"
+        | "__rune_builtin_fs_remove"
+        | "__rune_builtin_fs_rename"
+        | "__rune_builtin_fs_copy"
+        | "__rune_builtin_fs_create_dir"
+        | "__rune_builtin_fs_create_dir_all"
+        | "__rune_builtin_audio_bell"
+        | "__rune_builtin_json_is_null"
+        | "__rune_builtin_json_to_bool" => Some(IrType::Bool),
+        "__rune_builtin_fs_read_string"
+        | "__rune_builtin_json_stringify"
+        | "__rune_builtin_json_kind"
+        | "__rune_builtin_json_to_string" => Some(IrType::String),
+        "__rune_builtin_json_parse"
+        | "__rune_builtin_json_get"
+        | "__rune_builtin_json_index" => Some(IrType::Json),
+        "__rune_builtin_json_len" | "__rune_builtin_json_to_i64" => Some(IrType::I64),
+        _ => None,
     }
 }

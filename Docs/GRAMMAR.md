@@ -34,11 +34,13 @@ module_path     ::= { "." } ident { "." ident }
 exception_decl  ::= "exception" ident NEWLINE
 ```
 
-## Structs
+## Classes And Structs
 
 ```ebnf
-struct_decl     ::= "struct" ident ":" NEWLINE INDENT { struct_field } DEDENT
+struct_decl     ::= ( "struct" | "class" ) ident ":" NEWLINE INDENT { struct_member } DEDENT
+struct_member   ::= struct_field | method_decl
 struct_field    ::= ident ":" type_ref NEWLINE
+method_decl     ::= [ "extern" ] [ "async" ] "def" ident "(" [ param_list ] ")" [ return_ann ] [ raises_ann ] ":" NEWLINE block
 ```
 
 ## Functions
@@ -113,7 +115,8 @@ primary         ::= ident | integer | string | "true" | "false" | "(" expr ")"
 - `await` parses, but async native backend support is still incomplete.
 - `extern def` declarations are implemented for bodyless native C FFI declarations.
 - `try` / `except` tokens exist lexically but are not parser-level language constructs yet.
-- Struct declarations, constructor calls, and field reads are implemented for the current static native slice.
+- Struct/class declarations, constructor calls, and field reads are implemented for the current static native slice.
+- Class methods declared inside the class body are implemented for the semantic checker, native executable path, and LLVM executable path.
 - Current struct limitations:
   - struct values must be stored in explicitly typed locals like `let point: Point = ...`
   - struct parameters are supported for user functions in native codegen

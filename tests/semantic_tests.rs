@@ -113,6 +113,24 @@ fn checks_fs_terminal_and_audio_builtins() {
 }
 
 #[test]
+fn checks_json_builtins_and_stdlib_shape() {
+    let checked = check_source(
+        "def main() -> unit:\n    let doc: Json = __rune_builtin_json_parse(\"{\\\"name\\\":\\\"Rune\\\",\\\"nums\\\":[1,2,3],\\\"ok\\\":true}\")\n    let name: String = __rune_builtin_json_to_string(__rune_builtin_json_get(doc, \"name\"))\n    let second: i64 = __rune_builtin_json_to_i64(__rune_builtin_json_index(__rune_builtin_json_get(doc, \"nums\"), 1))\n    let ok: bool = __rune_builtin_json_to_bool(__rune_builtin_json_get(doc, \"ok\"))\n    println(__rune_builtin_json_stringify(doc))\n    println(__rune_builtin_json_kind(doc))\n    println(str(__rune_builtin_json_is_null(__rune_builtin_json_get(doc, \"missing\"))))\n    println(__rune_builtin_json_len(__rune_builtin_json_get(doc, \"nums\")))\n    println(name)\n    println(second)\n    println(str(ok))\n    return\n",
+    )
+    .expect("json stdlib program should check");
+    assert_eq!(checked.functions[0].return_type, Type::Unit);
+}
+
+#[test]
+fn accepts_direct_json_equality() {
+    let checked = check_source(
+        "def main() -> unit:\n    let left: Json = __rune_builtin_json_parse(\"1\")\n    let right: Json = __rune_builtin_json_parse(\"1\")\n    if left == right:\n        println(\"same\")\n    return\n",
+    )
+    .expect("direct json equality should check");
+    assert_eq!(checked.functions[0].return_type, Type::Unit);
+}
+
+#[test]
 fn defaults_untyped_locals_to_dynamic() {
     let checked =
         check_source("def main() -> unit:\n    let value = 42\n    println(value)\n    return\n")
@@ -248,6 +266,30 @@ fn checks_struct_construction_and_field_access() {
     )
     .expect("struct construction should check");
     assert_eq!(checked.functions[0].return_type, Type::I32);
+}
+
+#[test]
+fn checks_class_construction_and_field_access() {
+    let checked = check_source(
+        "class Point:\n    x: i32\n    y: i32\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    return point.x + point.y\n",
+    )
+    .expect("class construction should check");
+    assert_eq!(checked.functions[0].return_type, Type::I32);
+}
+
+#[test]
+fn checks_class_method_call() {
+    let checked = check_source(
+        "class Point:\n    x: i32\n    y: i32\n    def sum(self) -> i32:\n        return self.x + self.y\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    return point.sum()\n",
+    )
+    .expect("class method call should check");
+    assert!(checked.functions.iter().any(|function| function.name == "Point__sum"));
+    assert!(checked
+        .functions
+        .iter()
+        .any(|function| function.name == "main" && function.return_type == Type::I32));
 }
 
 #[test]

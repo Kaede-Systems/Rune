@@ -14,6 +14,8 @@
 # Generated compiler outputs
 *.ll
 *.wasm
+*.hex
+*.elf
 
 # Temporary bundles and scratch files
 debug_tmp/
@@ -24,6 +26,12 @@ test.ll
 temp_use_rune.c
 ffi_demo/greet_call_linux*
 ffi_demo/greet_call_macos*
+*_tmp.rn
+bad_codegen_tmp.rn
+debug_cli_tmp.rn
+debug_cli_tmp2.rn
+tmp_class_method.rn
+embedded_test/
 
 # Local helper outputs
 *.pyc
@@ -37,3 +45,5 @@ ChatGPT Image *.png
 tools/llvm21/
 tools/wasmtime/
 tools/py_wasmtime/
+tools/llvm-xpack-win64/
+tools/*.zip

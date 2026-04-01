@@ -14,7 +14,7 @@ Rune uses Python-inspired surface syntax:
 - keyword arguments
 - `and`, `or`, `not`
 - `raise` and `panic`
-- `struct`
+- `class`
 - `extern def`
 
 Example:
@@ -112,12 +112,14 @@ while count > 0:
 
 Dynamic truthiness is currently supported in native code paths for conditions.
 
-## Structs
+## Classes
 
-Concrete struct declarations are now implemented for the current static slice:
+Concrete class declarations are now implemented for the current static slice.
+
+`class` is the preferred Python-style surface syntax. Internally, the current compiler lowers it through the same concrete layout model that was previously exposed as `struct`.
 
 ```rune
-struct Point:
+class Point:
     x: i32
     y: i32
 
@@ -132,14 +134,19 @@ Current implemented struct rules:
 
 - construction uses keyword arguments
 - field reads use `value.field`
-- struct locals must currently be explicitly typed
-- struct parameters are supported for user functions
-- struct values are stack-backed in the native backend
+- instance methods are declared inside the class body with `def`
+- method calls use `value.method(...)`
+- `self` is required as the first method parameter
+- class locals must currently be explicitly typed
+- class parameters are supported for user functions
+- class methods are supported in the semantic checker, native executable path, and LLVM executable path
+- class values are stack-backed in the native backend
+- object layout is concrete and low-level, not hidden-heap by default
 
 Current struct limitations:
 
-- struct return values are not yet supported in native codegen
-- `impl`, methods, inheritance, traits, and ABCs are not implemented yet
+- class return values are not yet supported in native codegen
+- `impl`, inheritance, traits, and ABCs are not implemented yet
 
 ## Operators
 
@@ -252,6 +259,7 @@ Language-level builtins currently recognized:
 
 These top-level stdlib modules currently exist in [`stdlib/`](C:\Users\kaededevkentohinode\KUROX\stdlib):
 
+- `json`
 - `time`
 - `system`
 - `env`
@@ -324,6 +332,25 @@ Current exported functions:
 - `flush_out() -> unit`
 - `flush_err() -> unit`
 - `read_line() -> String`
+
+`json`
+- `parse(text: String) -> Json`
+- `stringify(value: Json) -> String`
+- `kind(value: Json) -> String`
+- `is_null(value: Json) -> bool`
+- `len(value: Json) -> i64`
+- `get(value: Json, key: String) -> Json`
+- `index(value: Json, at: i64) -> Json`
+- `to_string(value: Json) -> String`
+- `to_i64(value: Json) -> i64`
+- `to_bool(value: Json) -> bool`
+
+Current JSON notes:
+
+- `Json` is a real first-class runtime-backed type
+- `str(json_value)` and `int(json_value)` are supported
+- dynamic values can now carry `Json` in native and LLVM executable paths
+- direct `Json == Json` and `Json != Json` use structural comparison
 
 ## Native Backend Notes
 

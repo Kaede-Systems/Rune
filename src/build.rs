@@ -3,16 +3,22 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
 
 use crate::codegen::CodegenError;
 use crate::llvm_backend::{emit_object_file, emit_object_file_from_ir};
 use crate::llvm_ir::emit_llvm_ir;
 use crate::module_loader::load_program_from_path;
 use crate::optimize::optimize_program;
-use crate::parser::{Item, Program, TypeRef};
+use crate::parser::{BinaryOp, CallArg, Expr, ExprKind, Item, Program, Stmt, TypeRef, UnaryOp};
 use crate::semantic::check_program;
-use crate::toolchain::{find_packaged_llvm_tool, find_packaged_wasm_ld};
+use crate::toolchain::{
+    find_arduino_avr_avrdude_conf, find_arduino_avrdude, find_arduino_avr_core_root,
+    find_arduino_avr_gcc, find_arduino_avr_gpp, find_arduino_avr_objcopy,
+    find_packaged_llvm_tool, find_packaged_wasm_ld,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildOptions {
@@ -20,6 +26,8 @@ pub struct BuildOptions {
     pub link_libs: Vec<String>,
     pub link_args: Vec<String>,
     pub link_c_sources: Vec<PathBuf>,
+    pub flash_after_build: bool,
+    pub flash_port: Option<String>,
 }
 
 #[derive(Debug)]
@@ -87,6 +95,7 @@ pub enum TargetPlatform {
     Linux,
     MacOS,
     Wasm,
+    Embedded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +105,7 @@ pub struct TargetSpec {
     pub exe_extension: &'static str,
     pub library_extension: &'static str,
     pub static_library_extension: &'static str,
+    pub object_extension: &'static str,
     pub needs_macos_sdk: bool,
 }
 
@@ -106,6 +116,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "exe",
         library_extension: "dll",
         static_library_extension: "lib",
+        object_extension: "obj",
         needs_macos_sdk: false,
     },
     TargetSpec {
@@ -114,6 +125,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "exe",
         library_extension: "dll",
         static_library_extension: "lib",
+        object_extension: "obj",
         needs_macos_sdk: false,
     },
     TargetSpec {
@@ -122,6 +134,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "exe",
         library_extension: "dll",
         static_library_extension: "lib",
+        object_extension: "obj",
         needs_macos_sdk: false,
     },
     TargetSpec {
@@ -130,6 +143,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "",
         library_extension: "so",
         static_library_extension: "a",
+        object_extension: "o",
         needs_macos_sdk: false,
     },
     TargetSpec {
@@ -138,6 +152,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "",
         library_extension: "so",
         static_library_extension: "a",
+        object_extension: "o",
         needs_macos_sdk: false,
     },
     TargetSpec {
@@ -146,6 +161,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "",
         library_extension: "dylib",
         static_library_extension: "a",
+        object_extension: "o",
         needs_macos_sdk: true,
     },
     TargetSpec {
@@ -154,6 +170,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "",
         library_extension: "dylib",
         static_library_extension: "a",
+        object_extension: "o",
         needs_macos_sdk: true,
     },
     TargetSpec {
@@ -162,6 +179,7 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "wasm",
         library_extension: "wasm",
         static_library_extension: "a",
+        object_extension: "o",
         needs_macos_sdk: false,
     },
     TargetSpec {
@@ -170,6 +188,43 @@ const KNOWN_TARGETS: &[TargetSpec] = &[
         exe_extension: "wasm",
         library_extension: "wasm",
         static_library_extension: "a",
+        object_extension: "o",
+        needs_macos_sdk: false,
+    },
+    TargetSpec {
+        triple: "avr-atmega328p-arduino-uno",
+        platform: TargetPlatform::Embedded,
+        exe_extension: "hex",
+        library_extension: "a",
+        static_library_extension: "a",
+        object_extension: "o",
+        needs_macos_sdk: false,
+    },
+    TargetSpec {
+        triple: "thumbv6m-none-eabi",
+        platform: TargetPlatform::Embedded,
+        exe_extension: "",
+        library_extension: "a",
+        static_library_extension: "a",
+        object_extension: "o",
+        needs_macos_sdk: false,
+    },
+    TargetSpec {
+        triple: "thumbv7em-none-eabihf",
+        platform: TargetPlatform::Embedded,
+        exe_extension: "",
+        library_extension: "a",
+        static_library_extension: "a",
+        object_extension: "o",
+        needs_macos_sdk: false,
+    },
+    TargetSpec {
+        triple: "riscv32-unknown-elf",
+        platform: TargetPlatform::Embedded,
+        exe_extension: "",
+        library_extension: "a",
+        static_library_extension: "a",
+        object_extension: "o",
         needs_macos_sdk: false,
     },
 ];
@@ -227,6 +282,42 @@ pub fn build_executable_llvm(
     build_executable_llvm_with_options(source_path, output_path, target, &BuildOptions::default())
 }
 
+pub fn build_object_file(
+    source_path: &Path,
+    output_path: &Path,
+    target: Option<&str>,
+) -> Result<(), BuildError> {
+    let target_spec = target_spec(target)?;
+    let mut program = load_program_from_path(source_path)
+        .map_err(|error| BuildError::ModuleLoad(error.to_string()))?;
+    check_program(&program).map_err(|error| {
+        BuildError::Codegen(CodegenError {
+            message: error.message,
+            span: error.span,
+        })
+    })?;
+    optimize_program(&mut program);
+
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|source| BuildError::Io {
+            context: format!("failed to create `{}`", parent.display()),
+            source,
+        })?;
+    }
+
+    emit_object_file(&program, target_spec.triple, output_path)
+        .map(|_| ())
+        .map_err(|error| {
+        BuildError::Codegen(CodegenError {
+            message: error.message,
+            span: crate::lexer::Span { line: 1, column: 1 },
+        })
+    })
+}
+
 pub fn emit_c_header(source_path: &Path, output_path: &Path) -> Result<(), BuildError> {
     let mut program = load_program_from_path(source_path)
         .map_err(|error| BuildError::ModuleLoad(error.to_string()))?;
@@ -276,6 +367,9 @@ fn build_executable_with_backend(
         })
     })?;
     optimize_program(&mut program);
+    if target_spec.triple == "avr-atmega328p-arduino-uno" {
+        return build_arduino_uno_hex(&program, output_path, options);
+    }
     let should_try_llvm = true;
     if should_try_llvm {
         match build_executable_via_llvm(&program, output_path, &target_spec, source_path, options) {
@@ -347,6 +441,675 @@ fn build_executable_via_native_asm(
     let _ = fs::remove_file(&wrapper_path);
     let _ = fs::remove_dir(&temp_dir);
     Ok(())
+}
+
+fn build_arduino_uno_hex(
+    program: &Program,
+    output_path: &Path,
+    options: &BuildOptions,
+) -> Result<(), BuildError> {
+    let cpp_source = emit_arduino_uno_cpp(program).map_err(BuildError::Codegen)?;
+    let gpp = find_arduino_avr_gpp().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR g++ toolchain not found".into())
+    })?;
+    let gcc = find_arduino_avr_gcc().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR gcc toolchain not found".into())
+    })?;
+    let objcopy = find_arduino_avr_objcopy().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR objcopy not found".into())
+    })?;
+    let core_root = find_arduino_avr_core_root().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR core sources not found".into())
+    })?;
+    let temp_dir = create_temp_dir()?;
+    let cpp_path = temp_dir.join("rune_arduino_uno.cpp");
+    let sketch_obj = temp_dir.join("rune_arduino_uno.o");
+    let elf_path = temp_dir.join("rune_arduino_uno.elf");
+    fs::write(&cpp_path, cpp_source).map_err(|source| BuildError::Io {
+        context: format!("failed to write `{}`", cpp_path.display()),
+        source,
+    })?;
+
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|source| BuildError::Io {
+            context: format!("failed to create `{}`", parent.display()),
+            source,
+        })?;
+    }
+
+    let core_dir = core_root.join("cores").join("arduino");
+    let variant_dir = core_root.join("variants").join("standard");
+    let common_args = arduino_uno_common_compile_args(&core_dir, &variant_dir);
+
+    let sketch_compile = Command::new(&gpp)
+        .args(&common_args)
+        .arg("-std=gnu++11")
+        .arg("-fno-exceptions")
+        .arg("-fno-threadsafe-statics")
+        .arg("-c")
+        .arg(&cpp_path)
+        .arg("-o")
+        .arg(&sketch_obj)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", gpp.display()),
+            source,
+        })?;
+    if !sketch_compile.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: gpp.display().to_string(),
+            status: sketch_compile.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&sketch_compile.stderr).into_owned(),
+        });
+    }
+
+    let mut objects = vec![sketch_obj.clone()];
+    objects.extend(compile_arduino_uno_core_sources(
+        &temp_dir,
+        &gcc,
+        &gpp,
+        &core_dir,
+        &variant_dir,
+    )?);
+
+    let mut link = Command::new(&gpp);
+    link.arg("-mmcu=atmega328p")
+        .arg("-Os")
+        .arg("-Wl,--gc-sections")
+        .arg("-o")
+        .arg(&elf_path);
+    for object in &objects {
+        link.arg(object);
+    }
+    let link = link.output().map_err(|source| BuildError::Io {
+        context: format!("failed to run `{}`", gpp.display()),
+        source,
+    })?;
+    if !link.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: gpp.display().to_string(),
+            status: link.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&link.stderr).into_owned(),
+        });
+    }
+
+    let hex = Command::new(&objcopy)
+        .arg("-O")
+        .arg("ihex")
+        .arg("-R")
+        .arg(".eeprom")
+        .arg(&elf_path)
+        .arg(output_path)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", objcopy.display()),
+            source,
+        })?;
+    if !hex.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: objcopy.display().to_string(),
+            status: hex.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&hex.stderr).into_owned(),
+        });
+    }
+
+    let elf_output = output_path.with_extension("elf");
+    let _ = fs::copy(&elf_path, &elf_output);
+
+    if options.flash_after_build {
+        flash_arduino_uno_hex(output_path, options.flash_port.as_deref())?;
+    }
+
+    let _ = fs::remove_file(cpp_path);
+    for object in objects {
+        let _ = fs::remove_file(object);
+    }
+    let _ = fs::remove_file(elf_path);
+    let _ = fs::remove_dir(temp_dir);
+    Ok(())
+}
+
+fn flash_arduino_uno_hex(hex_path: &Path, port: Option<&str>) -> Result<(), BuildError> {
+    let avrdude = find_arduino_avrdude().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR avrdude not found".into())
+    })?;
+    let conf = find_arduino_avr_avrdude_conf().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR avrdude.conf not found".into())
+    })?;
+    let port = port.ok_or_else(|| {
+        BuildError::ToolNotFound(
+            "Arduino Uno flashing requires `--port <serial-port>` (for example `COM5`)".into(),
+        )
+    })?;
+
+    let flash = Command::new(&avrdude)
+        .arg("-C")
+        .arg(&conf)
+        .arg("-p")
+        .arg("m328p")
+        .arg("-c")
+        .arg("arduino")
+        .arg("-P")
+        .arg(port)
+        .arg("-b")
+        .arg("115200")
+        .arg("-D")
+        .arg("-U")
+        .arg(format!("flash:w:{}:i", hex_path.display()))
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", avrdude.display()),
+            source,
+        })?;
+    if !flash.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: avrdude.display().to_string(),
+            status: flash.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&flash.stderr).into_owned(),
+        });
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArduinoUnoType {
+    I64,
+    Bool,
+    String,
+}
+
+fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
+    let main = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Function(function) if function.name == "main" => Some(function),
+            _ => None,
+        })
+        .ok_or_else(|| CodegenError {
+            message: "Arduino Uno target requires a `main` function".into(),
+            span: crate::lexer::Span { line: 1, column: 1 },
+        })?;
+
+    if main.is_extern || main.is_async {
+        return Err(CodegenError {
+            message: "Arduino Uno target does not support extern or async `main`".into(),
+            span: main.span,
+        });
+    }
+    if !main.params.is_empty() {
+        return Err(CodegenError {
+            message: "Arduino Uno target requires `main()` with no parameters".into(),
+            span: main.span,
+        });
+    }
+
+    let mut body = String::new();
+    let mut scope = HashMap::new();
+    emit_arduino_uno_block(&mut body, &main.body.statements, &mut scope, 1)?;
+
+    Ok(format!(
+        "#include <Arduino.h>\n#include <stdint.h>\n\n\
+static void rune_serial_write_cstr(const char* text) {{\n\
+    Serial.print(text);\n\
+}}\n\n\
+static void rune_serial_write_bool(bool value) {{\n\
+    Serial.print(value ? \"true\" : \"false\");\n\
+}}\n\n\
+static void rune_serial_write_i64(int64_t value) {{\n\
+    char buffer[24];\n\
+    uint8_t index = 0;\n\
+    uint64_t magnitude = (value < 0) ? (uint64_t)(-value) : (uint64_t)value;\n\
+    if (value == 0) {{\n\
+        Serial.write('0');\n\
+        return;\n\
+    }}\n\
+    if (value < 0) {{\n\
+        Serial.write('-');\n\
+    }}\n\
+    while (magnitude > 0) {{\n\
+        buffer[index++] = (char)('0' + (magnitude % 10));\n\
+        magnitude /= 10;\n\
+    }}\n\
+    while (index > 0) {{\n\
+        Serial.write(buffer[--index]);\n\
+    }}\n\
+}}\n\n\
+static void rune_serial_newline(void) {{\n\
+    Serial.write('\\r');\n\
+    Serial.write('\\n');\n\
+}}\n\n\
+void setup() {{\n\
+    Serial.begin(115200);\n\
+{body}\
+}}\n\n\
+void loop() {{\n\
+}}\n"
+    ))
+}
+
+fn emit_arduino_uno_block(
+    out: &mut String,
+    statements: &[Stmt],
+    scope: &mut HashMap<String, ArduinoUnoType>,
+    indent: usize,
+) -> Result<(), CodegenError> {
+    for stmt in statements {
+        emit_arduino_uno_stmt(out, stmt, scope, indent)?;
+    }
+    Ok(())
+}
+
+fn emit_arduino_uno_stmt(
+    out: &mut String,
+    stmt: &Stmt,
+    scope: &mut HashMap<String, ArduinoUnoType>,
+    indent: usize,
+) -> Result<(), CodegenError> {
+    let prefix = "    ".repeat(indent);
+    match stmt {
+        Stmt::Let(stmt) => {
+            let explicit_ty = stmt.ty.as_ref().map(arduino_uno_type_from_ref).transpose()?;
+            let inferred_ty = emit_arduino_uno_expr(scope, &stmt.value)?;
+            let ty = explicit_ty.unwrap_or(inferred_ty.1);
+            if ty != inferred_ty.1 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires matching scalar let types".into(),
+                    span: stmt.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}{} {} = {};\n",
+                arduino_uno_c_type(ty),
+                stmt.name,
+                inferred_ty.0
+            ));
+            scope.insert(stmt.name.clone(), ty);
+            Ok(())
+        }
+        Stmt::Assign(stmt) => {
+            let Some(existing) = scope.get(&stmt.name).copied() else {
+                return Err(CodegenError {
+                    message: format!(
+                        "Arduino Uno target requires local `{}` to be declared before assignment",
+                        stmt.name
+                    ),
+                    span: stmt.span,
+                });
+            };
+            let rendered = emit_arduino_uno_expr(scope, &stmt.value)?;
+            if rendered.1 != existing {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires assignment types to stay concrete".into(),
+                    span: stmt.span,
+                });
+            }
+            out.push_str(&format!("{prefix}{} = {};\n", stmt.name, rendered.0));
+            Ok(())
+        }
+        Stmt::Expr(expr_stmt) => emit_arduino_uno_stmt_expr(out, &expr_stmt.expr, scope, indent),
+        Stmt::If(stmt) => {
+            let condition = emit_arduino_uno_expr(scope, &stmt.condition)?;
+            if condition.1 != ArduinoUnoType::Bool {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires boolean `if` conditions".into(),
+                    span: stmt.span,
+                });
+            }
+            out.push_str(&format!("{prefix}if ({}) {{\n", condition.0));
+            let mut then_scope = scope.clone();
+            emit_arduino_uno_block(out, &stmt.then_block.statements, &mut then_scope, indent + 1)?;
+            out.push_str(&format!("{prefix}}}"));
+            for elif in &stmt.elif_blocks {
+                let cond = emit_arduino_uno_expr(scope, &elif.condition)?;
+                if cond.1 != ArduinoUnoType::Bool {
+                    return Err(CodegenError {
+                        message: "Arduino Uno target requires boolean `elif` conditions".into(),
+                        span: elif.span,
+                    });
+                }
+                out.push_str(&format!(" else if ({}) {{\n", cond.0));
+                let mut elif_scope = scope.clone();
+                emit_arduino_uno_block(out, &elif.block.statements, &mut elif_scope, indent + 1)?;
+                out.push_str(&format!("{prefix}}}"));
+            }
+            if let Some(block) = &stmt.else_block {
+                out.push_str(" else {\n");
+                let mut else_scope = scope.clone();
+                emit_arduino_uno_block(out, &block.statements, &mut else_scope, indent + 1)?;
+                out.push_str(&format!("{prefix}}}"));
+            }
+            out.push('\n');
+            Ok(())
+        }
+        Stmt::While(stmt) => {
+            let condition = emit_arduino_uno_expr(scope, &stmt.condition)?;
+            if condition.1 != ArduinoUnoType::Bool {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires boolean `while` conditions".into(),
+                    span: stmt.span,
+                });
+            }
+            out.push_str(&format!("{prefix}while ({}) {{\n", condition.0));
+            let mut body_scope = scope.clone();
+            emit_arduino_uno_block(out, &stmt.body.statements, &mut body_scope, indent + 1)?;
+            out.push_str(&format!("{prefix}}}\n"));
+            Ok(())
+        }
+        Stmt::Return(_) => Ok(()),
+        Stmt::Raise(_) | Stmt::Panic(_) => Err(CodegenError {
+            message: "Arduino Uno target does not support exceptions or panic yet".into(),
+            span: stmt_span(stmt),
+        }),
+    }
+}
+
+fn emit_arduino_uno_stmt_expr(
+    out: &mut String,
+    expr: &Expr,
+    scope: &HashMap<String, ArduinoUnoType>,
+    indent: usize,
+) -> Result<(), CodegenError> {
+    let ExprKind::Call { callee, args } = &expr.kind else {
+        return Err(CodegenError {
+            message: "Arduino Uno target supports only call statements in `main`".into(),
+            span: expr.span,
+        });
+    };
+    let ExprKind::Identifier(name) = &callee.kind else {
+        return Err(CodegenError {
+            message: "Arduino Uno target supports only direct builtin-style calls in `main`".into(),
+            span: callee.span,
+        });
+    };
+    if args.len() != 1 {
+        return Err(CodegenError {
+            message: format!("`{name}` expects exactly one argument on the Arduino Uno target"),
+            span: expr.span,
+        });
+    }
+    let CallArg::Positional(value) = &args[0] else {
+        return Err(CodegenError {
+            message: format!("`{name}` does not accept keyword arguments on the Arduino Uno target"),
+            span: expr.span,
+        });
+    };
+    match name.as_str() {
+        "print" => emit_arduino_uno_print_expr(out, value, false, scope, indent),
+        "println" => emit_arduino_uno_print_expr(out, value, true, scope, indent),
+        _ => Err(CodegenError {
+            message: "current Arduino Uno target supports only `print` and `println` calls".into(),
+            span: callee.span,
+        }),
+    }
+}
+
+fn emit_arduino_uno_print_expr(
+    out: &mut String,
+    expr: &Expr,
+    newline: bool,
+    scope: &HashMap<String, ArduinoUnoType>,
+    indent: usize,
+) -> Result<(), CodegenError> {
+    let prefix = "    ".repeat(indent);
+    let rendered = emit_arduino_uno_expr(scope, expr)?;
+    match rendered.1 {
+        ArduinoUnoType::String => {
+            out.push_str(&format!("{prefix}rune_serial_write_cstr({});\n", rendered.0));
+        }
+        ArduinoUnoType::Bool => {
+            out.push_str(&format!("{prefix}rune_serial_write_bool({});\n", rendered.0));
+        }
+        ArduinoUnoType::I64 => {
+            out.push_str(&format!("{prefix}rune_serial_write_i64({});\n", rendered.0));
+        }
+    }
+    if newline {
+        out.push_str(&format!("{prefix}rune_serial_newline();\n"));
+    }
+    Ok(())
+}
+
+fn arduino_uno_common_compile_args(core_dir: &Path, variant_dir: &Path) -> Vec<String> {
+    vec![
+        "-mmcu=atmega328p".into(),
+        "-DF_CPU=16000000UL".into(),
+        "-DARDUINO=10819".into(),
+        "-DARDUINO_ARCH_AVR".into(),
+        "-DARDUINO_AVR_UNO".into(),
+        "-Os".into(),
+        "-ffunction-sections".into(),
+        "-fdata-sections".into(),
+        format!("-I{}", core_dir.display()),
+        format!("-I{}", variant_dir.display()),
+    ]
+}
+
+fn compile_arduino_uno_core_sources(
+    temp_dir: &Path,
+    gcc: &Path,
+    gpp: &Path,
+    core_dir: &Path,
+    variant_dir: &Path,
+) -> Result<Vec<PathBuf>, BuildError> {
+    let mut sources = fs::read_dir(core_dir)
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to read `{}`", core_dir.display()),
+            source,
+        })?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("c") | Some("cpp") | Some("S")
+            )
+        })
+        .collect::<Vec<_>>();
+    sources.sort();
+
+    let common_args = arduino_uno_common_compile_args(core_dir, variant_dir);
+    let mut objects = Vec::new();
+
+    for source_path in sources {
+        let extension = source_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default();
+        let object_name = format!(
+            "core_{}_{}.o",
+            source_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("arduino_core"),
+            extension
+        );
+        let object_path = temp_dir.join(object_name);
+
+        let mut command = if extension == "cpp" {
+            let mut cmd = Command::new(gpp);
+            cmd.args(&common_args)
+                .arg("-std=gnu++11")
+                .arg("-fno-exceptions")
+                .arg("-fno-threadsafe-statics");
+            cmd
+        } else {
+            let mut cmd = Command::new(gcc);
+            cmd.args(&common_args);
+            cmd
+        };
+        command
+            .arg("-c")
+            .arg(&source_path)
+            .arg("-o")
+            .arg(&object_path);
+
+        let output = command.output().map_err(|source| BuildError::Io {
+            context: format!("failed to run compiler for `{}`", source_path.display()),
+            source,
+        })?;
+        if !output.status.success() {
+            return Err(BuildError::ToolFailed {
+                tool: if extension == "cpp" {
+                    gpp.display().to_string()
+                } else {
+                    gcc.display().to_string()
+                },
+                status: output.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
+        objects.push(object_path);
+    }
+
+    Ok(objects)
+}
+
+fn emit_arduino_uno_expr(
+    scope: &HashMap<String, ArduinoUnoType>,
+    expr: &Expr,
+) -> Result<(String, ArduinoUnoType), CodegenError> {
+    match &expr.kind {
+        ExprKind::Identifier(name) => scope.get(name).copied().map(|ty| (name.clone(), ty)).ok_or_else(
+            || CodegenError {
+                message: format!("Arduino Uno target does not know local `{name}`"),
+                span: expr.span,
+            },
+        ),
+        ExprKind::Integer(value) => Ok((format!("((int64_t)({value}))"), ArduinoUnoType::I64)),
+        ExprKind::String(value) => Ok((format!("\"{}\"", c_escape(value)), ArduinoUnoType::String)),
+        ExprKind::Bool(value) => Ok((
+            if *value { "true".into() } else { "false".into() },
+            ArduinoUnoType::Bool,
+        )),
+        ExprKind::Unary { op, expr: inner } => {
+            let rendered = emit_arduino_uno_expr(scope, inner)?;
+            match op {
+                UnaryOp::Negate if rendered.1 == ArduinoUnoType::I64 => {
+                    Ok((format!("(-{})", rendered.0), ArduinoUnoType::I64))
+                }
+                UnaryOp::Not if rendered.1 == ArduinoUnoType::Bool => {
+                    Ok((format!("(!{})", rendered.0), ArduinoUnoType::Bool))
+                }
+                _ => Err(CodegenError {
+                    message: "Arduino Uno target received an unsupported unary operation".into(),
+                    span: expr.span,
+                }),
+            }
+        }
+        ExprKind::Binary { left, op, right } => {
+            let lhs = emit_arduino_uno_expr(scope, left)?;
+            let rhs = emit_arduino_uno_expr(scope, right)?;
+            match op {
+                BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Modulo if lhs.1 == ArduinoUnoType::I64 && rhs.1 == ArduinoUnoType::I64 => {
+                    Ok((
+                        format!("({} {} {})", lhs.0, arduino_uno_binary_op(*op), rhs.0),
+                        ArduinoUnoType::I64,
+                    ))
+                }
+                BinaryOp::EqualEqual
+                | BinaryOp::NotEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual if lhs.1 == rhs.1 && lhs.1 != ArduinoUnoType::String => {
+                    Ok((
+                        format!("({} {} {})", lhs.0, arduino_uno_binary_op(*op), rhs.0),
+                        ArduinoUnoType::Bool,
+                    ))
+                }
+                BinaryOp::And | BinaryOp::Or
+                    if lhs.1 == ArduinoUnoType::Bool && rhs.1 == ArduinoUnoType::Bool =>
+                {
+                    Ok((
+                        format!("({} {} {})", lhs.0, arduino_uno_binary_op(*op), rhs.0),
+                        ArduinoUnoType::Bool,
+                    ))
+                }
+                _ => Err(CodegenError {
+                    message: "Arduino Uno target received an unsupported binary operation".into(),
+                    span: expr.span,
+                }),
+            }
+        }
+        _ => Err(CodegenError {
+            message: "current Arduino Uno target supports locals, literals, unary ops, binary ops, `if`, `while`, `print`, and `println`".into(),
+            span: expr.span,
+        }),
+    }
+}
+
+fn stmt_span(stmt: &Stmt) -> crate::lexer::Span {
+    match stmt {
+        Stmt::Let(stmt) => stmt.span,
+        Stmt::Assign(stmt) => stmt.span,
+        Stmt::Return(stmt) => stmt.span,
+        Stmt::If(stmt) => stmt.span,
+        Stmt::While(stmt) => stmt.span,
+        Stmt::Raise(stmt) => stmt.span,
+        Stmt::Panic(stmt) => stmt.span,
+        Stmt::Expr(stmt) => stmt.expr.span,
+    }
+}
+
+fn c_escape(text: &str) -> String {
+    let mut escaped = String::new();
+    for ch in text.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn arduino_uno_type_from_ref(ty: &TypeRef) -> Result<ArduinoUnoType, CodegenError> {
+    match ty.name.as_str() {
+        "i32" | "i64" | "int" => Ok(ArduinoUnoType::I64),
+        "bool" => Ok(ArduinoUnoType::Bool),
+        "String" | "string" => Ok(ArduinoUnoType::String),
+        _ => Err(CodegenError {
+            message: format!("Arduino Uno target does not support type `{}` yet", ty.name),
+            span: ty.span,
+        }),
+    }
+}
+
+fn arduino_uno_c_type(ty: ArduinoUnoType) -> &'static str {
+    match ty {
+        ArduinoUnoType::I64 => "int64_t",
+        ArduinoUnoType::Bool => "bool",
+        ArduinoUnoType::String => "const char*",
+    }
+}
+
+fn arduino_uno_binary_op(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Add => "+",
+        BinaryOp::Subtract => "-",
+        BinaryOp::Multiply => "*",
+        BinaryOp::Divide => "/",
+        BinaryOp::Modulo => "%",
+        BinaryOp::EqualEqual => "==",
+        BinaryOp::NotEqual => "!=",
+        BinaryOp::Greater => ">",
+        BinaryOp::GreaterEqual => ">=",
+        BinaryOp::Less => "<",
+        BinaryOp::LessEqual => "<=",
+        BinaryOp::And => "&&",
+        BinaryOp::Or => "||",
+    }
 }
 
 pub fn build_shared_library(
@@ -483,6 +1246,11 @@ fn build_executable_via_llvm(
     if target_spec.platform == TargetPlatform::Wasm {
         return build_wasm_module_via_llvm(program, output_path, target_spec);
     }
+    if target_spec.platform == TargetPlatform::Embedded {
+        return Err(BuildError::UnsupportedBackendForTarget(
+            "freestanding embedded targets currently support `rune build --object` and `rune build --static-lib`, not executable linking".into(),
+        ));
+    }
     if target_spec.platform == TargetPlatform::Windows {
         return build_windows_executable_via_llvm_rust_wrapper(
             program,
@@ -598,17 +1366,14 @@ fn build_unix_executable_via_packaged_clang(
     options: &BuildOptions,
 ) -> Result<(), BuildError> {
     let temp_dir = create_temp_dir()?;
-    let runtime_path = temp_dir.join("runtime.c");
-    let wrapper_path = temp_dir.join("main_wrapper.c");
+    let wrapper_path = temp_dir.join("main_wrapper.rs");
+    let wrapper_obj_path = temp_dir.join("main_wrapper.o");
     let obj_path = temp_dir.join(object_file_name(target_spec));
-    fs::write(&runtime_path, portable_runtime_source()).map_err(|source| BuildError::Io {
-        context: format!("failed to write `{}`", runtime_path.display()),
-        source,
-    })?;
-    fs::write(&wrapper_path, c_native_exe_wrapper_source()).map_err(|source| BuildError::Io {
+    fs::write(&wrapper_path, rust_unix_llvm_wrapper_object_source()).map_err(|source| BuildError::Io {
         context: format!("failed to write `{}`", wrapper_path.display()),
         source,
     })?;
+    compile_rust_object(&wrapper_path, &wrapper_obj_path)?;
 
     emit_object_file(program, target_spec.triple, &obj_path).map_err(|error| {
         BuildError::Codegen(CodegenError {
@@ -617,17 +1382,16 @@ fn build_unix_executable_via_packaged_clang(
         })
     })?;
 
-    let mut c_sources = vec![runtime_path.clone(), wrapper_path.clone()];
-    c_sources.extend(options.link_c_sources.iter().cloned());
-    let compiled_c_objects = compile_c_sources(&temp_dir, target_spec, &c_sources)?;
+    let compiled_c_objects = compile_c_sources(&temp_dir, target_spec, &options.link_c_sources)?;
 
-    let mut link_objects = Vec::with_capacity(1 + compiled_c_objects.len());
+    let mut link_objects = Vec::with_capacity(2 + compiled_c_objects.len());
     link_objects.push(obj_path.clone());
+    link_objects.push(wrapper_obj_path.clone());
     link_objects.extend(compiled_c_objects.iter().cloned());
     link_with_packaged_clang(target_spec, &link_objects, output_path, false, options)?;
 
-    let _ = fs::remove_file(runtime_path);
     let _ = fs::remove_file(wrapper_path);
+    let _ = fs::remove_file(wrapper_obj_path);
     let _ = fs::remove_file(obj_path);
     let _ = fs::remove_dir(temp_dir);
     Ok(())
@@ -641,6 +1405,7 @@ fn windows_wrapper_target_spec(target_spec: &TargetSpec) -> TargetSpec {
             exe_extension: target_spec.exe_extension,
             library_extension: target_spec.library_extension,
             static_library_extension: target_spec.static_library_extension,
+            object_extension: target_spec.object_extension,
             needs_macos_sdk: false,
         },
         _ => target_spec.clone(),
@@ -1025,10 +1790,97 @@ function createHost(options = {{}}) {{
     return result.status === 0;
   }}
 
+  function tcpListen(host, port) {{
+    if (!isNode) {{
+      return false;
+    }}
+    const probe = [
+      "const net = require('net');",
+      "const host = process.argv[1];",
+      "const port = Number(process.argv[2]);",
+      "const server = net.createServer();",
+      "let done = false;",
+      "function finish(ok) {{ if (!done) {{ done = true; try {{ server.close(); }} catch (_) {{}} process.exit(ok ? 0 : 1); }} }}",
+      "server.once('error', () => finish(false));",
+      "server.listen(port, host, () => finish(true));"
+    ].join("");
+    const result = childProcess.spawnSync(process.execPath, ["-e", probe, host, String(port)], {{
+      stdio: "ignore"
+    }});
+    return result.status === 0;
+  }}
+
+  function udpBind(host, port) {{
+    if (!isNode) {{
+      return false;
+    }}
+    const probe = [
+      "const dgram = require('dgram');",
+      "const host = process.argv[1];",
+      "const port = Number(process.argv[2]);",
+      "const socket = dgram.createSocket('udp4');",
+      "let done = false;",
+      "function finish(ok) {{ if (!done) {{ done = true; try {{ socket.close(); }} catch (_) {{}} process.exit(ok ? 0 : 1); }} }}",
+      "socket.once('error', () => finish(false));",
+      "socket.bind(port, host, () => finish(true));"
+    ].join("");
+    const result = childProcess.spawnSync(process.execPath, ["-e", probe, host, String(port)], {{
+      stdio: "ignore"
+    }});
+    return result.status === 0;
+  }}
+
+  function tcpSend(host, port, payload) {{
+    if (!isNode) {{
+      return false;
+    }}
+    const probe = [
+      "const net = require('net');",
+      "const host = process.argv[1];",
+      "const port = Number(process.argv[2]);",
+      "const payload = process.argv[3] ?? '';",
+      "const socket = new net.Socket();",
+      "let done = false;",
+      "function finish(ok) {{ if (!done) {{ done = true; try {{ socket.destroy(); }} catch (_) {{}} process.exit(ok ? 0 : 1); }} }}",
+      "socket.setTimeout(500);",
+      "socket.once('connect', () => {{ socket.end(payload, 'utf8', () => finish(true)); }});",
+      "socket.once('timeout', () => finish(false));",
+      "socket.once('error', () => finish(false));",
+      "socket.connect(port, host);"
+    ].join("");
+    const result = childProcess.spawnSync(process.execPath, ["-e", probe, host, String(port), payload], {{
+      stdio: "ignore"
+    }});
+    return result.status === 0;
+  }}
+
+  function udpSend(host, port, payload) {{
+    if (!isNode) {{
+      return false;
+    }}
+    const probe = [
+      "const dgram = require('dgram');",
+      "const host = process.argv[1];",
+      "const port = Number(process.argv[2]);",
+      "const payload = process.argv[3] ?? '';",
+      "const socket = dgram.createSocket('udp4');",
+      "let done = false;",
+      "function finish(ok) {{ if (!done) {{ done = true; try {{ socket.close(); }} catch (_) {{}} process.exit(ok ? 0 : 1); }} }}",
+      "socket.once('error', () => finish(false));",
+      "socket.send(Buffer.from(payload, 'utf8'), port, host, (err) => finish(!err));"
+    ].join("");
+    const result = childProcess.spawnSync(process.execPath, ["-e", probe, host, String(port), payload], {{
+      stdio: "ignore"
+    }});
+    return result.status === 0;
+  }}
+
   const imports = {{
     env: {{
       rune_rt_print_i64(value) {{ writeText("stdout", value.toString()); }},
       rune_rt_eprint_i64(value) {{ writeText("stderr", value.toString()); }},
+      rune_rt_print_bool(value) {{ writeText("stdout", value !== 0n && value !== 0 ? "true" : "false"); }},
+      rune_rt_eprint_bool(value) {{ writeText("stderr", value !== 0n && value !== 0 ? "true" : "false"); }},
       rune_rt_print_str(ptr, len) {{ writeText("stdout", readString(ptr, len)); }},
       rune_rt_eprint_str(ptr, len) {{ writeText("stderr", readString(ptr, len)); }},
       rune_rt_print_newline() {{ writeText("stdout", "\n"); }},
@@ -1108,8 +1960,20 @@ function createHost(options = {{}}) {{
       rune_rt_network_tcp_connect(ptr, len, port) {{
         return tcpConnect(readString(ptr, len), Number(port), 250);
       }},
+      rune_rt_network_tcp_listen(ptr, len, port) {{
+        return tcpListen(readString(ptr, len), Number(port));
+      }},
+      rune_rt_network_tcp_send(hostPtr, hostLen, port, dataPtr, dataLen) {{
+        return tcpSend(readString(hostPtr, hostLen), Number(port), readString(dataPtr, dataLen));
+      }},
       rune_rt_network_tcp_connect_timeout(ptr, len, port, timeoutMs) {{
         return tcpConnect(readString(ptr, len), Number(port), Number(timeoutMs));
+      }},
+      rune_rt_network_udp_bind(ptr, len, port) {{
+        return udpBind(readString(ptr, len), Number(port));
+      }},
+      rune_rt_network_udp_send(hostPtr, hostLen, port, dataPtr, dataLen) {{
+        return udpSend(readString(hostPtr, hostLen), Number(port), readString(dataPtr, dataLen));
       }},
       rune_rt_fs_exists(ptr, len) {{
         if (!isNode || !fs) {{
@@ -1314,7 +2178,10 @@ fn create_archive(
                 });
             }
         }
-        TargetPlatform::Linux | TargetPlatform::MacOS | TargetPlatform::Wasm => {
+        TargetPlatform::Linux
+        | TargetPlatform::MacOS
+        | TargetPlatform::Wasm
+        | TargetPlatform::Embedded => {
             let llvm_ar = find_packaged_llvm_tool("llvm-ar").ok_or_else(|| {
                 BuildError::ToolNotFound("llvm-ar (expected in packaged LLVM toolchain)".into())
             })?;
@@ -1341,9 +2208,9 @@ fn create_archive(
 }
 
 fn object_file_name(target_spec: &TargetSpec) -> &'static str {
-    match target_spec.platform {
-        TargetPlatform::Windows => "out.obj",
-        TargetPlatform::Linux | TargetPlatform::MacOS | TargetPlatform::Wasm => "out.o",
+    match target_spec.object_extension {
+        "obj" => "out.obj",
+        _ => "out.o",
     }
 }
 
@@ -1389,6 +2256,8 @@ static void rune_rt_init_io(void) {
 
 void rune_rt_print_i64(int64_t value) { rune_rt_init_io(); printf("%" PRId64, value); fflush(stdout); }
 void rune_rt_eprint_i64(int64_t value) { rune_rt_init_io(); fprintf(stderr, "%" PRId64, value); fflush(stderr); }
+void rune_rt_print_bool(int64_t value) { rune_rt_init_io(); fputs(value ? "true" : "false", stdout); fflush(stdout); }
+void rune_rt_eprint_bool(int64_t value) { rune_rt_init_io(); fputs(value ? "true" : "false", stderr); fflush(stderr); }
 void rune_rt_print_newline(void) { rune_rt_init_io(); fwrite("\n", 1, 1, stdout); fflush(stdout); }
 void rune_rt_eprint_newline(void) { rune_rt_init_io(); fwrite("\n", 1, 1, stderr); fflush(stderr); }
 void rune_rt_flush_stdout(void) { rune_rt_init_io(); fflush(stdout); }
@@ -1835,13 +2704,11 @@ bool rune_rt_audio_bell(void) {
 "#
 }
 
-fn c_native_exe_wrapper_source() -> &'static str {
-    r#"#include <stdint.h>
-extern int64_t rune_entry_main(void);
-int main(void) {
-    return (int)rune_entry_main();
-}
-"#
+fn rust_unix_llvm_wrapper_object_source() -> String {
+    format!(
+        "{}\nunsafe extern \"C\" {{\n    fn rune_entry_main() -> i64;\n}}\n\n#[unsafe(no_mangle)]\npub extern \"C\" fn main() -> i32 {{\n    unsafe {{ rune_entry_main() as i32 }}\n}}\n",
+        rust_runtime_support_body()
+    )
 }
 
 fn rustc_command(
@@ -1877,6 +2744,38 @@ fn rustc_command(
     }
     command.args(render_rustc_link_args(options));
     command
+}
+
+fn compile_rust_object(source_path: &Path, output_path: &Path) -> Result<(), BuildError> {
+    let rustc = find_rustc().ok_or(BuildError::RustcNotFound)?;
+    let status = Command::new(&rustc)
+        .arg(source_path)
+        .arg("--edition=2024")
+        .arg("--crate-type=lib")
+        .arg("--emit=obj")
+        .arg("-C")
+        .arg("opt-level=3")
+        .arg("-C")
+        .arg("codegen-units=1")
+        .arg("-C")
+        .arg("panic=abort")
+        .arg("-o")
+        .arg(output_path)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", rustc.display()),
+            source,
+        })?;
+
+    if !status.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: rustc.display().to_string(),
+            status: status.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&status.stderr).into_owned(),
+        });
+    }
+
+    Ok(())
 }
 
 fn render_rustc_link_args(options: &BuildOptions) -> Vec<String> {
@@ -2082,7 +2981,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 #[cfg(not(target_os = "wasi"))]
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::OnceLock;
 use std::thread_local;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -2115,6 +3014,18 @@ pub extern "C" fn rune_rt_print_i64(value: i64) {
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_eprint_i64(value: i64) {
     eprint!("{value}");
+    let _ = io::stderr().flush();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_print_bool(value: i64) {
+    print!("{}", if value != 0 { "true" } else { "false" });
+    let _ = io::stdout().flush();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_eprint_bool(value: i64) {
+    eprint!("{}", if value != 0 { "true" } else { "false" });
     let _ = io::stderr().flush();
 }
 
@@ -2213,6 +3124,13 @@ pub extern "C" fn rune_rt_print_dynamic(tag: i64, payload: i64, extra: i64) {
             let text = std::str::from_utf8(bytes).expect("Rune dynamic strings must be valid UTF-8");
             print!("{text}");
         }
+        5 => {
+            let ptr = rune_rt_json_stringify(payload);
+            let len = rune_rt_last_string_len() as usize;
+            let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+            let text = std::str::from_utf8(bytes).expect("Rune JSON strings must be valid UTF-8");
+            print!("{text}");
+        }
         _ => print!("<dynamic:{tag}>"),
     }
     let _ = io::stdout().flush();
@@ -2230,6 +3148,13 @@ pub extern "C" fn rune_rt_eprint_dynamic(tag: i64, payload: i64, extra: i64) {
             let len = extra as usize;
             let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
             let text = std::str::from_utf8(bytes).expect("Rune dynamic strings must be valid UTF-8");
+            eprint!("{text}");
+        }
+        5 => {
+            let ptr = rune_rt_json_stringify(payload);
+            let len = rune_rt_last_string_len() as usize;
+            let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+            let text = std::str::from_utf8(bytes).expect("Rune JSON strings must be valid UTF-8");
             eprint!("{text}");
         }
         _ => eprint!("<dynamic:{tag}>"),
@@ -2347,8 +3272,588 @@ pub extern "C" fn rune_rt_dynamic_to_i64(tag: i64, payload: i64, extra: i64) -> 
         2 => payload as i32 as i64,
         3 => payload,
         4 => rune_rt_string_to_i64(payload as *const u8, extra),
+        5 => rune_rt_json_to_i64(payload),
         _ => panic!("failed to convert dynamic Rune value with tag {tag} to i64"),
     }
+}
+
+fn rune_rt_string_from_handle(ptr: *const u8) -> String {
+    RUNE_OWNED_STRINGS.with(|strings| {
+        strings
+            .borrow()
+            .iter()
+            .find(|value| value.as_ptr() == ptr)
+            .cloned()
+            .unwrap_or_else(|| panic!("unknown Rune string handle {ptr:p}"))
+    })
+}
+
+fn rune_rt_json_skip_ws(bytes: &[u8], index: &mut usize) {
+    while *index < bytes.len() && matches!(bytes[*index], b' ' | b'\n' | b'\r' | b'\t') {
+        *index += 1;
+    }
+}
+
+fn rune_rt_json_parse_hex(bytes: &[u8], index: &mut usize) -> char {
+    let mut value = 0u32;
+    for _ in 0..4 {
+        if *index >= bytes.len() {
+            panic!("invalid JSON unicode escape");
+        }
+        value = value * 16
+            + match bytes[*index] {
+                b'0'..=b'9' => (bytes[*index] - b'0') as u32,
+                b'a'..=b'f' => (bytes[*index] - b'a' + 10) as u32,
+                b'A'..=b'F' => (bytes[*index] - b'A' + 10) as u32,
+                _ => panic!("invalid JSON unicode escape"),
+            };
+        *index += 1;
+    }
+    char::from_u32(value).unwrap_or('\u{FFFD}')
+}
+
+fn rune_rt_json_parse_string_end(bytes: &[u8], index: &mut usize) {
+    if bytes.get(*index) != Some(&b'"') {
+        panic!("expected JSON string");
+    }
+    *index += 1;
+    while *index < bytes.len() {
+        match bytes[*index] {
+            b'"' => {
+                *index += 1;
+                return;
+            }
+            b'\\' => {
+                *index += 1;
+                let Some(escape) = bytes.get(*index).copied() else {
+                    panic!("unterminated JSON escape");
+                };
+                *index += 1;
+                match escape {
+                    b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {}
+                    b'u' => {
+                        let _ = rune_rt_json_parse_hex(bytes, index);
+                    }
+                    _ => panic!("invalid JSON escape"),
+                }
+            }
+            value if value < 0x20 => panic!("control characters are not valid in JSON strings"),
+            _ => *index += 1,
+        }
+    }
+    panic!("unterminated JSON string");
+}
+
+fn rune_rt_json_decode_string(literal: &str) -> String {
+    let bytes = literal.as_bytes();
+    let mut index = 0usize;
+    if bytes.get(index) != Some(&b'"') {
+        panic!("expected JSON string literal");
+    }
+    index += 1;
+    let mut out = String::new();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => return out,
+            b'\\' => {
+                index += 1;
+                let Some(escape) = bytes.get(index).copied() else {
+                    panic!("unterminated JSON escape");
+                };
+                index += 1;
+                match escape {
+                    b'"' => out.push('"'),
+                    b'\\' => out.push('\\'),
+                    b'/' => out.push('/'),
+                    b'b' => out.push('\u{0008}'),
+                    b'f' => out.push('\u{000C}'),
+                    b'n' => out.push('\n'),
+                    b'r' => out.push('\r'),
+                    b't' => out.push('\t'),
+                    b'u' => out.push(rune_rt_json_parse_hex(bytes, &mut index)),
+                    _ => panic!("invalid JSON escape"),
+                }
+            }
+            _ => {
+                let ch = std::str::from_utf8(&bytes[index..])
+                    .expect("JSON strings must be UTF-8")
+                    .chars()
+                    .next()
+                    .expect("character should exist");
+                out.push(ch);
+                index += ch.len_utf8();
+            }
+        }
+    }
+    panic!("unterminated JSON string literal");
+}
+
+fn rune_rt_json_parse_number_end(bytes: &[u8], index: &mut usize) {
+    if bytes.get(*index) == Some(&b'-') {
+        *index += 1;
+    }
+    match bytes.get(*index) {
+        Some(b'0') => *index += 1,
+        Some(b'1'..=b'9') => {
+            *index += 1;
+            while matches!(bytes.get(*index), Some(b'0'..=b'9')) {
+                *index += 1;
+            }
+        }
+        _ => panic!("invalid JSON number"),
+    }
+    if bytes.get(*index) == Some(&b'.') {
+        *index += 1;
+        let start = *index;
+        while matches!(bytes.get(*index), Some(b'0'..=b'9')) {
+            *index += 1;
+        }
+        if *index == start {
+            panic!("invalid JSON fractional part");
+        }
+    }
+    if matches!(bytes.get(*index), Some(b'e' | b'E')) {
+        *index += 1;
+        if matches!(bytes.get(*index), Some(b'+' | b'-')) {
+            *index += 1;
+        }
+        let start = *index;
+        while matches!(bytes.get(*index), Some(b'0'..=b'9')) {
+            *index += 1;
+        }
+        if *index == start {
+            panic!("invalid JSON exponent");
+        }
+    }
+}
+
+fn rune_rt_json_parse_value_end(bytes: &[u8], index: &mut usize) {
+    rune_rt_json_skip_ws(bytes, index);
+    match bytes.get(*index).copied() {
+        Some(b'"') => rune_rt_json_parse_string_end(bytes, index),
+        Some(b'{') => {
+            *index += 1;
+            rune_rt_json_skip_ws(bytes, index);
+            if bytes.get(*index) == Some(&b'}') {
+                *index += 1;
+                return;
+            }
+            loop {
+                rune_rt_json_parse_string_end(bytes, index);
+                rune_rt_json_skip_ws(bytes, index);
+                if bytes.get(*index) != Some(&b':') {
+                    panic!("expected `:` in JSON object");
+                }
+                *index += 1;
+                rune_rt_json_parse_value_end(bytes, index);
+                rune_rt_json_skip_ws(bytes, index);
+                match bytes.get(*index) {
+                    Some(b',') => {
+                        *index += 1;
+                        rune_rt_json_skip_ws(bytes, index);
+                    }
+                    Some(b'}') => {
+                        *index += 1;
+                        return;
+                    }
+                    _ => panic!("expected `,` or `}}` in JSON object"),
+                }
+            }
+        }
+        Some(b'[') => {
+            *index += 1;
+            rune_rt_json_skip_ws(bytes, index);
+            if bytes.get(*index) == Some(&b']') {
+                *index += 1;
+                return;
+            }
+            loop {
+                rune_rt_json_parse_value_end(bytes, index);
+                rune_rt_json_skip_ws(bytes, index);
+                match bytes.get(*index) {
+                    Some(b',') => {
+                        *index += 1;
+                        rune_rt_json_skip_ws(bytes, index);
+                    }
+                    Some(b']') => {
+                        *index += 1;
+                        return;
+                    }
+                    _ => panic!("expected `,` or `]` in JSON array"),
+                }
+            }
+        }
+        Some(b't') if bytes.get(*index..(*index + 4)) == Some(b"true") => *index += 4,
+        Some(b'f') if bytes.get(*index..(*index + 5)) == Some(b"false") => *index += 5,
+        Some(b'n') if bytes.get(*index..(*index + 4)) == Some(b"null") => *index += 4,
+        Some(b'-' | b'0'..=b'9') => rune_rt_json_parse_number_end(bytes, index),
+        _ => panic!("invalid JSON value"),
+    }
+}
+
+fn rune_rt_json_trimmed(text: &str) -> &str {
+    text.trim_matches(|ch| matches!(ch, ' ' | '\n' | '\r' | '\t'))
+}
+
+fn rune_rt_json_handle_string(handle: i64) -> String {
+    rune_rt_string_from_handle(handle as *const u8)
+}
+
+fn rune_rt_json_kind_name(text: &str) -> &'static str {
+    match rune_rt_json_trimmed(text).as_bytes().first().copied() {
+        Some(b'{') => "object",
+        Some(b'[') => "array",
+        Some(b'"') => "string",
+        Some(b't' | b'f') => "bool",
+        Some(b'n') => "null",
+        Some(b'-' | b'0'..=b'9') => "number",
+        _ => panic!("invalid JSON handle"),
+    }
+}
+
+fn rune_rt_json_store_slice(slice: &str) -> *const u8 {
+    rune_rt_store_string(rune_rt_json_trimmed(slice).to_string())
+}
+
+fn rune_rt_json_find_object_value(text: &str, key: &str) -> Option<String> {
+    let trimmed = rune_rt_json_trimmed(text);
+    let bytes = trimmed.as_bytes();
+    let mut index = 0usize;
+    rune_rt_json_skip_ws(bytes, &mut index);
+    if bytes.get(index) != Some(&b'{') {
+        return None;
+    }
+    index += 1;
+    rune_rt_json_skip_ws(bytes, &mut index);
+    if bytes.get(index) == Some(&b'}') {
+        return None;
+    }
+    loop {
+        let key_start = index;
+        rune_rt_json_parse_string_end(bytes, &mut index);
+        let parsed_key = rune_rt_json_decode_string(&trimmed[key_start..index]);
+        rune_rt_json_skip_ws(bytes, &mut index);
+        if bytes.get(index) != Some(&b':') {
+            panic!("expected `:` in JSON object");
+        }
+        index += 1;
+        let value_start = index;
+        rune_rt_json_parse_value_end(bytes, &mut index);
+        if parsed_key == key {
+            return Some(rune_rt_json_trimmed(&trimmed[value_start..index]).to_string());
+        }
+        rune_rt_json_skip_ws(bytes, &mut index);
+        match bytes.get(index) {
+            Some(b',') => {
+                index += 1;
+                rune_rt_json_skip_ws(bytes, &mut index);
+            }
+            Some(b'}') => return None,
+            _ => panic!("expected `,` or `}}` in JSON object"),
+        }
+    }
+}
+
+fn rune_rt_json_index_value(text: &str, wanted: usize) -> Option<String> {
+    let trimmed = rune_rt_json_trimmed(text);
+    let bytes = trimmed.as_bytes();
+    let mut index = 0usize;
+    rune_rt_json_skip_ws(bytes, &mut index);
+    if bytes.get(index) != Some(&b'[') {
+        return None;
+    }
+    index += 1;
+    rune_rt_json_skip_ws(bytes, &mut index);
+    if bytes.get(index) == Some(&b']') {
+        return None;
+    }
+    let mut current = 0usize;
+    loop {
+        let value_start = index;
+        rune_rt_json_parse_value_end(bytes, &mut index);
+        if current == wanted {
+            return Some(rune_rt_json_trimmed(&trimmed[value_start..index]).to_string());
+        }
+        current += 1;
+        rune_rt_json_skip_ws(bytes, &mut index);
+        match bytes.get(index) {
+            Some(b',') => {
+                index += 1;
+                rune_rt_json_skip_ws(bytes, &mut index);
+            }
+            Some(b']') => return None,
+            _ => panic!("expected `,` or `]` in JSON array"),
+        }
+    }
+}
+
+fn rune_rt_json_len_value(text: &str) -> i64 {
+    let trimmed = rune_rt_json_trimmed(text);
+    match rune_rt_json_kind_name(trimmed) {
+        "array" => {
+            let bytes = trimmed.as_bytes();
+            let mut index = 1usize;
+            let mut count = 0i64;
+            rune_rt_json_skip_ws(bytes, &mut index);
+            if bytes.get(index) == Some(&b']') {
+                return 0;
+            }
+            loop {
+                rune_rt_json_parse_value_end(bytes, &mut index);
+                count += 1;
+                rune_rt_json_skip_ws(bytes, &mut index);
+                match bytes.get(index) {
+                    Some(b',') => {
+                        index += 1;
+                        rune_rt_json_skip_ws(bytes, &mut index);
+                    }
+                    Some(b']') => return count,
+                    _ => panic!("expected `,` or `]` in JSON array"),
+                }
+            }
+        }
+        "object" => {
+            let bytes = trimmed.as_bytes();
+            let mut index = 1usize;
+            let mut count = 0i64;
+            rune_rt_json_skip_ws(bytes, &mut index);
+            if bytes.get(index) == Some(&b'}') {
+                return 0;
+            }
+            loop {
+                rune_rt_json_parse_string_end(bytes, &mut index);
+                rune_rt_json_skip_ws(bytes, &mut index);
+                if bytes.get(index) != Some(&b':') {
+                    panic!("expected `:` in JSON object");
+                }
+                index += 1;
+                rune_rt_json_parse_value_end(bytes, &mut index);
+                count += 1;
+                rune_rt_json_skip_ws(bytes, &mut index);
+                match bytes.get(index) {
+                    Some(b',') => {
+                        index += 1;
+                        rune_rt_json_skip_ws(bytes, &mut index);
+                    }
+                    Some(b'}') => return count,
+                    _ => panic!("expected `,` or `}}` in JSON object"),
+                }
+            }
+        }
+        "string" => rune_rt_json_decode_string(trimmed).chars().count() as i64,
+        _ => 0,
+    }
+}
+
+fn rune_rt_json_equal_values(left: &str, right: &str) -> bool {
+    let left_trimmed = rune_rt_json_trimmed(left);
+    let right_trimmed = rune_rt_json_trimmed(right);
+    let left_kind = rune_rt_json_kind_name(left_trimmed);
+    let right_kind = rune_rt_json_kind_name(right_trimmed);
+    if left_kind != right_kind {
+        return false;
+    }
+
+    match left_kind {
+        "null" => true,
+        "bool" => left_trimmed == right_trimmed,
+        "number" => match (left_trimmed.parse::<f64>(), right_trimmed.parse::<f64>()) {
+            (Ok(left_value), Ok(right_value)) => left_value == right_value,
+            _ => false,
+        },
+        "string" => {
+            rune_rt_json_decode_string(left_trimmed) == rune_rt_json_decode_string(right_trimmed)
+        }
+        "array" => {
+            let left_len = rune_rt_json_len_value(left_trimmed);
+            let right_len = rune_rt_json_len_value(right_trimmed);
+            if left_len != right_len {
+                return false;
+            }
+            for index in 0..left_len as usize {
+                let Some(left_value) = rune_rt_json_index_value(left_trimmed, index) else {
+                    return false;
+                };
+                let Some(right_value) = rune_rt_json_index_value(right_trimmed, index) else {
+                    return false;
+                };
+                if !rune_rt_json_equal_values(&left_value, &right_value) {
+                    return false;
+                }
+            }
+            true
+        }
+        "object" => {
+            let left_len = rune_rt_json_len_value(left_trimmed);
+            let right_len = rune_rt_json_len_value(right_trimmed);
+            if left_len != right_len {
+                return false;
+            }
+
+            let bytes = left_trimmed.as_bytes();
+            let mut index = 0usize;
+            rune_rt_json_skip_ws(bytes, &mut index);
+            if bytes.get(index) != Some(&b'{') {
+                return false;
+            }
+            index += 1;
+            rune_rt_json_skip_ws(bytes, &mut index);
+            if bytes.get(index) == Some(&b'}') {
+                return true;
+            }
+
+            loop {
+                if bytes.get(index) != Some(&b'"') {
+                    return false;
+                }
+                let key_start = index;
+                rune_rt_json_parse_string_end(bytes, &mut index);
+                let key_text = match std::str::from_utf8(&bytes[key_start..index]) {
+                    Ok(text) => text,
+                    Err(_) => return false,
+                };
+                let key = rune_rt_json_decode_string(key_text);
+
+                rune_rt_json_skip_ws(bytes, &mut index);
+                if bytes.get(index) != Some(&b':') {
+                    return false;
+                }
+                index += 1;
+                rune_rt_json_skip_ws(bytes, &mut index);
+
+                let value_start = index;
+                rune_rt_json_parse_value_end(bytes, &mut index);
+                let left_value = match std::str::from_utf8(&bytes[value_start..index]) {
+                    Ok(text) => text.to_string(),
+                    Err(_) => return false,
+                };
+                let Some(right_value) = rune_rt_json_find_object_value(right_trimmed, &key) else {
+                    return false;
+                };
+                if !rune_rt_json_equal_values(&left_value, &right_value) {
+                    return false;
+                }
+
+                rune_rt_json_skip_ws(bytes, &mut index);
+                match bytes.get(index) {
+                    Some(b',') => {
+                        index += 1;
+                        rune_rt_json_skip_ws(bytes, &mut index);
+                    }
+                    Some(b'}') => return true,
+                    _ => return false,
+                }
+            }
+        }
+        _ => false,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_parse(ptr: *const u8, len: i64) -> i64 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("JSON source must be valid UTF-8");
+    let trimmed = rune_rt_json_trimmed(text);
+    let mut index = 0usize;
+    rune_rt_json_parse_value_end(trimmed.as_bytes(), &mut index);
+    rune_rt_json_skip_ws(trimmed.as_bytes(), &mut index);
+    if index != trimmed.len() {
+        panic!("invalid trailing characters after JSON value");
+    }
+    rune_rt_store_string(trimmed.to_string()) as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_stringify(handle: i64) -> *const u8 {
+    let text = rune_rt_json_handle_string(handle);
+    rune_rt_store_string(text)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_kind(handle: i64) -> *const u8 {
+    rune_rt_store_string(rune_rt_json_kind_name(&rune_rt_json_handle_string(handle)).to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_is_null(handle: i64) -> bool {
+    rune_rt_json_kind_name(&rune_rt_json_handle_string(handle)) == "null"
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_len(handle: i64) -> i64 {
+    rune_rt_json_len_value(&rune_rt_json_handle_string(handle))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_get(handle: i64, key_ptr: *const u8, key_len: i64) -> i64 {
+    let key_bytes = unsafe { std::slice::from_raw_parts(key_ptr, key_len as usize) };
+    let key = std::str::from_utf8(key_bytes).expect("JSON object key must be valid UTF-8");
+    let text = rune_rt_json_handle_string(handle);
+    rune_rt_store_string(
+        rune_rt_json_find_object_value(&text, key).unwrap_or_else(|| "null".to_string()),
+    ) as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_index(handle: i64, index: i64) -> i64 {
+    if index < 0 {
+        return rune_rt_store_string("null".to_string()) as i64;
+    }
+    let text = rune_rt_json_handle_string(handle);
+    rune_rt_store_string(
+        rune_rt_json_index_value(&text, index as usize).unwrap_or_else(|| "null".to_string()),
+    ) as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_to_string(handle: i64) -> *const u8 {
+    let text = rune_rt_json_handle_string(handle);
+    let trimmed = rune_rt_json_trimmed(&text);
+    if rune_rt_json_kind_name(trimmed) == "string" {
+        rune_rt_store_string(rune_rt_json_decode_string(trimmed))
+    } else {
+        rune_rt_store_string(trimmed.to_string())
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_to_i64(handle: i64) -> i64 {
+    let text = rune_rt_json_handle_string(handle);
+    let trimmed = rune_rt_json_trimmed(&text);
+    match rune_rt_json_kind_name(trimmed) {
+        "null" => 0,
+        "bool" => (trimmed == "true") as i64,
+        "number" => trimmed
+            .parse::<i64>()
+            .unwrap_or_else(|_| panic!("failed to convert JSON number `{trimmed}` to i64")),
+        "string" => rune_rt_json_decode_string(trimmed)
+            .trim()
+            .parse::<i64>()
+            .unwrap_or_else(|_| panic!("failed to convert JSON string `{trimmed}` to i64")),
+        other => panic!("cannot convert JSON {other} to i64"),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_to_bool(handle: i64) -> bool {
+    let text = rune_rt_json_handle_string(handle);
+    let trimmed = rune_rt_json_trimmed(&text);
+    match rune_rt_json_kind_name(trimmed) {
+        "null" => false,
+        "bool" => trimmed == "true",
+        "number" => trimmed.parse::<f64>().map(|value| value != 0.0).unwrap_or(false),
+        "string" => !rune_rt_json_decode_string(trimmed).is_empty(),
+        "array" | "object" => rune_rt_json_len_value(trimmed) > 0,
+        _ => false,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_json_equal(left_handle: i64, right_handle: i64) -> bool {
+    rune_rt_json_equal_values(
+        &rune_rt_json_handle_string(left_handle),
+        &rune_rt_json_handle_string(right_handle),
+    )
 }
 
 fn rune_rt_dynamic_value_to_string(tag: i64, payload: i64, extra: i64) -> String {
@@ -2364,6 +3869,7 @@ fn rune_rt_dynamic_value_to_string(tag: i64, payload: i64, extra: i64) -> String
             let text = std::str::from_utf8(bytes).expect("Rune dynamic strings must be valid UTF-8");
             text.to_string()
         }
+        5 => rune_rt_string_from_handle(rune_rt_json_to_string(payload) as *const u8),
         _ => format!("<dynamic:{tag}>"),
     }
 }
@@ -2373,6 +3879,7 @@ fn rune_rt_dynamic_value_to_i64_lossy(tag: i64, payload: i64, _extra: i64) -> Op
         1 => Some((payload != 0) as i64),
         2 => Some(payload as i32 as i64),
         3 => Some(payload),
+        5 => Some(rune_rt_json_to_i64(payload)),
         _ => None,
     }
 }
@@ -2445,7 +3952,9 @@ pub extern "C" fn rune_rt_dynamic_compare(left: *const i64, right: *const i64, o
 
     match op {
         0 | 1 => {
-            let equal = if left_tag == 4 || right_tag == 4 {
+            let equal = if left_tag == 5 && right_tag == 5 {
+                rune_rt_json_equal(left_payload, right_payload)
+            } else if left_tag == 4 || right_tag == 4 {
                 rune_rt_dynamic_value_to_string(left_tag, left_payload, left_extra)
                     == rune_rt_dynamic_value_to_string(right_tag, right_payload, right_extra)
             } else {
@@ -2488,6 +3997,7 @@ pub extern "C" fn rune_rt_dynamic_truthy(tag: i64, payload: i64, extra: i64) -> 
         2 => payload as i32 != 0,
         3 => payload != 0,
         4 => extra != 0,
+        5 => rune_rt_json_to_bool(payload),
         _ => panic!("unknown dynamic truthiness tag {tag}"),
     }
 }
@@ -2598,6 +4108,24 @@ pub extern "C" fn rune_rt_network_tcp_connect(_ptr: *const u8, _len: i64, _port:
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_listen(_ptr: *const u8, _len: i64, _port: i32) -> bool {
+    false
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_send(
+    _host_ptr: *const u8,
+    _host_len: i64,
+    _port: i32,
+    _data_ptr: *const u8,
+    _data_len: i64,
+) -> bool {
+    false
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_connect_timeout(_ptr: *const u8, _len: i64, _port: i32, _timeout_ms: i32) -> bool {
     false
 }
@@ -2606,6 +4134,39 @@ pub extern "C" fn rune_rt_network_tcp_connect_timeout(_ptr: *const u8, _len: i64
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_connect(ptr: *const u8, len: i64, port: i32) -> bool {
     rune_rt_network_tcp_connect_timeout(ptr, len, port, 250)
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_listen(ptr: *const u8, len: i64, port: i32) -> bool {
+    if port < 0 || port > u16::MAX as i32 {
+        return false;
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP listen host must be valid UTF-8");
+    TcpListener::bind((host, port as u16)).is_ok()
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_send(
+    host_ptr: *const u8,
+    host_len: i64,
+    port: i32,
+    data_ptr: *const u8,
+    data_len: i64,
+) -> bool {
+    if port < 0 || port > u16::MAX as i32 {
+        return false;
+    }
+    let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP send host must be valid UTF-8");
+    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
+    let data = std::str::from_utf8(data).expect("TCP send data must be valid UTF-8");
+    match TcpStream::connect((host, port as u16)) {
+        Ok(mut stream) => std::io::Write::write_all(&mut stream, data.as_bytes()).is_ok(),
+        Err(_) => false,
+    }
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -2627,6 +4188,57 @@ pub extern "C" fn rune_rt_network_tcp_connect_timeout(ptr: *const u8, len: i64, 
     resolved.into_iter().any(|addr| {
         TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)).is_ok()
     })
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_udp_bind(_ptr: *const u8, _len: i64, _port: i32) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_udp_bind(ptr: *const u8, len: i64, port: i32) -> bool {
+    if port < 0 || port > u16::MAX as i32 {
+        return false;
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("UDP bind host must be valid UTF-8");
+    UdpSocket::bind((host, port as u16)).is_ok()
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_udp_send(
+    _host_ptr: *const u8,
+    _host_len: i64,
+    _port: i32,
+    _data_ptr: *const u8,
+    _data_len: i64,
+) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_udp_send(
+    host_ptr: *const u8,
+    host_len: i64,
+    port: i32,
+    data_ptr: *const u8,
+    data_len: i64,
+) -> bool {
+    if port < 0 || port > u16::MAX as i32 {
+        return false;
+    }
+    let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
+    let host = std::str::from_utf8(host).expect("UDP send host must be valid UTF-8");
+    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
+    let data = std::str::from_utf8(data).expect("UDP send data must be valid UTF-8");
+    match UdpSocket::bind(("0.0.0.0", 0)) {
+        Ok(socket) => socket.send_to(data.as_bytes(), (host, port as u16)).is_ok(),
+        Err(_) => false,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -2657,6 +4269,59 @@ pub extern "C" fn rune_rt_fs_write_string(
     let content = unsafe { std::slice::from_raw_parts(content_ptr, content_len as usize) };
     let content = std::str::from_utf8(content).expect("filesystem content must be valid UTF-8");
     fs::write(path, content).is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_remove(ptr: *const u8, len: i64) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).is_ok(),
+        Ok(_) => fs::remove_file(path).is_ok(),
+        Err(_) => false,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_rename(
+    from_ptr: *const u8,
+    from_len: i64,
+    to_ptr: *const u8,
+    to_len: i64,
+) -> bool {
+    let from = unsafe { std::slice::from_raw_parts(from_ptr, from_len as usize) };
+    let from = std::str::from_utf8(from).expect("filesystem source path must be valid UTF-8");
+    let to = unsafe { std::slice::from_raw_parts(to_ptr, to_len as usize) };
+    let to = std::str::from_utf8(to).expect("filesystem destination path must be valid UTF-8");
+    fs::rename(from, to).is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_copy(
+    from_ptr: *const u8,
+    from_len: i64,
+    to_ptr: *const u8,
+    to_len: i64,
+) -> bool {
+    let from = unsafe { std::slice::from_raw_parts(from_ptr, from_len as usize) };
+    let from = std::str::from_utf8(from).expect("filesystem source path must be valid UTF-8");
+    let to = unsafe { std::slice::from_raw_parts(to_ptr, to_len as usize) };
+    let to = std::str::from_utf8(to).expect("filesystem destination path must be valid UTF-8");
+    fs::copy(from, to).is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_create_dir(ptr: *const u8, len: i64) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    fs::create_dir(path).is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_create_dir_all(ptr: *const u8, len: i64) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    fs::create_dir_all(path).is_ok()
 }
 
 #[unsafe(no_mangle)]
@@ -2904,12 +4569,14 @@ fn write_wrapper_files(
 }
 
 fn create_temp_dir() -> Result<PathBuf, BuildError> {
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     let base = env::temp_dir();
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    let dir = base.join(format!("rune-build-{stamp}"));
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = base.join(format!("rune-build-{}-{stamp}-{unique}", std::process::id()));
     fs::create_dir_all(&dir).map_err(|source| BuildError::Io {
         context: format!("failed to create temporary directory `{}`", dir.display()),
         source,

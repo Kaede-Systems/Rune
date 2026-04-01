@@ -41,6 +41,7 @@ struct FunctionSig {
 struct Emitter<'a> {
     ir: &'a IrProgram,
     signatures: HashMap<String, FunctionSig>,
+    struct_layouts: HashMap<String, Vec<(String, IrType)>>,
     string_pool: BTreeMap<String, String>,
     declared_runtime: BTreeSet<String>,
 }
@@ -48,38 +49,31 @@ struct Emitter<'a> {
 impl<'a> Emitter<'a> {
     fn new(program: &'a Program, ir: &'a IrProgram) -> Result<Self, LlvmIrError> {
         let mut signatures = HashMap::new();
+        let struct_layouts = collect_struct_layouts(program)?;
         for item in &program.items {
-            let Item::Function(function) = item else {
-                continue;
-            };
-            if function.is_async {
-                return Err(LlvmIrError {
-                    message: "async functions are not supported by the current LLVM IR backend"
-                        .into(),
-                });
+            match item {
+                Item::Function(function) => {
+                    insert_function_signature(&mut signatures, &function.name, function, None)?;
+                }
+                Item::Struct(decl) => {
+                    for method in &decl.methods {
+                        let method_name = struct_method_symbol(&decl.name, &method.name);
+                        insert_function_signature(
+                            &mut signatures,
+                            &method_name,
+                            method,
+                            Some(&decl.name),
+                        )?;
+                    }
+                }
+                Item::Import(_) | Item::Exception(_) => {}
             }
-            let params = function
-                .params
-                .iter()
-                .map(|param| Ok((param.name.clone(), type_ref_to_ir(&param.ty)?)))
-                .collect::<Result<Vec<_>, LlvmIrError>>()?;
-            let ret = match function.return_type.as_ref() {
-                Some(ty) => type_ref_to_ir(ty)?,
-                None => IrType::Unit,
-            };
-            signatures.insert(
-                function.name.clone(),
-                FunctionSig {
-                    is_extern: function.is_extern,
-                    params,
-                    ret,
-                },
-            );
         }
 
         Ok(Self {
             ir,
             signatures,
+            struct_layouts,
             string_pool: BTreeMap::new(),
             declared_runtime: BTreeSet::new(),
         })
@@ -169,12 +163,12 @@ impl<'a> Emitter<'a> {
             .iter()
             .map(|local| (local.name.clone(), local.ty.clone()))
             .collect::<HashMap<_, _>>();
-        let temp_types = infer_temp_types(function, &self.signatures)?;
+        let temp_types = infer_temp_types(function, &self.signatures, &self.struct_layouts)?;
 
         let mut out = String::new();
         out.push_str(&format!(
             "define {} @{}(",
-            llvm_function_return_type(sig)?,
+            llvm_function_return_type(sig, &self.struct_layouts)?,
             llvm_internal_symbol_name(&function.name, sig)
         ));
         for (index, (name, ty)) in sig.params.iter().enumerate() {
@@ -190,7 +184,16 @@ impl<'a> Emitter<'a> {
                     "ptr %{}.in.ptr, i64 %{}.in.len",
                     name, name
                 )),
-                _ => out.push_str(&format!("{} %{}", llvm_extern_type(ty)?, name)),
+                IrType::Struct(_) if !sig.is_extern => out.push_str(&format!(
+                    "{} %{}",
+                    llvm_internal_type(ty, &self.struct_layouts)?,
+                    name
+                )),
+                _ => out.push_str(&format!(
+                    "{} %{}",
+                    llvm_extern_type(ty, &self.struct_layouts)?,
+                    name
+                )),
             }
         }
         out.push_str(") {\nentry:\n");
@@ -217,15 +220,17 @@ impl<'a> Emitter<'a> {
                     out.push_str(&format!("  store ptr %{}.in.ptr, ptr %{name}.ptr\n", name));
                     out.push_str(&format!("  store i64 %{}.in.len, ptr %{name}.len\n", name));
                 }
+                IrType::Struct(_) if !sig.is_extern => {
+                    let ty = llvm_internal_type(ty, &self.struct_layouts)?;
+                    out.push_str(&format!("  %{name}.addr = alloca {ty}\n"));
+                    out.push_str(&format!("  store {ty} %{name}, ptr %{name}.addr\n"));
+                }
                 _ => {
+                    let scalar_ty = llvm_scalar_type(ty)?;
                     out.push_str(&format!(
-                        "  %{name}.addr = alloca {}\n",
-                        llvm_scalar_type(ty)?
+                        "  %{name}.addr = alloca {scalar_ty}\n",
                     ));
-                    out.push_str(&format!(
-                        "  store {} %{name}, ptr %{name}.addr\n",
-                        llvm_scalar_type(ty)?,
-                    ));
+                    out.push_str(&format!("  store {scalar_ty} %{name}, ptr %{name}.addr\n"));
                 }
             }
         }
@@ -251,6 +256,10 @@ impl<'a> Emitter<'a> {
                     out.push_str(&format!("  %{}.ptr = alloca ptr\n", local.name));
                     out.push_str(&format!("  %{}.len = alloca i64\n", local.name));
                 }
+                IrType::Struct(_) => {
+                    let ty = llvm_internal_type(&local.ty, &self.struct_layouts)?;
+                    out.push_str(&format!("  %{}.addr = alloca {ty}\n", local.name));
+                }
                 _ => out.push_str(&format!(
                     "  %{}.addr = alloca {}\n",
                     local.name,
@@ -262,6 +271,7 @@ impl<'a> Emitter<'a> {
         let mut emitter = FunctionEmitter {
             function_name: &function.name,
             signatures: &self.signatures,
+            struct_layouts: &self.struct_layouts,
             local_types: &local_types,
             temp_types: &temp_types,
             string_pool: &mut self.string_pool,
@@ -285,21 +295,69 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_external_decl(&self, name: &str, sig: &FunctionSig) -> Result<String, LlvmIrError> {
-        let mut out = format!("declare {} @{}(", llvm_extern_type(&sig.ret)?, name);
+        let mut out = format!(
+            "declare {} @{}(",
+            llvm_extern_type(&sig.ret, &self.struct_layouts)?,
+            name
+        );
         for (index, (_, ty)) in sig.params.iter().enumerate() {
             if index > 0 {
                 out.push_str(", ");
             }
-            out.push_str(llvm_extern_type(ty)?);
+            out.push_str(&llvm_extern_type(ty, &self.struct_layouts)?);
         }
         out.push(')');
         Ok(out)
     }
 }
 
+fn insert_function_signature(
+    signatures: &mut HashMap<String, FunctionSig>,
+    registered_name: &str,
+    function: &crate::parser::Function,
+    method_owner: Option<&str>,
+) -> Result<(), LlvmIrError> {
+    if function.is_async {
+        return Err(LlvmIrError {
+            message: "async functions are not supported by the current LLVM IR backend".into(),
+        });
+    }
+    let mut params = Vec::with_capacity(function.params.len());
+    for (index, param) in function.params.iter().enumerate() {
+        let ty = if index == 0 && param.name == "self" {
+            if let Some(owner) = method_owner {
+                IrType::Struct(owner.to_string())
+            } else {
+                type_ref_to_ir(&param.ty)?
+            }
+        } else {
+            type_ref_to_ir(&param.ty)?
+        };
+        params.push((param.name.clone(), ty));
+    }
+    let ret = match function.return_type.as_ref() {
+        Some(ty) => type_ref_to_ir(ty)?,
+        None => IrType::Unit,
+    };
+    signatures.insert(
+        registered_name.to_string(),
+        FunctionSig {
+            is_extern: function.is_extern,
+            params,
+            ret,
+        },
+    );
+    Ok(())
+}
+
+fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {
+    format!("{struct_name}__{method_name}")
+}
+
 struct FunctionEmitter<'a> {
     function_name: &'a str,
     signatures: &'a HashMap<String, FunctionSig>,
+    struct_layouts: &'a HashMap<String, Vec<(String, IrType)>>,
     local_types: &'a HashMap<String, IrType>,
     temp_types: &'a HashMap<String, IrType>,
     string_pool: &'a mut BTreeMap<String, String>,
@@ -352,6 +410,13 @@ impl<'a> FunctionEmitter<'a> {
                             let (ptr, len) = split_string_value(&value)?;
                             out.push_str(&format!("  store {ptr}, ptr %{dst}.ptr\n"));
                             out.push_str(&format!("  store {len}, ptr %{dst}.len\n"));
+                        }
+                        IrType::Struct(_) => {
+                            out.push_str(&format!(
+                                "  store {} {value}, ptr %{}.addr\n",
+                                llvm_internal_type(local_ty, self.struct_layouts)?,
+                                dst
+                            ));
                         }
                         _ => {
                             out.push_str(&format!(
@@ -459,37 +524,43 @@ impl<'a> FunctionEmitter<'a> {
                         let agg0 = self.next_reg();
                         out.push_str(&format!(
                             "  {agg0} = insertvalue {} poison, {ptr}, 0\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
                         ));
                         let agg1 = self.next_reg();
                         out.push_str(&format!(
                             "  {agg1} = insertvalue {} {agg0}, {len}, 1\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
                         ));
                         out.push_str(&format!(
                             "  ret {} {agg1}\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
                         ));
                     } else if *ret_ty == IrType::Dynamic {
                         let (tag, payload, extra) = split_dynamic_value(&ret_val)?;
                         let agg0 = self.next_reg();
                         out.push_str(&format!(
                             "  {agg0} = insertvalue {} poison, {tag}, 0\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
                         ));
                         let agg1 = self.next_reg();
                         out.push_str(&format!(
                             "  {agg1} = insertvalue {} {agg0}, {payload}, 1\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
                         ));
                         let agg2 = self.next_reg();
                         out.push_str(&format!(
                             "  {agg2} = insertvalue {} {agg1}, {extra}, 2\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
                         ));
                         out.push_str(&format!(
                             "  ret {} {agg2}\n",
-                            llvm_internal_type(ret_ty)?
+                            llvm_internal_type(ret_ty, self.struct_layouts)?
+                        ));
+                    } else if matches!(ret_ty, IrType::Struct(_)) {
+                        out.push_str(&format!(
+                            "  ret {} {}\n",
+                            llvm_internal_type(ret_ty, self.struct_layouts)?,
+                            ret_val
                         ));
                     } else {
                         out.push_str(&format!(
@@ -632,6 +703,27 @@ impl<'a> FunctionEmitter<'a> {
             self.value_map.insert(dst.to_string(), reg);
             return Ok(());
         }
+        if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual)
+            && left_ty == IrType::Json
+            && right_ty == IrType::Json
+        {
+            let left_val = self.resolve_value(left, &IrType::Json, out)?;
+            let right_val = self.resolve_value(right, &IrType::Json, out)?;
+            self.declared_runtime
+                .insert("declare i1 @rune_rt_json_equal(i64, i64)\n".into());
+            let eq_reg = self.next_reg();
+            out.push_str(&format!(
+                "  {eq_reg} = call i1 @rune_rt_json_equal(i64 {left_val}, i64 {right_val})\n"
+            ));
+            if matches!(op, BinaryOp::EqualEqual) {
+                self.value_map.insert(dst.to_string(), eq_reg);
+            } else {
+                let reg = self.next_reg();
+                out.push_str(&format!("  {reg} = xor i1 {eq_reg}, true\n"));
+                self.value_map.insert(dst.to_string(), reg);
+            }
+            return Ok(());
+        }
         let op_ty = match op {
             BinaryOp::EqualEqual
             | BinaryOp::NotEqual
@@ -714,6 +806,84 @@ impl<'a> FunctionEmitter<'a> {
         callee: &str,
         args: &[IrArg],
     ) -> Result<(), LlvmIrError> {
+        if let Some(field_name) = callee.strip_prefix("field.") {
+            let [base] = args else {
+                return Err(LlvmIrError {
+                    message: format!("`{callee}` expects exactly 1 argument in the current LLVM IR backend"),
+                });
+            };
+            if base.name.as_deref() != Some("base") {
+                return Err(LlvmIrError {
+                    message: format!("`{callee}` requires a named `base` receiver in the current LLVM IR backend"),
+                });
+            }
+            let base_ty = self
+                .temp_types
+                .get(&base.value)
+                .or_else(|| self.local_types.get(&base.value))
+                .cloned()
+                .ok_or_else(|| LlvmIrError {
+                    message: format!("missing receiver type for `{callee}`"),
+                })?;
+            let IrType::Struct(struct_name) = base_ty else {
+                return Err(LlvmIrError {
+                    message: format!("`{callee}` requires a concrete struct receiver in the current LLVM IR backend"),
+                });
+            };
+            let layout = self.struct_layouts.get(&struct_name).ok_or_else(|| LlvmIrError {
+                message: format!("missing struct layout for `{struct_name}`"),
+            })?;
+            let (field_index, _) = layout
+                .iter()
+                .enumerate()
+                .find(|(_, (name, _))| name == field_name)
+                .ok_or_else(|| LlvmIrError {
+                    message: format!("`{struct_name}` has no field `{field_name}`"),
+                })?;
+            let base_value =
+                self.resolve_value(&base.value, &IrType::Struct(struct_name.clone()), out)?;
+            let reg = self.next_reg();
+            out.push_str(&format!(
+                "  {reg} = extractvalue {} {base_value}, {field_index}\n",
+                llvm_internal_type(&IrType::Struct(struct_name), self.struct_layouts)?
+            ));
+            if let Some(dst) = dst {
+                self.value_map.insert(dst.clone(), reg);
+            }
+            return Ok(());
+        }
+
+        if self.struct_layouts.contains_key(callee) {
+            let layout = self.struct_layouts.get(callee).expect("checked above");
+            if args.len() != layout.len() || args.iter().any(|arg| arg.name.is_none()) {
+                return Err(LlvmIrError {
+                    message: format!("constructor call shape for `{callee}` is not yet supported by the current LLVM IR backend"),
+                });
+            }
+            let aggregate_ty =
+                llvm_internal_type(&IrType::Struct(callee.to_string()), self.struct_layouts)?;
+            let mut aggregate = "poison".to_string();
+            for (index, (field_name, field_ty)) in layout.iter().enumerate() {
+                let arg = args
+                    .iter()
+                    .find(|arg| arg.name.as_deref() == Some(field_name))
+                    .ok_or_else(|| LlvmIrError {
+                        message: format!("missing constructor field `{field_name}` for `{callee}`"),
+                    })?;
+                let value = self.resolve_value(&arg.value, field_ty, out)?;
+                let reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {reg} = insertvalue {aggregate_ty} {aggregate}, {} {value}, {index}\n",
+                    llvm_internal_type(field_ty, self.struct_layouts)?
+                ));
+                aggregate = reg;
+            }
+            if let Some(dst) = dst {
+                self.value_map.insert(dst.clone(), aggregate);
+            }
+            return Ok(());
+        }
+
         match callee {
             "str" => {
                 let [arg] = args else {
@@ -738,6 +908,22 @@ impl<'a> FunctionEmitter<'a> {
                     })?;
                 let rendered = match src_ty {
                     IrType::String => self.resolve_value(&arg.value, &IrType::String, out)?,
+                    IrType::Json => {
+                        let value = self.resolve_value(&arg.value, &IrType::Json, out)?;
+                        self.declared_runtime
+                            .insert("declare ptr @rune_rt_json_to_string(i64)\n".into());
+                        self.declared_runtime
+                            .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                        let ptr_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {ptr_reg} = call ptr @rune_rt_json_to_string(i64 {value})\n"
+                        ));
+                        let len_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                        ));
+                        format!("ptr {ptr_reg}, i64 {len_reg}")
+                    }
                     IrType::Dynamic => {
                         let rendered = self.resolve_dynamic_value(&arg.value, out)?;
                         let (tag, payload, extra) = split_dynamic_value(&rendered)?;
@@ -808,12 +994,13 @@ impl<'a> FunctionEmitter<'a> {
                     other => {
                         return Err(LlvmIrError {
                             message: format!(
-                                "`str` currently supports only bool, i32, i64, dynamic, and String in the LLVM IR backend, found `{}`",
+                                "`str` currently supports only bool, i32, i64, Json, dynamic, and String in the LLVM IR backend, found `{}`",
                                 match other {
                                     IrType::Bool => "bool",
                                     IrType::Dynamic => "dynamic",
                                     IrType::I32 => "i32",
                                     IrType::I64 => "i64",
+                                    IrType::Json => "Json",
                                     IrType::String => "String",
                                     IrType::Struct(_) => "struct",
                                     IrType::Unit => "unit",
@@ -850,6 +1037,16 @@ impl<'a> FunctionEmitter<'a> {
                     })?;
                 let converted = match src_ty {
                     IrType::I64 => self.resolve_value(&arg.value, &IrType::I64, out)?,
+                    IrType::Json => {
+                        let value = self.resolve_value(&arg.value, &IrType::Json, out)?;
+                        self.declared_runtime
+                            .insert("declare i64 @rune_rt_json_to_i64(i64)\n".into());
+                        let reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {reg} = call i64 @rune_rt_json_to_i64(i64 {value})\n"
+                        ));
+                        reg
+                    }
                     IrType::I32 => {
                         let value = self.resolve_value(&arg.value, &IrType::I32, out)?;
                         let reg = self.next_reg();
@@ -886,7 +1083,7 @@ impl<'a> FunctionEmitter<'a> {
                     }
                     _ => {
                         return Err(LlvmIrError {
-                            message: "`int` currently supports only bool, i32, i64, String, and dynamic in the LLVM IR backend".into(),
+                            message: "`int` currently supports only bool, i32, i64, Json, String, and dynamic in the LLVM IR backend".into(),
                         });
                     }
                 };
@@ -1157,6 +1354,41 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_network_tcp_listen" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_network_tcp_listen(ptr, i64, i32)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_network_tcp_listen({ptr}, {len}, i32 {port})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_send" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let rendered_host = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (host_ptr, host_len) = split_string_value(&rendered_host)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let rendered_data = self.resolve_value(&args[2].value, &IrType::String, out)?;
+                let (data_ptr, data_len) = split_string_value(&rendered_data)?;
+                let reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare i1 @rune_rt_network_tcp_send(ptr, i64, i32, ptr, i64)\n".into(),
+                );
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_network_tcp_send({host_ptr}, {host_len}, i32 {port}, {data_ptr}, {data_len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_network_tcp_connect_timeout" => {
                 self.expect_plain_arity(callee, args, 3)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -1169,6 +1401,41 @@ impl<'a> FunctionEmitter<'a> {
                 );
                 out.push_str(&format!(
                     "  {reg} = call i1 @rune_rt_network_tcp_connect_timeout({ptr}, {len}, i32 {port}, i32 {timeout})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_udp_bind" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_network_udp_bind(ptr, i64, i32)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_network_udp_bind({ptr}, {len}, i32 {port})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_udp_send" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let rendered_host = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (host_ptr, host_len) = split_string_value(&rendered_host)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let rendered_data = self.resolve_value(&args[2].value, &IrType::String, out)?;
+                let (data_ptr, data_len) = split_string_value(&rendered_data)?;
+                let reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare i1 @rune_rt_network_udp_send(ptr, i64, i32, ptr, i64)\n".into(),
+                );
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_network_udp_send({host_ptr}, {host_len}, i32 {port}, {data_ptr}, {data_len})\n"
                 ));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
@@ -1224,6 +1491,214 @@ impl<'a> FunctionEmitter<'a> {
                 );
                 out.push_str(&format!(
                     "  {reg} = call i1 @rune_rt_fs_write_string({path_ptr}, {path_len}, {content_ptr}, {content_len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_fs_remove"
+            | "__rune_builtin_fs_create_dir"
+            | "__rune_builtin_fs_create_dir_all" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let reg = self.next_reg();
+                let runtime = match callee {
+                    "__rune_builtin_fs_remove" => "rune_rt_fs_remove",
+                    "__rune_builtin_fs_create_dir" => "rune_rt_fs_create_dir",
+                    "__rune_builtin_fs_create_dir_all" => "rune_rt_fs_create_dir_all",
+                    _ => unreachable!(),
+                };
+                self.declared_runtime
+                    .insert(format!("declare i1 @{runtime}(ptr, i64)\n"));
+                out.push_str(&format!("  {reg} = call i1 @{runtime}({ptr}, {len})\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_fs_rename" | "__rune_builtin_fs_copy" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let from_rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (from_ptr, from_len) = split_string_value(&from_rendered)?;
+                let to_rendered = self.resolve_value(&args[1].value, &IrType::String, out)?;
+                let (to_ptr, to_len) = split_string_value(&to_rendered)?;
+                let reg = self.next_reg();
+                let runtime = match callee {
+                    "__rune_builtin_fs_rename" => "rune_rt_fs_rename",
+                    "__rune_builtin_fs_copy" => "rune_rt_fs_copy",
+                    _ => unreachable!(),
+                };
+                self.declared_runtime
+                    .insert(format!("declare i1 @{runtime}(ptr, i64, ptr, i64)\n"));
+                out.push_str(&format!(
+                    "  {reg} = call i1 @{runtime}({from_ptr}, {from_len}, {to_ptr}, {to_len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_parse" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_json_parse(ptr, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_json_parse({ptr}, {len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_stringify" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_json_stringify(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_json_stringify(i64 {value})\n"
+                ));
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_kind" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_json_kind(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_json_kind(i64 {value})\n"
+                ));
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_is_null" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_json_is_null(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_json_is_null(i64 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_len" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_json_len(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_json_len(i64 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_get" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let key = self.resolve_value(&args[1].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&key)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_json_get(i64, ptr, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_json_get(i64 {value}, {ptr}, {len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_index" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let index = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_json_index(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_json_index(i64 {value}, i64 {index})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_to_string" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_json_to_string(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_json_to_string(i64 {value})\n"
+                ));
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_to_i64" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_json_to_i64(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_json_to_i64(i64 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_json_to_bool" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::Json, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_json_to_bool(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_json_to_bool(i64 {value})\n"
                 ));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
@@ -1350,6 +1825,13 @@ impl<'a> FunctionEmitter<'a> {
                 rendered_args.push(tag.to_string());
                 rendered_args.push(payload.to_string());
                 rendered_args.push(extra.to_string());
+            } else if matches!(ty, IrType::Struct(_)) && !sig.is_extern {
+                let value = self.resolve_value(&arg.value, ty, out)?;
+                rendered_args.push(format!(
+                    "{} {}",
+                    llvm_internal_type(ty, self.struct_layouts)?,
+                    value
+                ));
             } else {
                 let value = self.resolve_value(&arg.value, ty, out)?;
                 rendered_args.push(format!("{} {}", llvm_scalar_type(ty)?, value));
@@ -1394,11 +1876,11 @@ impl<'a> FunctionEmitter<'a> {
                 self.value_map
                     .insert(dst.clone(), format!("ptr {owned_ptr}, i64 {len_reg}"));
             }
-        } else if matches!(sig.ret, IrType::String | IrType::Dynamic) {
+        } else if matches!(sig.ret, IrType::String | IrType::Dynamic | IrType::Struct(_)) {
             let aggregate_reg = self.next_reg();
             out.push_str(&format!(
                 "  {aggregate_reg} = call {} @{}({})\n",
-                llvm_internal_type(&sig.ret)?,
+                llvm_internal_type(&sig.ret, self.struct_layouts)?,
                 llvm_internal_symbol_name(callee, sig),
                 rendered_args.join(", ")
             ));
@@ -1406,32 +1888,36 @@ impl<'a> FunctionEmitter<'a> {
                 let ptr_reg = self.next_reg();
                 out.push_str(&format!(
                     "  {ptr_reg} = extractvalue {} {aggregate_reg}, 0\n",
-                    llvm_internal_type(&sig.ret)?
+                    llvm_internal_type(&sig.ret, self.struct_layouts)?
                 ));
                 let len_reg = self.next_reg();
                 out.push_str(&format!(
                     "  {len_reg} = extractvalue {} {aggregate_reg}, 1\n",
-                    llvm_internal_type(&sig.ret)?
+                    llvm_internal_type(&sig.ret, self.struct_layouts)?
                 ));
                 if let Some(dst) = dst {
                     self.value_map
                         .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
                 }
+            } else if matches!(sig.ret, IrType::Struct(_)) {
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), aggregate_reg);
+                }
             } else if let Some(dst) = dst {
                 let tag_reg = self.next_reg();
                 out.push_str(&format!(
                     "  {tag_reg} = extractvalue {} {aggregate_reg}, 0\n",
-                    llvm_internal_type(&sig.ret)?
+                    llvm_internal_type(&sig.ret, self.struct_layouts)?
                 ));
                 let payload_reg = self.next_reg();
                 out.push_str(&format!(
                     "  {payload_reg} = extractvalue {} {aggregate_reg}, 1\n",
-                    llvm_internal_type(&sig.ret)?
+                    llvm_internal_type(&sig.ret, self.struct_layouts)?
                 ));
                 let extra_reg = self.next_reg();
                 out.push_str(&format!(
                     "  {extra_reg} = extractvalue {} {aggregate_reg}, 2\n",
-                    llvm_internal_type(&sig.ret)?
+                    llvm_internal_type(&sig.ret, self.struct_layouts)?
                 ));
                 self.value_map.insert(
                     dst.clone(),
@@ -1501,20 +1987,47 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 out.push_str(&call);
             }
+            IrType::Json => {
+                let rendered = self.resolve_value(value_name, ty, out)?;
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_json_stringify(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_json_stringify(i64 {rendered})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                let decl = if stderr {
+                    "declare void @rune_rt_eprint_str(ptr, i64)\n"
+                } else {
+                    "declare void @rune_rt_print_str(ptr, i64)\n"
+                };
+                self.declared_runtime.insert(decl.into());
+                let call = if stderr {
+                    format!("  call void @rune_rt_eprint_str(ptr {ptr_reg}, i64 {len_reg})\n")
+                } else {
+                    format!("  call void @rune_rt_print_str(ptr {ptr_reg}, i64 {len_reg})\n")
+                };
+                out.push_str(&call);
+            }
             IrType::Bool => {
                 let rendered = self.resolve_value(value_name, ty, out)?;
                 let zext = self.next_reg();
                 out.push_str(&format!("  {zext} = zext i1 {rendered} to i64\n"));
                 let decl = if stderr {
-                    "declare void @rune_rt_eprint_i64(i64)\n"
+                    "declare void @rune_rt_eprint_bool(i64)\n"
                 } else {
-                    "declare void @rune_rt_print_i64(i64)\n"
+                    "declare void @rune_rt_print_bool(i64)\n"
                 };
                 self.declared_runtime.insert(decl.into());
                 let call = if stderr {
-                    format!("  call void @rune_rt_eprint_i64(i64 {zext})\n")
+                    format!("  call void @rune_rt_eprint_bool(i64 {zext})\n")
                 } else {
-                    format!("  call void @rune_rt_print_i64(i64 {zext})\n")
+                    format!("  call void @rune_rt_print_bool(i64 {zext})\n")
                 };
                 out.push_str(&call);
             }
@@ -1730,6 +2243,15 @@ impl<'a> FunctionEmitter<'a> {
                     out.push_str(&format!("  {len_reg} = load i64, ptr %{}.len\n", name));
                     Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
                 }
+                IrType::Struct(_) => {
+                    let reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {reg} = load {}, ptr %{}.addr\n",
+                        llvm_internal_type(ty, self.struct_layouts)?,
+                        name
+                    ));
+                    Ok(reg)
+                }
                 _ => {
                     let reg = self.next_reg();
                     out.push_str(&format!(
@@ -1773,6 +2295,10 @@ impl<'a> FunctionEmitter<'a> {
             IrType::I64 => {
                 let value = self.resolve_value(name, &IrType::I64, out)?;
                 Ok(format!("i64 3, i64 {value}, i64 0"))
+            }
+            IrType::Json => {
+                let value = self.resolve_value(name, &IrType::Json, out)?;
+                Ok(format!("i64 5, i64 {value}, i64 0"))
             }
             IrType::String => {
                 let rendered = self.resolve_value(name, &IrType::String, out)?;
@@ -1821,6 +2347,7 @@ impl<'a> FunctionEmitter<'a> {
 fn infer_temp_types(
     function: &IrFunction,
     signatures: &HashMap<String, FunctionSig>,
+    struct_layouts: &HashMap<String, Vec<(String, IrType)>>,
 ) -> Result<HashMap<String, IrType>, LlvmIrError> {
     let local_types = function
         .locals
@@ -1892,6 +2419,14 @@ fn infer_temp_types(
             IrInst::Call { dst, callee, .. } => {
                 if let Some(dst) = dst {
                     let ty = builtin_return_type(callee)
+                        .or_else(|| field_call_return_type(callee, inst, &temp_types, &local_types, struct_layouts))
+                        .or_else(|| {
+                            if struct_layouts.contains_key(callee) {
+                                Some(IrType::Struct(callee.to_string()))
+                            } else {
+                                None
+                            }
+                        })
                         .or_else(|| signatures.get(callee).map(|sig| sig.ret.clone()))
                         .ok_or_else(|| LlvmIrError {
                             message: format!("missing return type for call `{callee}`"),
@@ -1905,6 +2440,32 @@ fn infer_temp_types(
     Ok(temp_types)
 }
 
+fn field_call_return_type(
+    callee: &str,
+    inst: &IrInst,
+    temp_types: &HashMap<String, IrType>,
+    local_types: &HashMap<String, IrType>,
+    struct_layouts: &HashMap<String, Vec<(String, IrType)>>,
+) -> Option<IrType> {
+    let field_name = callee.strip_prefix("field.")?;
+    let IrInst::Call { args, .. } = inst else {
+        return None;
+    };
+    let base = args.iter().find(|arg| arg.name.as_deref() == Some("base"))?;
+    let base_ty = temp_types
+        .get(&base.value)
+        .or_else(|| local_types.get(&base.value))
+        .cloned()?;
+    let IrType::Struct(struct_name) = base_ty else {
+        return None;
+    };
+    struct_layouts
+        .get(&struct_name)?
+        .iter()
+        .find(|(name, _)| name == field_name)
+        .map(|(_, ty)| ty.clone())
+}
+
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
@@ -1912,6 +2473,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
+        "__rune_builtin_json_parse" => Some(IrType::Json),
+        "__rune_builtin_json_stringify"
+        | "__rune_builtin_json_kind"
+        | "__rune_builtin_json_to_string" => Some(IrType::String),
+        "__rune_builtin_json_is_null" | "__rune_builtin_json_to_bool" => Some(IrType::Bool),
+        "__rune_builtin_json_len" | "__rune_builtin_json_to_i64" => Some(IrType::I64),
+        "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
         | "__rune_builtin_system_exit"
@@ -1927,9 +2495,18 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"
+        | "__rune_builtin_network_tcp_listen"
+        | "__rune_builtin_network_tcp_send"
         | "__rune_builtin_network_tcp_connect_timeout"
+        | "__rune_builtin_network_udp_bind"
+        | "__rune_builtin_network_udp_send"
         | "__rune_builtin_fs_exists"
         | "__rune_builtin_fs_write_string"
+        | "__rune_builtin_fs_remove"
+        | "__rune_builtin_fs_rename"
+        | "__rune_builtin_fs_copy"
+        | "__rune_builtin_fs_create_dir"
+        | "__rune_builtin_fs_create_dir_all"
         | "__rune_builtin_audio_bell" => Some(IrType::Bool),
         "__rune_builtin_fs_read_string" => Some(IrType::String),
         _ => None,
@@ -1941,6 +2518,7 @@ fn type_ref_to_ir(ty: &TypeRef) -> Result<IrType, LlvmIrError> {
         "bool" => Ok(IrType::Bool),
         "i32" => Ok(IrType::I32),
         "i64" => Ok(IrType::I64),
+        "Json" => Ok(IrType::Json),
         "unit" => Ok(IrType::Unit),
         "dynamic" => Ok(IrType::Dynamic),
         "String" | "str" => Ok(IrType::String),
@@ -1967,6 +2545,7 @@ fn llvm_scalar_type(ty: &IrType) -> Result<&'static str, LlvmIrError> {
         IrType::Bool => Ok("i1"),
         IrType::I32 => Ok("i32"),
         IrType::I64 => Ok("i64"),
+        IrType::Json => Ok("i64"),
         IrType::Unit => Ok("void"),
         IrType::String | IrType::Dynamic | IrType::Struct(_) => Err(LlvmIrError {
             message: "non-scalar type is not yet supported in this LLVM IR position".into(),
@@ -1974,27 +2553,75 @@ fn llvm_scalar_type(ty: &IrType) -> Result<&'static str, LlvmIrError> {
     }
 }
 
-fn llvm_extern_type(ty: &IrType) -> Result<&'static str, LlvmIrError> {
+fn llvm_extern_type(
+    ty: &IrType,
+    struct_layouts: &HashMap<String, Vec<(String, IrType)>>,
+) -> Result<String, LlvmIrError> {
     match ty {
-        IrType::String => Ok("ptr"),
-        _ => llvm_scalar_type(ty),
+        IrType::String => Ok("ptr".into()),
+        IrType::Struct(_) => Err(LlvmIrError {
+            message: "extern struct ABI is not yet supported in the current LLVM IR backend"
+                .into(),
+        }),
+        _ => {
+            let _ = struct_layouts;
+            Ok(llvm_scalar_type(ty)?.into())
+        }
     }
 }
 
-fn llvm_internal_type(ty: &IrType) -> Result<&'static str, LlvmIrError> {
+fn llvm_internal_type(
+    ty: &IrType,
+    struct_layouts: &HashMap<String, Vec<(String, IrType)>>,
+) -> Result<String, LlvmIrError> {
     match ty {
-        IrType::String => Ok("{ ptr, i64 }"),
-        IrType::Dynamic => Ok("{ i64, i64, i64 }"),
-        _ => llvm_scalar_type(ty),
+        IrType::String => Ok("{ ptr, i64 }".into()),
+        IrType::Dynamic => Ok("{ i64, i64, i64 }".into()),
+        IrType::Struct(name) => llvm_struct_type(name, struct_layouts),
+        _ => Ok(llvm_scalar_type(ty)?.into()),
     }
 }
 
-fn llvm_function_return_type(sig: &FunctionSig) -> Result<&'static str, LlvmIrError> {
-    if matches!(sig.ret, IrType::String | IrType::Dynamic) && !sig.is_extern {
-        llvm_internal_type(&sig.ret)
+fn llvm_function_return_type(
+    sig: &FunctionSig,
+    struct_layouts: &HashMap<String, Vec<(String, IrType)>>,
+) -> Result<String, LlvmIrError> {
+    if matches!(sig.ret, IrType::String | IrType::Dynamic | IrType::Struct(_)) && !sig.is_extern {
+        llvm_internal_type(&sig.ret, struct_layouts)
     } else {
-        llvm_extern_type(&sig.ret)
+        llvm_extern_type(&sig.ret, struct_layouts)
     }
+}
+
+fn llvm_struct_type(
+    name: &str,
+    struct_layouts: &HashMap<String, Vec<(String, IrType)>>,
+) -> Result<String, LlvmIrError> {
+    let layout = struct_layouts.get(name).ok_or_else(|| LlvmIrError {
+        message: format!("missing struct layout for `{name}`"),
+    })?;
+    let mut parts = Vec::with_capacity(layout.len());
+    for (_, ty) in layout {
+        parts.push(llvm_internal_type(ty, struct_layouts)?);
+    }
+    Ok(format!("{{ {} }}", parts.join(", ")))
+}
+
+fn collect_struct_layouts(
+    program: &Program,
+) -> Result<HashMap<String, Vec<(String, IrType)>>, LlvmIrError> {
+    let mut layouts = HashMap::new();
+    for item in &program.items {
+        let Item::Struct(decl) = item else {
+            continue;
+        };
+        let mut fields = Vec::with_capacity(decl.fields.len());
+        for field in &decl.fields {
+            fields.push((field.name.clone(), type_ref_to_ir(&field.ty)?));
+        }
+        layouts.insert(decl.name.clone(), fields);
+    }
+    Ok(layouts)
 }
 
 fn llvm_string_bytes(value: &str) -> String {

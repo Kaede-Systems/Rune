@@ -1,0 +1,29 @@
+def parse(text: String) -> Json:
+    return __rune_builtin_json_parse(text)
+
+def stringify(value: Json) -> String:
+    return __rune_builtin_json_stringify(value)
+
+def kind(value: Json) -> String:
+    return __rune_builtin_json_kind(value)
+
+def is_null(value: Json) -> bool:
+    return __rune_builtin_json_is_null(value)
+
+def len(value: Json) -> i64:
+    return __rune_builtin_json_len(value)
+
+def get(value: Json, key: String) -> Json:
+    return __rune_builtin_json_get(value, key)
+
+def index(value: Json, at: i64) -> Json:
+    return __rune_builtin_json_index(value, at)
+
+def to_string(value: Json) -> String:
+    return __rune_builtin_json_to_string(value)
+
+def to_i64(value: Json) -> i64:
+    return __rune_builtin_json_to_i64(value)
+
+def to_bool(value: Json) -> bool:
+    return __rune_builtin_json_to_bool(value)

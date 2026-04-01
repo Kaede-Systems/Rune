@@ -32,6 +32,7 @@ pub struct ImportDecl {
 pub struct StructDecl {
     pub name: String,
     pub fields: Vec<StructField>,
+    pub methods: Vec<Function>,
     pub span: Span,
 }
 
@@ -268,37 +269,59 @@ impl Parser {
         match self.peek().kind {
             TokenKind::Import | TokenKind::From => Ok(Item::Import(self.parse_import()?)),
             TokenKind::Exception => Ok(Item::Exception(self.parse_exception()?)),
-            TokenKind::Struct => Ok(Item::Struct(self.parse_struct()?)),
+            TokenKind::Struct | TokenKind::Class => Ok(Item::Struct(self.parse_struct()?)),
             _ => Ok(Item::Function(self.parse_function()?)),
         }
     }
 
     fn parse_struct(&mut self) -> Result<StructDecl, ParseError> {
-        let span = self.expect_simple(TokenKind::Struct, "expected `struct`")?;
-        let (name, _) = self.expect_identifier("expected struct name")?;
-        self.expect_simple(TokenKind::Colon, "expected `:` after struct name")?;
+        let span = if self.match_simple(&TokenKind::Struct) || self.match_simple(&TokenKind::Class)
+        {
+            self.previous().span
+        } else {
+            return Err(ParseError {
+                message: "expected `struct` or `class`".to_string(),
+                span: self.peek().span,
+            });
+        };
+        let (name, _) = self.expect_identifier("expected class name")?;
+        self.expect_simple(TokenKind::Colon, "expected `:` after class name")?;
         self.expect_simple(
             TokenKind::Newline,
-            "expected newline after struct declaration",
+            "expected newline after class declaration",
         )?;
-        self.expect_simple(TokenKind::Indent, "expected indented struct body")?;
+        self.expect_simple(TokenKind::Indent, "expected indented class body")?;
 
         let mut fields = Vec::new();
+        let mut methods = Vec::new();
         while !self.check(&TokenKind::Dedent) && !self.at_end() {
-            let (field_name, field_span) = self.expect_identifier("expected struct field name")?;
-            self.expect_simple(TokenKind::Colon, "expected `:` after field name")?;
-            let ty = self.parse_type()?;
-            self.expect_simple(TokenKind::Newline, "expected newline after struct field")?;
-            fields.push(StructField {
-                name: field_name,
-                ty,
-                span: field_span,
-            });
+            if matches!(
+                self.peek().kind,
+                TokenKind::Def | TokenKind::Async | TokenKind::Extern
+            ) {
+                methods.push(self.parse_function()?);
+            } else {
+                let (field_name, field_span) =
+                    self.expect_identifier("expected class field name")?;
+                self.expect_simple(TokenKind::Colon, "expected `:` after field name")?;
+                let ty = self.parse_type()?;
+                self.expect_simple(TokenKind::Newline, "expected newline after class field")?;
+                fields.push(StructField {
+                    name: field_name,
+                    ty,
+                    span: field_span,
+                });
+            }
             self.skip_newlines();
         }
 
-        self.expect_simple(TokenKind::Dedent, "expected end of struct body")?;
-        Ok(StructDecl { name, fields, span })
+        self.expect_simple(TokenKind::Dedent, "expected end of class body")?;
+        Ok(StructDecl {
+            name,
+            fields,
+            methods,
+            span,
+        })
     }
 
     fn parse_exception(&mut self) -> Result<ExceptionDecl, ParseError> {

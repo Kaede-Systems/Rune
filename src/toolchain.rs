@@ -72,6 +72,50 @@ pub fn find_packaged_wasmtime() -> Option<PathBuf> {
     None
 }
 
+pub fn find_arduino_avr_gcc() -> Option<PathBuf> {
+    find_arduino_avr_tool(&["avr-gcc.exe", "avr-gcc"])
+}
+
+pub fn find_arduino_avr_gpp() -> Option<PathBuf> {
+    find_arduino_avr_tool(&["avr-g++.exe", "avr-g++", "avr-c++.exe", "avr-c++"])
+}
+
+pub fn find_arduino_avr_objcopy() -> Option<PathBuf> {
+    find_arduino_avr_tool(&["objcopy.exe", "avr-objcopy.exe", "objcopy", "avr-objcopy"])
+}
+
+pub fn find_arduino_avrdude() -> Option<PathBuf> {
+    for root in bundled_arduino_avr_roots() {
+        for file_name in ["avrdude.exe", "avrdude"] {
+            let candidate = root.join("avrdude").join("bin").join(file_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+pub fn find_arduino_avr_avrdude_conf() -> Option<PathBuf> {
+    for root in bundled_arduino_avr_roots() {
+        let candidate = root.join("avrdude").join("etc").join("avrdude.conf");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+pub fn find_arduino_avr_core_root() -> Option<PathBuf> {
+    for root in bundled_arduino_avr_roots() {
+        let candidate = root.join("arduino-core");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 pub fn detect_windows_dev_assets() -> Option<WindowsDevAssets> {
     let msvc_root = newest_child_dir_with_subdir(
         Path::new(r"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC"),
@@ -185,6 +229,33 @@ fn bundled_wasmtime_roots() -> Vec<PathBuf> {
     dedupe_paths(roots)
 }
 
+fn bundled_arduino_avr_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(exe_path) = std::env::current_exe().ok() {
+        if let Some(bin_dir) = exe_path.parent()
+            && let Some(prefix) = bin_dir.parent()
+        {
+            let installed_root = prefix.join("share").join("rune").join("tools").join("arduino-avr");
+            append_arduino_avr_roots(&mut roots, &installed_root);
+        }
+    }
+
+    if let Some(cwd) = std::env::current_dir().ok() {
+        for ancestor in cwd.ancestors() {
+            append_arduino_avr_roots(&mut roots, &ancestor.join("tools").join("arduino-avr"));
+        }
+    }
+
+    if let Some(exe_path) = std::env::current_exe().ok() {
+        for ancestor in exe_path.ancestors() {
+            append_arduino_avr_roots(&mut roots, &ancestor.join("tools").join("arduino-avr"));
+        }
+    }
+
+    dedupe_paths(roots)
+}
+
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut unique = Vec::new();
     for path in paths {
@@ -225,6 +296,30 @@ fn append_llvm_bundle_roots(roots: &mut Vec<PathBuf>, base_root: &Path, host_bun
 
     for bundle_dir in host_bundle_dirs {
         let candidate = base_root.join(bundle_dir);
+        if candidate.is_dir() {
+            roots.push(candidate);
+        }
+    }
+
+    roots.push(base_root.to_path_buf());
+}
+
+fn append_arduino_avr_roots(roots: &mut Vec<PathBuf>, base_root: &Path) {
+    if !base_root.is_dir() {
+        return;
+    }
+
+    let host_dir = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Some("windows-x64"),
+        ("linux", "x86_64") => Some("linux-x64"),
+        ("linux", "aarch64") => Some("linux-arm64"),
+        ("macos", "x86_64") => Some("macos-x64"),
+        ("macos", "aarch64") => Some("macos-arm64"),
+        _ => None,
+    };
+
+    if let Some(host_dir) = host_dir {
+        let candidate = base_root.join(host_dir);
         if candidate.is_dir() {
             roots.push(candidate);
         }
@@ -280,6 +375,24 @@ fn newest_child_dir(root: &Path) -> Option<PathBuf> {
         .collect::<Vec<_>>();
     dirs.sort();
     dirs.pop()
+}
+
+fn find_arduino_avr_tool(names: &[&str]) -> Option<PathBuf> {
+    for root in bundled_arduino_avr_roots() {
+        for bin_dir in [root.join("avr-gcc").join("bin"), root.join("avr-gcc").join("avr").join("bin")] {
+            if !bin_dir.is_dir() {
+                continue;
+            }
+            for name in names {
+                let candidate = bin_dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn newest_child_dir_with_subdir(root: &Path, required_subdir: &str) -> Option<PathBuf> {

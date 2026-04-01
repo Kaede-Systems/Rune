@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rune::build::{
     BuildError, BuildOptions, build_executable, build_executable_llvm,
-    build_executable_llvm_with_options, build_shared_library,
+    build_executable_llvm_with_options, build_object_file, build_shared_library,
     build_static_library, default_library_extension, supported_targets, target_spec,
 };
 
@@ -72,6 +72,21 @@ fn exposes_known_cross_targets() {
             .iter()
             .any(|target| target.triple == "wasm32-unknown-unknown")
     );
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.triple == "thumbv6m-none-eabi")
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.triple == "riscv32-unknown-elf")
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.triple == "avr-atmega328p-arduino-uno")
+    );
 }
 
 #[test]
@@ -95,6 +110,21 @@ fn resolves_target_specific_extensions() {
     assert_eq!(wasm.exe_extension, "wasm");
     assert_eq!(wasm.library_extension, "wasm");
     assert_eq!(wasm.static_library_extension, "a");
+    assert_eq!(wasm.object_extension, "o");
+
+    let embedded =
+        target_spec(Some("thumbv6m-none-eabi")).expect("embedded target should resolve");
+    assert_eq!(embedded.exe_extension, "");
+    assert_eq!(embedded.library_extension, "a");
+    assert_eq!(embedded.static_library_extension, "a");
+    assert_eq!(embedded.object_extension, "o");
+
+    let uno =
+        target_spec(Some("avr-atmega328p-arduino-uno")).expect("arduino uno target should resolve");
+    assert_eq!(uno.exe_extension, "hex");
+    assert_eq!(uno.library_extension, "a");
+    assert_eq!(uno.static_library_extension, "a");
+    assert_eq!(uno.object_extension, "o");
 }
 
 #[test]
@@ -403,6 +433,86 @@ fn builds_windows_static_library_via_packaged_llvm_archiver() {
 }
 
 #[test]
+fn builds_thumb_embedded_object_via_packaged_llvm_backend() {
+    let dir = temp_dir();
+    let source_path = dir.join("thumb_embedded.rn");
+    let output_path = dir.join("thumb_embedded.o");
+
+    fs::write(
+        &source_path,
+        "def add(a: i32, b: i32) -> i32:\n    return a + b\n",
+    )
+    .expect("failed to write source");
+
+    build_object_file(&source_path, &output_path, Some("thumbv6m-none-eabi"))
+        .expect("thumb embedded object build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read thumb embedded object");
+    assert!(!bytes.is_empty());
+}
+
+#[test]
+fn builds_riscv32_embedded_static_library_via_packaged_llvm_archiver() {
+    let dir = temp_dir();
+    let source_path = dir.join("riscv_embedded.rn");
+    let output_path = dir.join("riscv_embedded.a");
+
+    fs::write(
+        &source_path,
+        "def add(a: i32, b: i32) -> i32:\n    return a + b\n",
+    )
+    .expect("failed to write source");
+
+    build_static_library(&source_path, &output_path, Some("riscv32-unknown-elf"))
+        .expect("riscv embedded static library build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read riscv embedded static library");
+    assert!(bytes.starts_with(b"!<arch>\n"));
+}
+
+#[test]
+fn builds_arduino_uno_hex_via_packaged_avr_gcc() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_hello.rn");
+    let output_path = dir.join("arduino_uno_hello.hex");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    println(\"Hello from Rune\")\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno hex build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_hex_with_locals_and_control_flow() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_logic.rn");
+    let output_path = dir.join("arduino_uno_logic.hex");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    let value = 20 + 22\n    let ok = value == 42\n    if ok:\n        println(value)\n    let counter = 0\n    while counter < 2:\n        println(counter)\n        counter = counter + 1\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno logic hex build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno logic hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_and_runs_program_with_c_ffi_on_windows() {
     let _guard = build_lock()
         .lock()
@@ -443,6 +553,7 @@ fn builds_and_runs_program_with_c_ffi_on_windows() {
         link_libs: Vec::new(),
         link_args: vec![obj_path.display().to_string()],
         link_c_sources: Vec::new(),
+        ..BuildOptions::default()
     };
     build_executable_llvm_with_options(
         &source_path,
@@ -502,6 +613,7 @@ fn builds_and_runs_program_with_c_string_ffi_on_windows() {
         link_libs: Vec::new(),
         link_args: vec![obj_path.display().to_string()],
         link_c_sources: Vec::new(),
+        ..BuildOptions::default()
     };
     build_executable_llvm_with_options(
         &source_path,
@@ -567,6 +679,7 @@ fn builds_linux_program_with_c_string_ffi_via_llvm_backend() {
         link_libs: Vec::new(),
         link_args: vec![obj_path.display().to_string()],
         link_c_sources: Vec::new(),
+        ..BuildOptions::default()
     };
     assert_no_zig_linking_gap(build_executable_llvm_with_options(
         &source_path,
@@ -603,6 +716,7 @@ fn auto_compiles_c_source_for_linux_ffi_build() {
         link_libs: Vec::new(),
         link_args: Vec::new(),
         link_c_sources: vec![c_path],
+        ..BuildOptions::default()
     };
     assert_no_zig_linking_gap(build_executable_llvm_with_options(
         &source_path,
@@ -656,6 +770,7 @@ fn builds_macos_program_with_c_string_ffi_via_llvm_backend() {
         link_libs: Vec::new(),
         link_args: vec![obj_path.display().to_string()],
         link_c_sources: Vec::new(),
+        ..BuildOptions::default()
     };
     assert_no_zig_linking_gap(build_executable_llvm_with_options(
         &source_path,

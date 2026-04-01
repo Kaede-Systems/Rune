@@ -52,6 +52,7 @@ pub enum Type {
     Exception(String),
     I32,
     I64,
+    Json,
     String,
     Struct(String),
     Unit,
@@ -65,6 +66,7 @@ impl Type {
             "dynamic" => Ok(Type::Dynamic),
             "i32" => Ok(Type::I32),
             "i64" => Ok(Type::I64),
+            "Json" => Ok(Type::Json),
             "String" | "str" => Ok(Type::String),
             "unit" => Ok(Type::Unit),
             other => Ok(Type::Unknown(other.to_string())),
@@ -78,6 +80,7 @@ impl Type {
             Type::Exception(_) => "exception",
             Type::I32 => "i32",
             Type::I64 => "i64",
+            Type::Json => "Json",
             Type::String => "String",
             Type::Struct(_) => "struct",
             Type::Unit => "unit",
@@ -106,6 +109,7 @@ struct FunctionSig {
 #[derive(Debug, Clone)]
 struct StructSig {
     fields: HashMap<String, Type>,
+    methods: HashMap<String, FunctionSig>,
 }
 
 #[derive(Debug)]
@@ -153,30 +157,53 @@ impl<'a> Analyzer<'a> {
 
     fn check(mut self) -> Result<CheckedProgram, SemanticFailure> {
         self.collect_exception_declarations()?;
-        self.collect_struct_declarations()?;
+        self.collect_struct_shells()?;
         self.collect_function_signatures()?;
+        self.collect_struct_members()?;
 
         let mut checked = Vec::new();
         for item in &self.program.items {
-            let Item::Function(function) = item else {
-                continue;
-            };
-            self.check_function(function)
-                .map_err(|error| SemanticFailure {
-                    function_name: function.name.clone(),
-                    error,
-                })?;
-            let sig = self
-                .functions
-                .get(&function.name)
-                .expect("signature must exist");
-            checked.push(CheckedFunction {
-                name: function.name.clone(),
-                is_extern: function.is_extern,
-                is_async: sig.is_async,
-                return_type: sig.return_type.clone(),
-                raises: sig.raises.clone(),
-            });
+            match item {
+                Item::Function(function) => {
+                    self.check_function(function, &function.name)
+                        .map_err(|error| SemanticFailure {
+                            function_name: function.name.clone(),
+                            error,
+                        })?;
+                    let sig = self
+                        .functions
+                        .get(&function.name)
+                        .expect("signature must exist");
+                    checked.push(CheckedFunction {
+                        name: function.name.clone(),
+                        is_extern: function.is_extern,
+                        is_async: sig.is_async,
+                        return_type: sig.return_type.clone(),
+                        raises: sig.raises.clone(),
+                    });
+                }
+                Item::Struct(decl) => {
+                    for method in &decl.methods {
+                        let synthetic_name = struct_method_symbol(&decl.name, &method.name);
+                        self.check_function(method, &synthetic_name).map_err(|error| SemanticFailure {
+                            function_name: synthetic_name.clone(),
+                            error,
+                        })?;
+                        let sig = self
+                            .functions
+                            .get(&synthetic_name)
+                            .expect("method signature must exist");
+                        checked.push(CheckedFunction {
+                            name: synthetic_name,
+                            is_extern: method.is_extern,
+                            is_async: sig.is_async,
+                            return_type: sig.return_type.clone(),
+                            raises: sig.raises.clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
         }
 
         Ok(CheckedProgram { functions: checked })
@@ -184,34 +211,60 @@ impl<'a> Analyzer<'a> {
 
     fn check_all(mut self) -> Result<CheckedProgram, Vec<SemanticFailure>> {
         self.collect_exception_declarations().map_err(|error| vec![error])?;
-        self.collect_struct_declarations().map_err(|error| vec![error])?;
+        self.collect_struct_shells().map_err(|error| vec![error])?;
         self.collect_function_signatures().map_err(|error| vec![error])?;
+        self.collect_struct_members().map_err(|error| vec![error])?;
 
         let mut checked = Vec::new();
         let mut failures = Vec::new();
         for item in &self.program.items {
-            let Item::Function(function) = item else {
-                continue;
-            };
-
-            let function_errors = self.check_function_all(function);
-            if function_errors.is_empty() {
-                let sig = self
-                    .functions
-                    .get(&function.name)
-                    .expect("signature must exist");
-                checked.push(CheckedFunction {
-                    name: function.name.clone(),
-                    is_extern: function.is_extern,
-                    is_async: sig.is_async,
-                    return_type: sig.return_type.clone(),
-                    raises: sig.raises.clone(),
-                });
-            } else {
-                failures.extend(function_errors.into_iter().map(|error| SemanticFailure {
-                    function_name: function.name.clone(),
-                    error,
-                }));
+            match item {
+                Item::Function(function) => {
+                    let function_errors = self.check_function_all(function, &function.name);
+                    if function_errors.is_empty() {
+                        let sig = self
+                            .functions
+                            .get(&function.name)
+                            .expect("signature must exist");
+                        checked.push(CheckedFunction {
+                            name: function.name.clone(),
+                            is_extern: function.is_extern,
+                            is_async: sig.is_async,
+                            return_type: sig.return_type.clone(),
+                            raises: sig.raises.clone(),
+                        });
+                    } else {
+                        failures.extend(function_errors.into_iter().map(|error| SemanticFailure {
+                            function_name: function.name.clone(),
+                            error,
+                        }));
+                    }
+                }
+                Item::Struct(decl) => {
+                    for method in &decl.methods {
+                        let synthetic_name = struct_method_symbol(&decl.name, &method.name);
+                        let method_errors = self.check_function_all(method, &synthetic_name);
+                        if method_errors.is_empty() {
+                            let sig = self
+                                .functions
+                                .get(&synthetic_name)
+                                .expect("method signature must exist");
+                            checked.push(CheckedFunction {
+                                name: synthetic_name.clone(),
+                                is_extern: method.is_extern,
+                                is_async: sig.is_async,
+                                return_type: sig.return_type.clone(),
+                                raises: sig.raises.clone(),
+                            });
+                        } else {
+                            failures.extend(method_errors.into_iter().map(|error| SemanticFailure {
+                                function_name: synthetic_name.clone(),
+                                error,
+                            }));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -224,114 +277,26 @@ impl<'a> Analyzer<'a> {
 
     fn collect_function_signatures(&mut self) -> Result<(), SemanticFailure> {
         for item in &self.program.items {
-            let Item::Function(function) = item else {
-                continue;
-            };
-            if self.functions.contains_key(&function.name) {
-                return Err(SemanticFailure {
-                    function_name: function.name.clone(),
-                    error: SemanticError {
-                        message: format!("duplicate function `{}`", function.name),
-                        span: function.span,
-                    },
-                });
-            }
-
-            let params = function
-                .params
-                .iter()
-                .map(|param| {
-                    let ty = self.resolve_regular_type(&param.ty)?;
-                    Ok((param.name.clone(), ty))
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| SemanticFailure {
-                    function_name: function.name.clone(),
-                    error,
-                })?;
-            let return_type = match &function.return_type {
-                Some(ty) => self
-                    .resolve_regular_type(ty)
-                    .map_err(|error| SemanticFailure {
-                        function_name: function.name.clone(),
-                        error,
-                    })?,
-                None => Type::Unit,
-            };
-            let raises = match &function.raises {
-                Some(ty) => {
-                    Some(
-                        self.resolve_exception_type(ty)
-                            .map_err(|error| SemanticFailure {
-                                function_name: function.name.clone(),
-                                error,
-                            })?,
-                    )
+            match item {
+                Item::Function(function) => {
+                    self.insert_function_signature(function.name.clone(), function, None)?;
                 }
-                None => None,
-            };
-
-            if function.is_extern {
-                if function.is_async {
-                    return Err(SemanticFailure {
-                        function_name: function.name.clone(),
-                        error: SemanticError {
-                            message: "extern functions cannot be async".to_string(),
-                            span: function.span,
-                        },
-                    });
-                }
-                if raises.is_some() {
-                    return Err(SemanticFailure {
-                        function_name: function.name.clone(),
-                        error: SemanticError {
-                            message: "extern functions cannot declare `raises`".to_string(),
-                            span: function.span,
-                        },
-                    });
-                }
-                for (param_name, ty) in &params {
-                    if !is_supported_extern_ffi_type(ty) {
-                        return Err(SemanticFailure {
-                            function_name: function.name.clone(),
-                            error: SemanticError {
-                                message: format!(
-                                    "extern function parameter `{param_name}` in `{}` must use bool, i32, i64, String, or unit",
-                                    function.name
-                                ),
-                                span: function.span,
-                            },
-                        });
+                Item::Struct(decl) => {
+                    for method in &decl.methods {
+                        self.insert_function_signature(
+                            struct_method_symbol(&decl.name, &method.name),
+                            method,
+                            Some(decl),
+                        )?;
                     }
                 }
-                if !is_supported_extern_ffi_type(&return_type) {
-                    return Err(SemanticFailure {
-                        function_name: function.name.clone(),
-                        error: SemanticError {
-                            message: format!(
-                                "extern function `{}` must return bool, i32, i64, String, or unit",
-                                function.name
-                            ),
-                            span: function.span,
-                        },
-                    });
-                }
+                _ => {}
             }
-
-            self.functions.insert(
-                function.name.clone(),
-                FunctionSig {
-                    is_async: function.is_async,
-                    params,
-                    return_type,
-                    raises,
-                },
-            );
         }
         Ok(())
     }
 
-    fn collect_struct_declarations(&mut self) -> Result<(), SemanticFailure> {
+    fn collect_struct_shells(&mut self) -> Result<(), SemanticFailure> {
         for item in &self.program.items {
             let Item::Struct(decl) = item else {
                 continue;
@@ -348,10 +313,164 @@ impl<'a> Analyzer<'a> {
             self.structs.insert(
                 decl.name.clone(),
                 StructSig {
-                    fields: self.collect_struct_fields(decl)?,
+                    fields: HashMap::new(),
+                    methods: HashMap::new(),
                 },
             );
         }
+        Ok(())
+    }
+
+    fn collect_struct_members(&mut self) -> Result<(), SemanticFailure> {
+        for item in &self.program.items {
+            let Item::Struct(decl) = item else {
+                continue;
+            };
+            let fields = self.collect_struct_fields(decl)?;
+            let methods = self.collect_struct_methods(decl)?;
+            let sig = self.structs.get_mut(&decl.name).expect("struct should exist");
+            sig.fields = fields;
+            sig.methods = methods;
+        }
+        Ok(())
+    }
+
+    fn insert_function_signature(
+        &mut self,
+        registered_name: String,
+        function: &Function,
+        method_owner: Option<&StructDecl>,
+    ) -> Result<(), SemanticFailure> {
+        if self.functions.contains_key(&registered_name) {
+            return Err(SemanticFailure {
+                function_name: registered_name.clone(),
+                error: SemanticError {
+                    message: format!("duplicate function `{registered_name}`"),
+                    span: function.span,
+                },
+            });
+        }
+
+        let params = function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| {
+                let ty = if let Some(owner) = method_owner {
+                    if index == 0 && param.name == "self" {
+                        Type::Struct(owner.name.clone())
+                    } else {
+                        self.resolve_regular_type(&param.ty)?
+                    }
+                } else {
+                    self.resolve_regular_type(&param.ty)?
+                };
+                Ok((param.name.clone(), ty))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| SemanticFailure {
+                function_name: registered_name.clone(),
+                error,
+            })?;
+
+        if method_owner.is_some() {
+            if params.is_empty() || params[0].0 != "self" {
+                return Err(SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error: SemanticError {
+                        message: "class methods must declare `self` as their first parameter"
+                            .to_string(),
+                        span: function.span,
+                    },
+                });
+            }
+            if function.is_extern {
+                return Err(SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error: SemanticError {
+                        message: "class methods cannot be extern".to_string(),
+                        span: function.span,
+                    },
+                });
+            }
+        }
+
+        let return_type = match &function.return_type {
+            Some(ty) => self
+                .resolve_regular_type(ty)
+                .map_err(|error| SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error,
+                })?,
+            None => Type::Unit,
+        };
+        let raises = match &function.raises {
+            Some(ty) => Some(
+                self.resolve_exception_type(ty)
+                    .map_err(|error| SemanticFailure {
+                        function_name: registered_name.clone(),
+                        error,
+                    })?,
+            ),
+            None => None,
+        };
+
+        if function.is_extern {
+            if function.is_async {
+                return Err(SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error: SemanticError {
+                        message: "extern functions cannot be async".to_string(),
+                        span: function.span,
+                    },
+                });
+            }
+            if raises.is_some() {
+                return Err(SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error: SemanticError {
+                        message: "extern functions cannot declare `raises`".to_string(),
+                        span: function.span,
+                    },
+                });
+            }
+            for (param_name, ty) in &params {
+                if !is_supported_extern_ffi_type(ty) {
+                    return Err(SemanticFailure {
+                        function_name: registered_name.clone(),
+                        error: SemanticError {
+                            message: format!(
+                                "extern function parameter `{param_name}` in `{}` must use bool, i32, i64, String, or unit",
+                                function.name
+                            ),
+                            span: function.span,
+                        },
+                    });
+                }
+            }
+            if !is_supported_extern_ffi_type(&return_type) {
+                return Err(SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error: SemanticError {
+                        message: format!(
+                            "extern function `{}` must return bool, i32, i64, String, or unit",
+                            function.name
+                        ),
+                        span: function.span,
+                    },
+                });
+            }
+        }
+
+        self.functions.insert(
+            registered_name,
+            FunctionSig {
+                is_async: function.is_async,
+                params,
+                return_type,
+                raises,
+            },
+        );
         Ok(())
     }
 
@@ -395,6 +514,43 @@ impl<'a> Analyzer<'a> {
         Ok(fields)
     }
 
+    fn collect_struct_methods(
+        &self,
+        decl: &StructDecl,
+    ) -> Result<HashMap<String, FunctionSig>, SemanticFailure> {
+        let mut methods = HashMap::new();
+        for method in &decl.methods {
+            let registered_name = struct_method_symbol(&decl.name, &method.name);
+            let sig = self
+                .functions
+                .get(&registered_name)
+                .cloned()
+                .ok_or_else(|| SemanticFailure {
+                    function_name: registered_name.clone(),
+                    error: SemanticError {
+                        message: format!(
+                            "missing method signature for `{}.{}`",
+                            decl.name, method.name
+                        ),
+                        span: method.span,
+                    },
+                })?;
+            if methods.insert(method.name.clone(), sig).is_some() {
+                return Err(SemanticFailure {
+                    function_name: registered_name,
+                    error: SemanticError {
+                        message: format!(
+                            "duplicate method `{}` in class `{}`",
+                            method.name, decl.name
+                        ),
+                        span: method.span,
+                    },
+                });
+            }
+        }
+        Ok(methods)
+    }
+
     fn collect_exception_declarations(&mut self) -> Result<(), SemanticFailure> {
         for item in &self.program.items {
             let Item::Exception(exception) = item else {
@@ -413,13 +569,13 @@ impl<'a> Analyzer<'a> {
         Ok(())
     }
 
-    fn check_function(&self, function: &Function) -> Result<(), SemanticError> {
+    fn check_function(&self, function: &Function, registered_name: &str) -> Result<(), SemanticError> {
         if function.is_extern {
             return Ok(());
         }
         let sig = self
             .functions
-            .get(&function.name)
+            .get(registered_name)
             .expect("function signature should exist");
 
         let mut scope = Scope::default();
@@ -441,14 +597,14 @@ impl<'a> Analyzer<'a> {
         )
     }
 
-    fn check_function_all(&self, function: &Function) -> Vec<SemanticError> {
+    fn check_function_all(&self, function: &Function, registered_name: &str) -> Vec<SemanticError> {
         if function.is_extern {
             return Vec::new();
         }
 
         let sig = self
             .functions
-            .get(&function.name)
+            .get(registered_name)
             .expect("function signature should exist");
         let mut scope = Scope::default();
         let mut errors = Vec::new();
@@ -980,7 +1136,7 @@ impl<'a> Analyzer<'a> {
                 }
             }
             BinaryOp::EqualEqual | BinaryOp::NotEqual => {
-                if left == right || self.is_integer_pair(left, right) {
+                if *left == *right || self.is_integer_pair(left, right) {
                     Ok(Type::Bool)
                 } else if self.is_dynamic_equality_supported(left, right) {
                     Ok(Type::Bool)
@@ -1025,6 +1181,30 @@ impl<'a> Analyzer<'a> {
         span: Span,
     ) -> Result<Type, SemanticError> {
         match &callee.kind {
+            ExprKind::Field { base, name } => {
+                let base_ty = self.check_expr(base, scope, in_async)?;
+                let Type::Struct(struct_name) = base_ty else {
+                    return Err(SemanticError {
+                        message: "methods can only be called on class or struct values".to_string(),
+                        span: callee.span,
+                    });
+                };
+                let struct_sig = self.structs.get(&struct_name).ok_or_else(|| SemanticError {
+                    message: format!("unknown struct `{struct_name}`"),
+                    span: callee.span,
+                })?;
+                let method_sig = struct_sig.methods.get(name).ok_or_else(|| SemanticError {
+                    message: format!("class `{struct_name}` has no method `{name}`"),
+                    span: callee.span,
+                })?;
+                let remaining_params = method_sig.params.get(1..).unwrap_or(&[]);
+                let resolved = self.resolve_call_args(name, remaining_params, args, span)?;
+                for ((_, expected), arg) in remaining_params.iter().zip(resolved.iter()) {
+                    let actual = self.check_expr(arg, scope, in_async)?;
+                    self.expect_type(&actual, expected, arg.span, "method argument")?;
+                }
+                Ok(method_sig.return_type.clone())
+            }
             ExprKind::Identifier(name) => match name.as_str() {
                 "print" | "println" | "eprint" | "eprintln" => {
                     for arg in args {
@@ -1078,13 +1258,18 @@ impl<'a> Analyzer<'a> {
                     let actual = self.check_expr(expr, scope, in_async)?;
                     if matches!(
                         actual,
-                        Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::String
+                        Type::Bool
+                            | Type::Dynamic
+                            | Type::I32
+                            | Type::I64
+                            | Type::Json
+                            | Type::String
                     ) {
                         Ok(Type::String)
                     } else {
                         Err(SemanticError {
                             message: format!(
-                                "`str` expects a bool, integer, string, or dynamic value, found `{}`",
+                                "`str` expects a bool, integer, Json, string, or dynamic value, found `{}`",
                                 actual.name()
                             ),
                             span: expr.span,
@@ -1107,13 +1292,18 @@ impl<'a> Analyzer<'a> {
                     let actual = self.check_expr(expr, scope, in_async)?;
                     if matches!(
                         actual,
-                        Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::String
+                        Type::Bool
+                            | Type::Dynamic
+                            | Type::I32
+                            | Type::I64
+                            | Type::Json
+                            | Type::String
                     ) {
                         Ok(Type::I64)
                     } else {
                         Err(SemanticError {
                             message: format!(
-                                "`int` expects a bool, integer, string, or dynamic value, found `{}`",
+                                "`int` expects a bool, integer, Json, string, or dynamic value, found `{}`",
                                 actual.name()
                             ),
                             span: expr.span,
@@ -1393,6 +1583,55 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&port_ty, &Type::I32, port_expr.span, "TCP port")?;
                     Ok(Type::Bool)
                 }
+                "__rune_builtin_network_tcp_listen" | "__rune_builtin_network_udp_bind" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 2 arguments"),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "network host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "network port")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_network_tcp_send" | "__rune_builtin_network_udp_send" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 3 arguments"),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                        CallArg::Positional(data_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "network host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "network port")?;
+                    let data_ty = self.check_expr(data_expr, scope, in_async)?;
+                    self.expect_type(&data_ty, &Type::String, data_expr.span, "network data")?;
+                    Ok(Type::Bool)
+                }
                 "__rune_builtin_network_tcp_connect_timeout" => {
                     if args.len() != 3 {
                         return Err(SemanticError {
@@ -1489,6 +1728,248 @@ impl<'a> Analyzer<'a> {
                         content_expr.span,
                         "filesystem content",
                     )?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_fs_remove"
+                | "__rune_builtin_fs_create_dir"
+                | "__rune_builtin_fs_create_dir_all" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 1 argument"),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(path_expr)] = args else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let path_ty = self.check_expr(path_expr, scope, in_async)?;
+                    self.expect_type(&path_ty, &Type::String, path_expr.span, "filesystem path")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_fs_rename" | "__rune_builtin_fs_copy" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 2 arguments"),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(from_expr),
+                        CallArg::Positional(to_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let from_ty = self.check_expr(from_expr, scope, in_async)?;
+                    self.expect_type(&from_ty, &Type::String, from_expr.span, "filesystem source path")?;
+                    let to_ty = self.check_expr(to_expr, scope, in_async)?;
+                    self.expect_type(&to_ty, &Type::String, to_expr.span, "filesystem destination path")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_json_parse" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_parse` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(source_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_parse` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let source_ty = self.check_expr(source_expr, scope, in_async)?;
+                    self.expect_type(&source_ty, &Type::String, source_expr.span, "JSON source")?;
+                    Ok(Type::Json)
+                }
+                "__rune_builtin_json_stringify" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_stringify` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_stringify` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_json_kind" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_kind` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_kind` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_json_is_null" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_is_null` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_is_null` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_json_len" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_len` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_len` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_json_get" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_get` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr), CallArg::Positional(key_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_get` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    let key_ty = self.check_expr(key_expr, scope, in_async)?;
+                    self.expect_type(&key_ty, &Type::String, key_expr.span, "Json object key")?;
+                    Ok(Type::Json)
+                }
+                "__rune_builtin_json_index" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_index` expects 2 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr), CallArg::Positional(index_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_index` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    let index_ty = self.check_expr(index_expr, scope, in_async)?;
+                    self.expect_type(&index_ty, &Type::I64, index_expr.span, "Json array index")?;
+                    Ok(Type::Json)
+                }
+                "__rune_builtin_json_to_string" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_to_string` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_to_string` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_json_to_i64" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_to_i64` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_to_i64` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_json_to_bool" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_json_to_bool` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(json_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_json_to_bool` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let json_ty = self.check_expr(json_expr, scope, in_async)?;
+                    self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
                     Ok(Type::Bool)
                 }
                 "__rune_builtin_terminal_clear" => {
@@ -1672,7 +2153,7 @@ impl<'a> Analyzer<'a> {
         let supported = |ty: &Type| {
             matches!(
                 ty,
-                Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::String
+                Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::Json | Type::String
             )
         };
         supported(left) && supported(right) && (*left == Type::Dynamic || *right == Type::Dynamic)
@@ -1682,7 +2163,7 @@ impl<'a> Analyzer<'a> {
         let supported = |ty: &Type| {
             matches!(
                 ty,
-                Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::String
+                Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::Json | Type::String
             )
         };
         supported(left) && supported(right) && (*left == Type::Dynamic || *right == Type::Dynamic)
@@ -1690,13 +2171,13 @@ impl<'a> Analyzer<'a> {
 
     fn is_dynamic_ordering_supported(&self, left: &Type, right: &Type) -> bool {
         let supported =
-            |ty: &Type| matches!(ty, Type::Bool | Type::Dynamic | Type::I32 | Type::I64);
+            |ty: &Type| matches!(ty, Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::Json);
         supported(left) && supported(right) && (*left == Type::Dynamic || *right == Type::Dynamic)
     }
 
     fn is_dynamic_numeric_supported(&self, left: &Type, right: &Type) -> bool {
         let supported =
-            |ty: &Type| matches!(ty, Type::Bool | Type::Dynamic | Type::I32 | Type::I64);
+            |ty: &Type| matches!(ty, Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::Json);
         supported(left) && supported(right) && (*left == Type::Dynamic || *right == Type::Dynamic)
     }
 
@@ -1825,10 +2306,29 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_env_get_bool" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_env_arg_count" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_connect" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_listen" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_send" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_connect_timeout" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_udp_bind" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_udp_send" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_exists" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_read_string" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_write_string" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_remove" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_rename" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_copy" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_create_dir" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_create_dir_all" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_parse" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_stringify" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_kind" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_is_null" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_len" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_get" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_index" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_to_string" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_to_i64" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_json_to_bool" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_clear" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_move_to" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_hide_cursor" => Some(Type::Unknown("builtin".to_string())),
@@ -1842,4 +2342,8 @@ fn builtin_function_type(name: &str) -> Option<Type> {
 #[derive(Debug, Clone, Default)]
 struct Scope {
     values: HashMap<String, Type>,
+}
+
+fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {
+    format!("{struct_name}__{method_name}")
 }

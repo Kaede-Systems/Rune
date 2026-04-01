@@ -4,6 +4,41 @@ This document lists the Rune standard library modules that are implemented today
 
 These modules live in [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib).
 
+## `json`
+
+```rune
+from json import parse, stringify, kind, is_null, len, get, index
+from json import to_string, to_i64, to_bool
+```
+
+Exports:
+
+- `parse(text: String) -> Json`
+- `stringify(value: Json) -> String`
+- `kind(value: Json) -> String`
+- `is_null(value: Json) -> bool`
+- `len(value: Json) -> i64`
+- `get(value: Json, key: String) -> Json`
+- `index(value: Json, at: i64) -> Json`
+- `to_string(value: Json) -> String`
+- `to_i64(value: Json) -> i64`
+- `to_bool(value: Json) -> bool`
+
+Current implemented JSON scope:
+
+- parsing validated JSON text into a first-class `Json` value
+- stringifying full JSON values
+- object field lookup
+- array indexing
+- null checks
+- container length
+- scalar conversion to `String`, `i64`, and `bool`
+
+Current JSON limitations:
+
+- direct `Json == Json` and `Json != Json` are implemented as structural comparisons
+- JSON values are runtime-backed, not native arrays/maps in the language type system yet
+
 ## `io`
 
 ```rune
@@ -78,6 +113,7 @@ Exports:
 ```rune
 from network import tcp_connect, tcp_connect_timeout
 from network import tcp_probe, tcp_probe_timeout
+from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 ```
 
 Exports:
@@ -86,16 +122,23 @@ Exports:
 - `tcp_connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
 - `tcp_probe(host: String, port: i32) -> bool`
 - `tcp_probe_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
+- `tcp_listen(host: String, port: i32) -> bool`
+- `tcp_bind(host: String, port: i32) -> bool`
+- `udp_bind(host: String, port: i32) -> bool`
+- `tcp_send(host: String, port: i32, data: String) -> bool`
+- `udp_send(host: String, port: i32, data: String) -> bool`
 
 Current implemented network scope:
 
 - TCP client connectivity probes
 - timeout-aware TCP probe
+- TCP bind/listen availability checks
+- UDP bind availability checks
 
 Not implemented in this module yet:
 
-- TCP server sockets
-- UDP
+- TCP server accept/send/receive
+- UDP send/receive
 - HTTP
 - WebSocket
 
@@ -103,6 +146,8 @@ Not implemented in this module yet:
 
 ```rune
 from fs import exists, read_string, read_text, write_string, write_text
+from fs import remove, remove_file, rename, copy
+from fs import create_dir, create_dir_all, mkdir, mkdirs
 ```
 
 Exports:
@@ -112,18 +157,29 @@ Exports:
 - `read_text(path: String) -> String`
 - `write_string(path: String, content: String) -> bool`
 - `write_text(path: String, content: String) -> bool`
+- `remove(path: String) -> bool`
+- `remove_file(path: String) -> bool`
+- `rename(from_path: String, to_path: String) -> bool`
+- `copy(from_path: String, to_path: String) -> bool`
+- `create_dir(path: String) -> bool`
+- `mkdir(path: String) -> bool`
+- `create_dir_all(path: String) -> bool`
+- `mkdirs(path: String) -> bool`
 
 Current implemented filesystem scope:
 
 - existence checks
 - reading UTF-8 text files
 - writing UTF-8 text files
+- removing files or directories
+- renaming files or directories
+- copying files
+- creating directories recursively or non-recursively
 
 Not implemented in this module yet:
 
 - directory walking
-- file deletion
-- rename/copy
+- directory listing
 
 ## `terminal`
 

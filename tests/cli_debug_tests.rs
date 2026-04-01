@@ -34,7 +34,7 @@ fn debug_command_emits_pipeline_and_runs_program() {
     assert!(stdout.contains("== IR =="));
     assert!(stdout.contains("fn main:"));
     assert!(stdout.contains("== ASM =="));
-    assert!(stdout.contains(".globl main"));
+    assert!(stdout.contains("main:"));
     assert!(stdout.contains("== Build =="));
     assert!(stdout.contains("debug_demo.debug.exe"));
     assert!(stdout.contains("== Run stdout =="));

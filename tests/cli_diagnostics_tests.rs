@@ -67,7 +67,7 @@ fn codegen_errors_include_file_line_and_caret() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("async functions are not supported by the current native backend"));
+    assert!(stderr.contains("async functions are not supported by the current LLVM IR backend"));
     assert!(stderr.contains("bad_codegen.rn:1:"));
     assert!(stderr.contains("1 | async def main() -> i32:"));
     assert!(stderr.contains("^"));

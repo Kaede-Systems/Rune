@@ -9,3 +9,18 @@ def tcp_probe(host: String, port: i32) -> bool:
 
 def tcp_probe_timeout(host: String, port: i32, timeout_ms: i32) -> bool:
     return tcp_connect_timeout(host, port, timeout_ms)
+
+def tcp_listen(host: String, port: i32) -> bool:
+    return __rune_builtin_network_tcp_listen(host, port)
+
+def tcp_bind(host: String, port: i32) -> bool:
+    return tcp_listen(host, port)
+
+def udp_bind(host: String, port: i32) -> bool:
+    return __rune_builtin_network_udp_bind(host, port)
+
+def tcp_send(host: String, port: i32, data: String) -> bool:
+    return __rune_builtin_network_tcp_send(host, port, data)
+
+def udp_send(host: String, port: i32, data: String) -> bool:
+    return __rune_builtin_network_udp_send(host, port, data)

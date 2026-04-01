@@ -31,6 +31,8 @@ Rune is aiming at:
 - OOP and richer type-system work over time
 - cross-target native builds
 - WASM and WASI support
+- freestanding embedded object/static-library output for supported LLVM targets
+- packaged Arduino Uno AVR builds for the current embedded slice using the packaged Arduino AVR core and AVR GCC/G++
 
 ## What Works Now
 
@@ -40,9 +42,8 @@ Rune is aiming at:
 - `rune parse`
 - `rune check`
 - `rune emit-ir`
-- `rune emit-asm`
+- `rune emit-asm` (LLVM-backed assembly emission)
 - `rune emit-llvm-ir`
-- `rune emit-llvm-asm`
 - `rune debug`
 
 ### Backends
@@ -106,10 +107,10 @@ Emit LLVM IR:
 cargo run -- emit-llvm-ir calculator.rn
 ```
 
-Emit LLVM assembly:
+Emit target assembly:
 
 ```powershell
-cargo run -- emit-llvm-asm calculator.rn --target x86_64-unknown-linux-gnu
+cargo run -- emit-asm calculator.rn --target x86_64-unknown-linux-gnu
 ```
 
 Build WASI and run it through packaged Wasmtime:
@@ -117,6 +118,18 @@ Build WASI and run it through packaged Wasmtime:
 ```powershell
 cargo run -- build calculator.rn --target wasm32-wasip1 -o calculator_wasi.wasm
 cargo run -- run-wasm calculator_wasi.wasm --host wasmtime
+```
+
+Build Arduino Uno firmware (`.hex`) through the packaged Arduino AVR core and AVR toolchain:
+
+```powershell
+cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-uno -o hello_arduino.hex
+```
+
+Build and flash to a serial port:
+
+```powershell
+cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o hello_arduino.hex
 ```
 
 ## Main Commands
@@ -128,10 +141,9 @@ rune check file.rn
 rune emit-ir file.rn
 rune emit-asm file.rn
 rune emit-llvm-ir file.rn
-rune emit-llvm-asm file.rn [--target <triple>]
 rune emit-c-header file.rn -o file.h
 rune build file.rn
-rune build-llvm file.rn
+rune build file.rn --object --target thumbv6m-none-eabi -o firmware.o
 rune build file.rn --target <triple> -o output
 rune build file.rn --lib -o library
 rune build file.rn --static-lib -o library
@@ -146,6 +158,14 @@ rune toolchain
 ## Toolchain
 
 Rune now uses packaged LLVM/LLD tooling. Zig is not part of the live build path anymore.
+
+For embedded targets, Rune currently supports freestanding object/static-library output on the packaged LLVM targets that really exist in this repo today:
+
+- `thumbv6m-none-eabi`
+- `thumbv7em-none-eabihf`
+- `riscv32-unknown-elf`
+
+Arduino Uno is implemented through the packaged Arduino AVR core plus AVR GCC/G++/objcopy/avrdude toolchain path. Xtensa ESP32 is not claimed as implemented yet.
 
 The current toolchain state is documented in:
 

@@ -245,10 +245,10 @@ fn wasm_build_runs_stdlib_builtin_program_in_node() {
     assert!(lines[0].parse::<i32>().unwrap_or_default() > 0);
     assert!(lines[1].parse::<i32>().unwrap_or_default() >= 1);
     assert_eq!(lines[2], "2");
-    assert_eq!(lines[3], "1");
+    assert_eq!(lines[3], "true");
     assert_eq!(lines[4], "9091");
-    assert_eq!(lines[5], "1");
-    assert_eq!(lines[6], "0");
+    assert_eq!(lines[5], "true");
+    assert_eq!(lines[6], "false");
 }
 
 #[test]
@@ -296,10 +296,10 @@ fn wasi_build_runs_stdlib_builtin_program_in_packaged_wasmtime() {
     assert!(lines[0].parse::<i32>().unwrap_or_default() > 0);
     assert!(lines[1].parse::<i32>().unwrap_or_default() >= 1);
     assert_eq!(lines[2], "2");
-    assert_eq!(lines[3], "1");
+    assert_eq!(lines[3], "true");
     assert_eq!(lines[4], "9091");
-    assert_eq!(lines[5], "1");
-    assert_eq!(lines[6], "0");
+    assert_eq!(lines[5], "true");
+    assert_eq!(lines[6], "false");
 }
 
 #[test]
@@ -349,8 +349,8 @@ fn wasm_build_runs_fs_terminal_and_audio_program_in_node() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    assert!(stdout.contains("0\n1\nhello wasm\n"), "unexpected stdout: {stdout}");
-    assert!(stdout.contains("1\n"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("false\ntrue\nhello wasm\n"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("true\n"), "unexpected stdout: {stdout}");
     let file_contents = fs::read_to_string(&file_path).expect("node wasm should write file");
     assert_eq!(file_contents, "hello wasm");
 }
@@ -385,8 +385,8 @@ fn wasi_build_runs_fs_terminal_and_audio_program_in_packaged_wasmtime() {
 
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    assert!(stdout.contains("0\n1\nhello wasi\n"), "unexpected stdout: {stdout}");
-    assert!(stdout.contains("1\n"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("false\ntrue\nhello wasi\n"), "unexpected stdout: {stdout}");
+    assert!(stdout.contains("true\n"), "unexpected stdout: {stdout}");
     let file_contents = fs::read_to_string(dir.join("note.txt")).expect("wasi should write file");
     assert_eq!(file_contents, "hello wasi");
 }

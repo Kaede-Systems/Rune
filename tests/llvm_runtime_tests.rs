@@ -63,6 +63,32 @@ fn llvm_backend_builds_and_runs_input_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_bool_output_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_bool_output_demo.rn");
+    let exe_path = dir.join("llvm_bool_output_demo.exe");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    println(true)\n    eprintln(false)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm bool output program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\n");
+    assert_eq!(stderr, "false\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_panic_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_panic_demo.rn");
@@ -131,4 +157,134 @@ fn llvm_backend_builds_and_runs_string_int_program_on_windows() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "123\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_json_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_json_demo.rn");
+    let exe_path = dir.join("llvm_json_demo.exe");
+
+    fs::write(
+        &source_path,
+        r#"from json import parse, get, index, to_string, to_i64, to_bool, kind
+
+def main() -> i32:
+    let doc: Json = parse("{\"name\":\"Rune\",\"nums\":[40,41,42],\"ok\":true}")
+    let left: Json = parse("{\"a\":1,\"b\":[2,3]}")
+    let right: Json = parse("{\"b\":[2,3],\"a\":1}")
+    println(kind(doc))
+    println(to_string(get(doc, "name")))
+    println(to_i64(index(get(doc, "nums"), 2)))
+    println(str(to_bool(get(doc, "ok"))))
+    println(str(left == right))
+    println(str(left != parse("{\"a\":1,\"b\":[2,4]}")))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm json program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built json executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "object\nRune\n42\ntrue\ntrue\ntrue\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_fs_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_fs_demo.rn");
+    let exe_path = dir.join("llvm_fs_demo.exe");
+    let file_path = dir.join("llvm_note.txt");
+    let rune_file_path = file_path.display().to_string().replace('\\', "/");
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from fs import write_string, read_string, copy, rename, remove
+
+def main() -> i32:
+    println(write_string("{0}", "llvm fs"))
+    println(read_string("{0}"))
+    println(copy("{0}", "{0}.copy"))
+    println(rename("{0}.copy", "{0}.moved"))
+    println(remove("{0}.moved"))
+    return 0
+"#,
+            rune_file_path
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm fs program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built fs executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\nllvm fs\ntrue\ntrue\ntrue\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_class_method_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_method_demo.rn");
+    let exe_path = dir.join("llvm_class_method_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Point:\n    x: i32\n    y: i32\n    def sum(self) -> i32:\n        return self.x + self.y\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    println(point.sum())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm class method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built class method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "42\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_network_send_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_send_demo.rn");
+    let exe_path = dir.join("llvm_network_send_demo.exe");
+
+    fs::write(
+        &source_path,
+        r#"from network import tcp_send, udp_send
+
+def main() -> i32:
+    println(tcp_send("127.0.0.1", 65535, "hello"))
+    println(udp_send("127.0.0.1", 9, "ping"))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm network send program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built network send executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\ntrue\n");
 }

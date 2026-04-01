@@ -147,6 +147,7 @@ enum ScalarKind {
     Bool,
     I32,
     I64,
+    Json,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +176,7 @@ const DYNAMIC_TAG_BOOL: i64 = 1;
 const DYNAMIC_TAG_I32: i64 = 2;
 const DYNAMIC_TAG_I64: i64 = 3;
 const DYNAMIC_TAG_STRING: i64 = 4;
+const DYNAMIC_TAG_JSON: i64 = 5;
 const DYNAMIC_CMP_EQ: i64 = 0;
 const DYNAMIC_CMP_NE: i64 = 1;
 const DYNAMIC_CMP_GT: i64 = 2;
@@ -188,6 +190,7 @@ impl AbiType {
             IrType::Bool => Ok(Self::Scalar(ScalarKind::Bool)),
             IrType::I32 => Ok(Self::Scalar(ScalarKind::I32)),
             IrType::I64 => Ok(Self::Scalar(ScalarKind::I64)),
+            IrType::Json => Ok(Self::Scalar(ScalarKind::Json)),
             IrType::String => Ok(Self::String),
             IrType::Dynamic => Ok(Self::Dynamic),
             IrType::Struct(name) => Ok(Self::Struct(name.clone())),
@@ -220,6 +223,10 @@ impl LocalBinding {
                 kind: ScalarKind::I64,
                 ..
             } => IrType::I64,
+            LocalBinding::Scalar {
+                kind: ScalarKind::Json,
+                ..
+            } => IrType::Json,
             LocalBinding::String { .. } => IrType::String,
             LocalBinding::Dynamic { .. } => IrType::Dynamic,
             LocalBinding::Struct { name, .. } => IrType::Struct(name.clone()),
@@ -260,91 +267,53 @@ impl<'a> Generator<'a> {
 
     fn emit(&mut self) -> Result<String, CodegenFailure> {
         for item in &self.program.items {
-            let Item::Function(function) = item else {
-                continue;
-            };
-            if function.is_async {
-                return Err(CodegenFailure {
-                    function_name: function.name.clone(),
-                    error: CodegenError {
-                        message: "async functions are not supported by the current native backend"
-                            .into(),
-                        span: function.span,
-                    },
-                });
-            }
-            let return_ty = type_ref_to_ir_type(function.return_type.as_ref());
-            if function.name == "main" && return_ty == IrType::Dynamic {
-                return Err(CodegenFailure {
-                    function_name: function.name.clone(),
-                    error: CodegenError {
-                        message: "dynamic return values are not yet supported for `main` in the native backend"
-                            .into(),
-                        span: function.span,
-                    },
-                });
-            }
-            if function.name == "main" && return_ty == IrType::String {
-                return Err(CodegenFailure {
-                    function_name: function.name.clone(),
-                    error: CodegenError {
-                        message:
-                            "string return values are not yet supported for `main` in the native backend"
-                                .into(),
-                        span: function.span,
-                    },
-                });
-            }
-            self.function_names.insert(function.name.clone());
-            if function.is_extern {
-                self.extern_functions.insert(function.name.clone());
-            }
-            self.function_returns
-                .insert(function.name.clone(), return_ty.clone());
-            let param_types = function
-                .params
-                .iter()
-                .map(|param| {
-                    let ty = self
-                        .function_locals
-                        .get(&function.name)
-                        .and_then(|locals| locals.get(&param.name))
-                        .cloned()
-                        .unwrap_or_else(|| type_ref_to_ir_type(Some(&param.ty)));
-                    let abi = if function.is_extern && ty == IrType::String {
-                        Ok(AbiType::CString)
-                    } else {
-                        AbiType::from_ir_type(&ty)
+            match item {
+                Item::Function(function) => {
+                    self.collect_function_metadata(function.name.clone(), function)?;
+                }
+                Item::Struct(decl) => {
+                    for method in &decl.methods {
+                        self.collect_function_metadata(
+                            struct_method_symbol(&decl.name, &method.name),
+                            method,
+                        )?;
                     }
-                    .map_err(|message| CodegenFailure {
-                        function_name: function.name.clone(),
-                        error: CodegenError {
-                            message: message.into(),
-                            span: param.span,
-                        },
-                    })?;
-                    Ok((param.name.clone(), abi))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            self.function_params
-                .insert(function.name.clone(), param_types);
+                }
+                _ => {}
+            }
         }
 
         self.output.push_str(".text\n\n");
 
         for item in &self.program.items {
-            let Item::Function(function) = item else {
-                continue;
-            };
-            if function.is_extern {
-                continue;
+            match item {
+                Item::Function(function) => {
+                    if function.is_extern {
+                        continue;
+                    }
+                    self.emit_function_with_symbol(function, &function.name)
+                        .map_err(|error| CodegenFailure {
+                            function_name: function.name.clone(),
+                            error,
+                        })?;
+                    self.output.push('\n');
+                }
+                Item::Struct(decl) => {
+                    for method in &decl.methods {
+                        if method.is_extern {
+                            continue;
+                        }
+                        let synthetic_name = struct_method_symbol(&decl.name, &method.name);
+                        self.emit_function_with_symbol(method, &synthetic_name)
+                            .map_err(|error| CodegenFailure {
+                                function_name: synthetic_name.clone(),
+                                error,
+                            })?;
+                        self.output.push('\n');
+                    }
+                }
+                _ => {}
             }
-            self.emit_function(function)
-                .map_err(|error| CodegenFailure {
-                    function_name: function.name.clone(),
-                    error,
-                })?;
-            self.output.push('\n');
         }
 
         if !self.string_labels.is_empty() {
@@ -366,18 +335,122 @@ impl<'a> Generator<'a> {
         Ok(std::mem::take(&mut self.output))
     }
 
-    fn emit_function(&mut self, function: &Function) -> Result<(), CodegenError> {
+    fn collect_function_metadata(
+        &mut self,
+        registered_name: String,
+        function: &Function,
+    ) -> Result<(), CodegenFailure> {
+        if function.is_async {
+            return Err(CodegenFailure {
+                function_name: registered_name.clone(),
+                error: CodegenError {
+                    message: "async functions are not supported by the current native backend"
+                        .into(),
+                    span: function.span,
+                },
+            });
+        }
+        let return_ty = self
+            .function_locals
+            .get(&registered_name)
+            .and_then(|locals| locals.get("__return"))
+            .cloned()
+            .unwrap_or_else(|| type_ref_to_ir_type(function.return_type.as_ref()));
+        if registered_name == "main" && return_ty == IrType::Dynamic {
+            return Err(CodegenFailure {
+                function_name: registered_name.clone(),
+                error: CodegenError {
+                    message: "dynamic return values are not yet supported for `main` in the native backend"
+                        .into(),
+                    span: function.span,
+                },
+            });
+        }
+        if registered_name == "main" && return_ty == IrType::String {
+            return Err(CodegenFailure {
+                function_name: registered_name.clone(),
+                error: CodegenError {
+                    message:
+                        "string return values are not yet supported for `main` in the native backend"
+                            .into(),
+                    span: function.span,
+                },
+            });
+        }
+        if registered_name == "main" && return_ty == IrType::Json {
+            return Err(CodegenFailure {
+                function_name: registered_name.clone(),
+                error: CodegenError {
+                    message:
+                        "Json return values are not yet supported for `main` in the native backend"
+                            .into(),
+                    span: function.span,
+                },
+            });
+        }
+        self.function_names.insert(registered_name.clone());
+        if function.is_extern {
+            self.extern_functions.insert(registered_name.clone());
+        }
+        self.function_returns
+            .insert(registered_name.clone(), return_ty.clone());
+        let param_types = function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| {
+                let ty = if index == 0 && param.name == "self" {
+                    method_owner_from_registered_name(&registered_name)
+                        .map(IrType::Struct)
+                        .or_else(|| {
+                            self.function_locals
+                                .get(&registered_name)
+                                .and_then(|locals| locals.get(&param.name))
+                                .cloned()
+                        })
+                        .unwrap_or_else(|| type_ref_to_ir_type(Some(&param.ty)))
+                } else {
+                    self.function_locals
+                        .get(&registered_name)
+                        .and_then(|locals| locals.get(&param.name))
+                        .cloned()
+                        .unwrap_or_else(|| type_ref_to_ir_type(Some(&param.ty)))
+                };
+                let abi = if function.is_extern && ty == IrType::String {
+                    Ok(AbiType::CString)
+                } else {
+                    AbiType::from_ir_type(&ty)
+                }
+                .map_err(|message| CodegenFailure {
+                    function_name: registered_name.clone(),
+                    error: CodegenError {
+                        message: message.into(),
+                        span: param.span,
+                    },
+                })?;
+                Ok((param.name.clone(), abi))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.function_params.insert(registered_name, param_types);
+        Ok(())
+    }
+
+    fn emit_function_with_symbol(
+        &mut self,
+        function: &Function,
+        registered_name: &str,
+    ) -> Result<(), CodegenError> {
         let mut locals = BTreeSet::new();
         collect_locals(&function.body, &mut locals)?;
         let local_types = self
             .function_locals
-            .get(&function.name)
+            .get(registered_name)
             .cloned()
             .unwrap_or_default();
 
         let param_meta = self
             .function_params
-            .get(&function.name)
+            .get(registered_name)
             .expect("parameter metadata should exist");
         let register_count = param_meta
             .iter()
@@ -390,7 +463,7 @@ impl<'a> Generator<'a> {
             })
             .sum::<usize>()
             + usize::from(matches!(
-                self.function_returns.get(&function.name),
+                self.function_returns.get(registered_name),
                 Some(IrType::Struct(_))
             ));
         if register_count > 4 {
@@ -472,7 +545,7 @@ impl<'a> Generator<'a> {
         let scratch_offset = next_slot * 8;
         next_slot += FunctionEmitter::SCRATCH_SLOTS;
         let return_out_offset = if matches!(
-            self.function_returns.get(&function.name),
+            self.function_returns.get(registered_name),
             Some(IrType::Struct(_))
         ) {
             let offset = next_slot * 8;
@@ -489,7 +562,7 @@ impl<'a> Generator<'a> {
         }
 
         let mut emitter = FunctionEmitter::new(
-            &function.name,
+            registered_name,
             offsets,
             scratch_offset,
             stack_size,
@@ -503,7 +576,7 @@ impl<'a> Generator<'a> {
             function.span,
         );
 
-        let symbol_name = native_internal_symbol_name(&function.name);
+        let symbol_name = native_internal_symbol_name(registered_name);
         self.output
             .push_str(&format!(".globl {symbol_name}\n{symbol_name}:\n"));
         self.output.push_str("    push rbp\n");
@@ -600,6 +673,15 @@ impl<'a> Generator<'a> {
         self.output.push_str("    ret\n");
         Ok(())
     }
+}
+
+fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {
+    format!("{struct_name}__{method_name}")
+}
+
+fn method_owner_from_registered_name(name: &str) -> Option<String> {
+    let (owner, _) = name.split_once("__")?;
+    (!owner.is_empty()).then(|| owner.to_string())
 }
 
 fn collect_locals(block: &Block, locals: &mut BTreeSet<String>) -> Result<(), CodegenError> {
@@ -1056,6 +1138,17 @@ impl<'a> FunctionEmitter<'a> {
                 self.emit_expr(out, right)?;
                 out.push_str("    mov rcx, rax\n");
                 out.push_str("    pop rax\n");
+                if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual)
+                    && self.infer_expr_type(left) == Some(IrType::Json)
+                    && self.infer_expr_type(right) == Some(IrType::Json)
+                {
+                    out.push_str("    call rune_rt_json_equal\n");
+                    if matches!(op, BinaryOp::NotEqual) {
+                        out.push_str("    xor eax, 1\n");
+                    }
+                    out.push_str("    movzx rax, al\n");
+                    return Ok(());
+                }
                 match op {
                     BinaryOp::And | BinaryOp::Or => unreachable!("logical operators lower earlier"),
                     BinaryOp::Add => out.push_str("    add rax, rcx\n"),
@@ -1159,6 +1252,16 @@ impl<'a> FunctionEmitter<'a> {
                         "    call rune_rt_print_str\n"
                     });
                 }
+                _ if self.infer_expr_type(expr) == Some(IrType::Json) => {
+                    self.emit_into_reg(out, "rcx", expr)?;
+                    out.push_str("    call rune_rt_json_stringify\n");
+                    self.capture_runtime_string_result(out, "rcx", "rdx");
+                    out.push_str(if stderr {
+                        "    call rune_rt_eprint_str\n"
+                    } else {
+                        "    call rune_rt_print_str\n"
+                    });
+                }
                 ExprKind::Integer(_)
                 | ExprKind::Identifier(_)
                 | ExprKind::Bool(_)
@@ -1168,7 +1271,13 @@ impl<'a> FunctionEmitter<'a> {
                 | ExprKind::Field { .. } => {
                     self.emit_expr(out, expr)?;
                     out.push_str("    mov rcx, rax\n");
-                    out.push_str(if stderr {
+                    out.push_str(if self.infer_expr_type(expr) == Some(IrType::Bool) {
+                        if stderr {
+                            "    call rune_rt_eprint_bool\n"
+                        } else {
+                            "    call rune_rt_print_bool\n"
+                        }
+                    } else if stderr {
                         "    call rune_rt_eprint_i64\n"
                     } else {
                         "    call rune_rt_print_i64\n"
@@ -1248,13 +1357,8 @@ impl<'a> FunctionEmitter<'a> {
         args: &[CallArg],
         span: Span,
     ) -> Result<(), CodegenError> {
-        let ExprKind::Identifier(name) = &callee.kind else {
-            return Err(CodegenError {
-                message: "only direct function calls are supported by the current native backend"
-                    .into(),
-                span: callee.span,
-            });
-        };
+        let (name, owned_args) = self.resolve_call_target(callee, args, span)?;
+        let args = owned_args.as_slice();
 
         if name == "__rune_builtin_time_now_unix" {
             if !args.is_empty() {
@@ -1421,6 +1525,49 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_network_tcp_listen" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_tcp_listen` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP listen host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            out.push_str("    call rune_rt_network_tcp_listen\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_send" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(data_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_tcp_send` expects 3 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP send host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_string_arg(out, data_expr, "r9", "r10", "TCP send data")?;
+            out.push_str("    sub rsp, 48\n");
+            out.push_str("    mov QWORD PTR [rsp+32], r10\n");
+            out.push_str("    call rune_rt_network_tcp_send\n");
+            out.push_str("    add rsp, 48\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_network_tcp_connect_timeout" {
             let [
                 CallArg::Positional(host_expr),
@@ -1439,6 +1586,49 @@ impl<'a> FunctionEmitter<'a> {
             self.emit_into_reg(out, "r8d", port_expr)?;
             self.emit_into_reg(out, "r9d", timeout_expr)?;
             out.push_str("    call rune_rt_network_tcp_connect_timeout\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_udp_bind" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_udp_bind` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "UDP bind host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            out.push_str("    call rune_rt_network_udp_bind\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_udp_send" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(data_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_udp_send` expects 3 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "UDP send host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_string_arg(out, data_expr, "r9", "r10", "UDP send data")?;
+            out.push_str("    sub rsp, 48\n");
+            out.push_str("    mov QWORD PTR [rsp+32], r10\n");
+            out.push_str("    call rune_rt_network_udp_send\n");
+            out.push_str("    add rsp, 48\n");
             out.push_str("    movzx rax, al\n");
             return Ok(());
         }
@@ -1485,6 +1675,187 @@ impl<'a> FunctionEmitter<'a> {
             self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
             self.emit_string_arg(out, content_expr, "r8", "r9", "filesystem content")?;
             out.push_str("    call rune_rt_fs_write_string\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_fs_remove"
+                | "__rune_builtin_fs_create_dir"
+                | "__rune_builtin_fs_create_dir_all"
+        ) {
+            let [CallArg::Positional(path_expr)] = args else {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 1 positional argument"),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
+            let runtime = match name.as_str() {
+                "__rune_builtin_fs_remove" => "rune_rt_fs_remove",
+                "__rune_builtin_fs_create_dir" => "rune_rt_fs_create_dir",
+                "__rune_builtin_fs_create_dir_all" => "rune_rt_fs_create_dir_all",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if matches!(name.as_str(), "__rune_builtin_fs_rename" | "__rune_builtin_fs_copy") {
+            let [
+                CallArg::Positional(from_expr),
+                CallArg::Positional(to_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 2 positional arguments"),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, from_expr, "rcx", "rdx", "filesystem source path")?;
+            self.emit_string_arg(out, to_expr, "r8", "r9", "filesystem destination path")?;
+            let runtime = match name.as_str() {
+                "__rune_builtin_fs_rename" => "rune_rt_fs_rename",
+                "__rune_builtin_fs_copy" => "rune_rt_fs_copy",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_parse" {
+            let [CallArg::Positional(source_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_parse` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, source_expr, "rcx", "rdx", "JSON source")?;
+            out.push_str("    call rune_rt_json_parse\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_stringify" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_stringify` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_stringify\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_kind" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_kind` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_kind\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_is_null" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_is_null` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_is_null\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_len" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_len` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_len\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_get" {
+            let [CallArg::Positional(json_expr), CallArg::Positional(key_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_get` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            self.emit_string_arg(out, key_expr, "rdx", "r8", "JSON object key")?;
+            out.push_str("    call rune_rt_json_get\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_index" {
+            let [CallArg::Positional(json_expr), CallArg::Positional(index_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_index` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            self.emit_into_reg(out, "rdx", index_expr)?;
+            out.push_str("    call rune_rt_json_index\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_to_string" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_to_string` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_to_string\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_to_i64" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_to_i64` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_to_i64\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_json_to_bool" {
+            let [CallArg::Positional(json_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_json_to_bool` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            out.push_str("    call rune_rt_json_to_bool\n");
             out.push_str("    movzx rax, al\n");
             return Ok(());
         }
@@ -1598,6 +1969,11 @@ impl<'a> FunctionEmitter<'a> {
                     out.push_str("    call rune_rt_dynamic_to_i64\n");
                     return Ok(());
                 }
+                Some(IrType::Json) => {
+                    self.emit_into_reg(out, "rcx", expr)?;
+                    out.push_str("    call rune_rt_json_to_i64\n");
+                    return Ok(());
+                }
                 _ => {
                     return Err(CodegenError {
                         message: "`int` conversion is not supported for this expression in the native backend"
@@ -1616,7 +1992,7 @@ impl<'a> FunctionEmitter<'a> {
             });
         }
 
-        if !self.function_names.contains(name) {
+        if !self.function_names.contains(&name) {
             return Err(CodegenError {
                 message: format!(
                     "calls to `{name}` are not supported by the current native backend"
@@ -1625,7 +2001,7 @@ impl<'a> FunctionEmitter<'a> {
             });
         }
 
-        let Some(param_meta) = self.function_params.get(name) else {
+        let Some(param_meta) = self.function_params.get(&name) else {
             return Err(CodegenError {
                 message: format!("missing parameter metadata for `{name}`"),
                 span,
@@ -1633,11 +2009,11 @@ impl<'a> FunctionEmitter<'a> {
         };
         let callee_return_ty = self
             .function_returns
-            .get(name)
+            .get(&name)
             .cloned()
             .unwrap_or(IrType::Unit);
 
-        let ordered_args = self.resolve_call_args(name, param_meta, args, span)?;
+        let ordered_args = self.resolve_call_args(&name, param_meta, args, span)?;
 
         let register_count = param_meta
             .iter()
@@ -1658,7 +2034,7 @@ impl<'a> FunctionEmitter<'a> {
         }
 
         let arg_regs = ["rcx", "rdx", "r8", "r9"];
-        let callee_is_extern = self.extern_functions.contains(name);
+        let callee_is_extern = self.extern_functions.contains(&name);
         if matches!(callee_return_ty, IrType::Struct(_)) {
             return Err(CodegenError {
                 message:
@@ -1730,7 +2106,7 @@ impl<'a> FunctionEmitter<'a> {
             let target_name = if callee_is_extern {
                 name.clone()
             } else {
-                native_internal_symbol_name(name)
+                native_internal_symbol_name(&name)
             };
             out.push_str(&format!("    call {target_name}\n"));
             if callee_is_extern && callee_return_ty == IrType::String {
@@ -1776,7 +2152,7 @@ impl<'a> FunctionEmitter<'a> {
         let target_name = if callee_is_extern {
             name.clone()
         } else {
-            native_internal_symbol_name(name)
+            native_internal_symbol_name(&name)
         };
         out.push_str(&format!("    call {target_name}\n"));
         if callee_is_extern && callee_return_ty == IrType::String {
@@ -1784,6 +2160,44 @@ impl<'a> FunctionEmitter<'a> {
             out.push_str("    call rune_rt_from_c_string\n");
         }
         Ok(())
+    }
+
+    fn resolve_call_target(
+        &self,
+        callee: &Expr,
+        args: &[CallArg],
+        span: Span,
+    ) -> Result<(String, Vec<CallArg>), CodegenError> {
+        match &callee.kind {
+            ExprKind::Identifier(name) => Ok((name.clone(), args.to_vec())),
+            ExprKind::Field { base, name } => {
+                let Some(IrType::Struct(struct_name)) = self.infer_expr_type(base) else {
+                    return Err(CodegenError {
+                        message: "method calls require a concrete class or struct receiver in the current native backend"
+                            .into(),
+                        span: callee.span,
+                    });
+                };
+                let synthetic_name = struct_method_symbol(&struct_name, name);
+                if !self.function_names.contains(&synthetic_name) {
+                    return Err(CodegenError {
+                        message: format!(
+                            "`{struct_name}` has no method `{name}` in the current native backend"
+                        ),
+                        span,
+                    });
+                }
+                let mut owned_args = Vec::with_capacity(args.len() + 1);
+                owned_args.push(CallArg::Positional((**base).clone()));
+                owned_args.extend(args.iter().cloned());
+                Ok((synthetic_name, owned_args))
+            }
+            _ => Err(CodegenError {
+                message: "only direct function and method calls are supported by the current native backend"
+                    .into(),
+                span: callee.span,
+            }),
+        }
     }
 
     fn intern_string(&mut self, value: &str) -> String {
@@ -1881,6 +2295,12 @@ impl<'a> FunctionEmitter<'a> {
         op: &BinaryOp,
         right: &Expr,
     ) -> Result<bool, CodegenError> {
+        if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual)
+            && self.infer_expr_type(left) == Some(IrType::Json)
+            && self.infer_expr_type(right) == Some(IrType::Json)
+        {
+            return Ok(false);
+        }
         let Some(left_operand) = self.simple_operand(left) else {
             return Ok(false);
         };
@@ -1981,6 +2401,13 @@ impl<'a> FunctionEmitter<'a> {
             Some(IrType::String) => {
                 self.emit_string_arg(out, expr, payload_reg, extra_reg, "dynamic string value")?;
                 out.push_str(&format!("    mov {tag_reg}, {DYNAMIC_TAG_STRING}\n"));
+                Ok(())
+            }
+            Some(IrType::Json) => {
+                self.emit_expr(out, expr)?;
+                move_reg(out, payload_reg, "rax");
+                out.push_str(&format!("    mov {tag_reg}, {DYNAMIC_TAG_JSON}\n"));
+                out.push_str(&format!("    xor {extra_reg}, {extra_reg}\n"));
                 Ok(())
             }
             Some(IrType::Dynamic) => {
@@ -2139,6 +2566,10 @@ impl<'a> FunctionEmitter<'a> {
                     self.emit_dynamic_value(out, value_expr, "rcx", "rdx", "r8")?;
                     out.push_str("    call rune_rt_dynamic_to_string\n");
                 }
+                Some(IrType::Json) => {
+                    self.emit_into_reg(out, "rcx", value_expr)?;
+                    out.push_str("    call rune_rt_json_to_string\n");
+                }
                 _ => {
                     return Err(CodegenError {
                         message: "`str` conversion is not supported for this expression in the native backend"
@@ -2180,6 +2611,35 @@ impl<'a> FunctionEmitter<'a> {
             };
             self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
             out.push_str("    call rune_rt_fs_read_string\n");
+            self.capture_runtime_string_result(out, ptr_reg, len_reg);
+            return Ok(());
+        }
+
+        if let ExprKind::Call { callee, args } = &expr.kind
+            && let ExprKind::Identifier(name) = &callee.kind
+            && matches!(
+                name.as_str(),
+                "__rune_builtin_json_stringify"
+                    | "__rune_builtin_json_kind"
+                    | "__rune_builtin_json_to_string"
+            )
+        {
+            let [CallArg::Positional(json_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: format!(
+                        "`{name}` expects 1 positional argument in the native backend"
+                    ),
+                    span: expr.span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", json_expr)?;
+            let runtime = match name.as_str() {
+                "__rune_builtin_json_stringify" => "rune_rt_json_stringify",
+                "__rune_builtin_json_kind" => "rune_rt_json_kind",
+                "__rune_builtin_json_to_string" => "rune_rt_json_to_string",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
             self.capture_runtime_string_result(out, ptr_reg, len_reg);
             return Ok(());
         }
@@ -2382,17 +2842,22 @@ impl<'a> FunctionEmitter<'a> {
                             Some(left_ty)
                         } else if matches!(
                             (&left_ty, &right_ty),
-                            (
-                                IrType::Dynamic,
-                                IrType::Bool
-                                    | IrType::Dynamic
-                                    | IrType::I32
-                                    | IrType::I64
-                                    | IrType::String
-                            ) | (
-                                IrType::Bool | IrType::I32 | IrType::I64 | IrType::String,
-                                IrType::Dynamic
-                            )
+                        (
+                            IrType::Dynamic,
+                            IrType::Bool
+                                | IrType::Dynamic
+                                | IrType::I32
+                                | IrType::I64
+                                | IrType::Json
+                                | IrType::String
+                        ) | (
+                            IrType::Bool
+                                | IrType::I32
+                                | IrType::I64
+                                | IrType::Json
+                                | IrType::String,
+                            IrType::Dynamic
+                        )
                         ) {
                             Some(IrType::Dynamic)
                         } else {
@@ -2409,8 +2874,15 @@ impl<'a> FunctionEmitter<'a> {
                             (&left_ty, &right_ty),
                             (
                                 IrType::Dynamic,
-                                IrType::Bool | IrType::Dynamic | IrType::I32 | IrType::I64
-                            ) | (IrType::Bool | IrType::I32 | IrType::I64, IrType::Dynamic)
+                                IrType::Bool
+                                    | IrType::Dynamic
+                                    | IrType::I32
+                                    | IrType::I64
+                                    | IrType::Json
+                            ) | (
+                                IrType::Bool | IrType::I32 | IrType::I64 | IrType::Json,
+                                IrType::Dynamic
+                            )
                         ) {
                             Some(IrType::Dynamic)
                         } else {
@@ -3080,7 +3552,7 @@ impl<'a> FunctionEmitter<'a> {
         span: Span,
     ) -> Result<(), CodegenError> {
         match ty {
-            IrType::Bool | IrType::I32 | IrType::I64 | IrType::Unit => {
+            IrType::Bool | IrType::I32 | IrType::I64 | IrType::Json | IrType::Unit => {
                 self.emit_expr(out, expr)?;
                 out.push_str(&format!("    mov QWORD PTR [{ptr_reg}+{offset}], rax\n"));
                 Ok(())
@@ -3238,7 +3710,7 @@ fn abi_scalar_register<'a>(register: &'a str, kind: ScalarKind) -> &'a str {
             "r9" => "r9d",
             other => other,
         },
-        ScalarKind::I64 => register,
+        ScalarKind::I64 | ScalarKind::Json => register,
     }
 }
 
@@ -3261,6 +3733,10 @@ fn binding_for_type(
         IrType::I32 => LocalBinding::Scalar {
             offset: next_slot * 8,
             kind: ScalarKind::I32,
+        },
+        IrType::Json => LocalBinding::Scalar {
+            offset: next_slot * 8,
+            kind: ScalarKind::Json,
         },
         IrType::I64 | IrType::Unit => LocalBinding::Scalar {
             offset: next_slot * 8,
@@ -3344,6 +3820,7 @@ fn type_ref_to_ir_type(ty: Option<&crate::parser::TypeRef>) -> IrType {
         Some("bool") => IrType::Bool,
         Some("i32") => IrType::I32,
         Some("i64") => IrType::I64,
+        Some("Json") => IrType::Json,
         Some("String") | Some("str") => IrType::String,
         Some("unit") => IrType::Unit,
         Some("dynamic") | None => IrType::Dynamic,
@@ -3387,6 +3864,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_terminal_set_title" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "__rune_builtin_fs_read_string" => Some(IrType::String),
+        "__rune_builtin_json_parse" => Some(IrType::Json),
+        "__rune_builtin_json_stringify"
+        | "__rune_builtin_json_kind"
+        | "__rune_builtin_json_to_string" => Some(IrType::String),
+        "__rune_builtin_json_is_null" | "__rune_builtin_json_to_bool" => Some(IrType::Bool),
+        "__rune_builtin_json_len" | "__rune_builtin_json_to_i64" => Some(IrType::I64),
+        "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
         "int" => Some(IrType::I64),
         "__rune_builtin_system_pid"
@@ -3396,9 +3880,18 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"
+        | "__rune_builtin_network_tcp_listen"
+        | "__rune_builtin_network_tcp_send"
         | "__rune_builtin_network_tcp_connect_timeout"
+        | "__rune_builtin_network_udp_bind"
+        | "__rune_builtin_network_udp_send"
         | "__rune_builtin_fs_exists"
         | "__rune_builtin_fs_write_string"
+        | "__rune_builtin_fs_remove"
+        | "__rune_builtin_fs_rename"
+        | "__rune_builtin_fs_copy"
+        | "__rune_builtin_fs_create_dir"
+        | "__rune_builtin_fs_create_dir_all"
         | "__rune_builtin_audio_bell" => Some(IrType::Bool),
         "input" => Some(IrType::String),
         _ => None,

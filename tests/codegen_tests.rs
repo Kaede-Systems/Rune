@@ -376,6 +376,30 @@ fn lowers_struct_locals_and_field_reads() {
 }
 
 #[test]
+fn lowers_class_locals_and_field_reads() {
+    let asm = emit_asm_source(
+        "class Point:\n    x: i32\n    y: i32\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    return point.x + point.y\n",
+    )
+    .expect("class locals should lower");
+
+    assert!(asm.contains("mov QWORD PTR [rbp-"));
+    assert!(asm.contains("add rax, QWORD PTR [rbp-"));
+}
+
+#[test]
+fn lowers_class_methods_and_method_calls() {
+    let asm = emit_asm_source(
+        "class Point:\n    x: i32\n    y: i32\n    def sum(self) -> i32:\n        return self.x + self.y\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    return point.sum()\n",
+    )
+    .expect("class method call should lower");
+
+    assert!(asm.contains(".globl Point__sum"));
+    assert!(asm.contains("call Point__sum"));
+}
+
+#[test]
 fn lowers_struct_parameters_for_user_functions() {
     let asm = emit_asm_source(
         "struct Point:\n    x: i32\n    y: i32\n\n\

@@ -5,9 +5,8 @@ use std::process::Command;
 use std::process::ExitCode;
 
 use rune::build::{
-    BuildOptions, build_executable, build_executable_llvm_with_options,
-    build_executable_with_options, build_shared_library, build_static_library, emit_c_header,
-    supported_targets, target_spec,
+    BuildOptions, build_executable, build_executable_with_options, build_object_file,
+    build_shared_library, build_static_library, emit_c_header, supported_targets, target_spec,
 };
 use rune::diagnostics::render_file_diagnostic;
 use rune::ir::lower_program;
@@ -19,7 +18,8 @@ use rune::optimize::optimize_program;
 use rune::parser::parse_source;
 use rune::semantic::{check_program_with_context, check_program_with_context_all};
 use rune::toolchain::{
-    detect_windows_dev_assets, find_packaged_ld_lld, find_packaged_ld64_lld,
+    detect_windows_dev_assets, find_arduino_avr_gcc, find_arduino_avr_objcopy,
+    find_arduino_avrdude, find_packaged_ld_lld, find_packaged_ld64_lld,
     find_packaged_lld_link, find_packaged_llvm_tool, find_packaged_wasm_ld, find_packaged_wasmtime,
 };
 use rune::warnings::collect_warnings;
@@ -119,39 +119,29 @@ fn run() -> Result<(), String> {
         "emit-asm" => {
             let Some(path) = args.next() else {
                 return Err(
-                    "missing source file path\n\nUsage: rune emit-asm <file.rn>".to_string()
+                    "missing source file path\n\nUsage: rune emit-asm <file.rn> [--target triple]".to_string()
                 );
             };
 
-            if args.next().is_some() {
-                return Err(
-                    "too many arguments for `rune emit-asm`\n\nUsage: rune emit-asm <file.rn>"
-                        .to_string(),
-                );
+            let mut target: Option<String> = None;
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--target" => {
+                        let Some(value) = args.next() else {
+                            return Err(
+                                "missing value after `--target`\n\nUsage: rune emit-asm <file.rn> [--target triple]".to_string(),
+                            );
+                        };
+                        target = Some(value);
+                    }
+                    _ => {
+                        return Err(
+                            "invalid arguments for `rune emit-asm`\n\nUsage: rune emit-asm <file.rn> [--target triple]".to_string(),
+                        );
+                    }
+                }
             }
-
-            let bundle =
-                load_program_bundle_from_path(Path::new(&path)).map_err(|error| error.render())?;
-            let mut program = bundle.program.clone();
-            let _checked = check_program_with_context(&program).map_err(|failure| {
-                render_loaded_diagnostic(
-                    &bundle,
-                    &failure.function_name,
-                    &failure.error.message,
-                    failure.error.span,
-                )
-            })?;
-            optimize_program(&mut program);
-            let asm = rune::codegen::emit_program_with_context(&program).map_err(|failure| {
-                render_loaded_diagnostic(
-                    &bundle,
-                    &failure.function_name,
-                    &failure.error.message,
-                    failure.error.span,
-                )
-            })?;
-            println!("{asm}");
-            Ok(())
+            emit_llvm_asm_command(&path, target.as_deref())
         }
         "emit-ir" => {
             let Some(path) = args.next() else {
@@ -236,38 +226,7 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-
-            let bundle =
-                load_program_bundle_from_path(Path::new(&path)).map_err(|error| error.render())?;
-            let mut program = bundle.program.clone();
-            let _checked = check_program_with_context(&program).map_err(|failure| {
-                render_loaded_diagnostic(
-                    &bundle,
-                    &failure.function_name,
-                    &failure.error.message,
-                    failure.error.span,
-                )
-            })?;
-            optimize_program(&mut program);
-            let target_info = target_spec(target.as_deref()).map_err(|error| error.to_string())?;
-            let temp_dir = std::env::temp_dir().join(format!(
-                "rune-emit-llvm-asm-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|error| format!("failed to compute temp timestamp: {error}"))?
-                    .as_nanos()
-            ));
-            fs::create_dir_all(&temp_dir)
-                .map_err(|error| format!("failed to create `{}`: {error}", temp_dir.display()))?;
-            let output_path = temp_dir.join("out.s");
-            emit_assembly_file(&program, target_info.triple, &output_path)
-                .map_err(|error| error.to_string())?;
-            let asm = fs::read_to_string(&output_path)
-                .map_err(|error| format!("failed to read `{}`: {error}", output_path.display()))?;
-            print!("{asm}");
-            let _ = fs::remove_file(output_path);
-            let _ = fs::remove_dir(temp_dir);
-            Ok(())
+            emit_llvm_asm_command(&path, target.as_deref())
         }
         "emit-c-header" => {
             let Some(path) = args.next() else {
@@ -307,18 +266,22 @@ fn run() -> Result<(), String> {
         "build" => {
             let Some(path) = args.next() else {
                 return Err(
-                    "missing source file path\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [-o output]"
+                    "missing source file path\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [-o output]"
                         .to_string(),
                 );
             };
 
             let mut output: Option<PathBuf> = None;
+            let mut build_object = false;
             let mut build_lib = false;
             let mut build_static_lib = false;
             let mut target: Option<String> = None;
             let mut build_options = BuildOptions::default();
             while let Some(arg) = args.next() {
                 match arg.as_str() {
+                    "--object" => {
+                        build_object = true;
+                    }
                     "--lib" => {
                         build_lib = true;
                     }
@@ -327,49 +290,63 @@ fn run() -> Result<(), String> {
                     }
                     "--target" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `--target`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [-o output]".to_string());
+                            return Err("missing value after `--target`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [-o output]".to_string());
                         };
                         target = Some(value);
                     }
                     "--link-lib" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `--link-lib`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]".to_string());
+                            return Err("missing value after `--link-lib`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]".to_string());
                         };
                         build_options.link_libs.push(value);
                     }
                     "--link-search" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `--link-search`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]".to_string());
+                            return Err("missing value after `--link-search`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]".to_string());
                         };
                         build_options.link_search_paths.push(PathBuf::from(value));
                     }
                     "--link-arg" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `--link-arg`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]".to_string());
+                            return Err("missing value after `--link-arg`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]".to_string());
                         };
                         build_options.link_args.push(value);
                     }
                     "--link-c-source" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `--link-c-source`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]".to_string());
+                            return Err("missing value after `--link-c-source`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]".to_string());
                         };
                         build_options.link_c_sources.push(PathBuf::from(value));
                     }
+                    "--flash" => {
+                        build_options.flash_after_build = true;
+                    }
+                    "--port" => {
+                        let Some(value) = args.next() else {
+                            return Err("missing value after `--port`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--flash --port serial] [-o output]".to_string());
+                        };
+                        build_options.flash_port = Some(value);
+                    }
                     "-o" | "--output" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `-o`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [-o output]".to_string());
+                            return Err("missing value after `-o`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [-o output]".to_string());
                         };
                         output = Some(PathBuf::from(value));
                     }
                     _ => {
-                        return Err("invalid arguments for `rune build`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]".to_string());
+                        return Err("invalid arguments for `rune build`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]".to_string());
                     }
                 }
             }
 
-            if build_lib && build_static_lib {
+            if [build_object, build_lib, build_static_lib]
+                .into_iter()
+                .filter(|enabled| *enabled)
+                .count()
+                > 1
+            {
                 return Err(
-                    "cannot combine `--lib` and `--static-lib`\n\nUsage: rune build <file.rn> [--lib | --static-lib] [--target triple] [-o output]"
+                    "cannot combine `--object`, `--lib`, and `--static-lib`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [-o output]"
                         .to_string(),
                 );
             }
@@ -381,7 +358,9 @@ fn run() -> Result<(), String> {
                 .map_err(|failures| render_loaded_diagnostics(&bundle, &failures))?;
             let target_info = target_spec(target.as_deref()).map_err(|error| error.to_string())?;
             let output_path = output.unwrap_or_else(|| {
-                if build_lib {
+                if build_object {
+                    source_path.with_extension(target_info.object_extension)
+                } else if build_lib {
                     source_path.with_extension(target_info.library_extension)
                 } else if build_static_lib {
                     source_path.with_extension(target_info.static_library_extension)
@@ -389,7 +368,10 @@ fn run() -> Result<(), String> {
                     source_path.with_extension(target_info.exe_extension)
                 }
             });
-            if build_lib {
+            if build_object {
+                build_object_file(&source_path, &output_path, target.as_deref())
+                    .map_err(|error| error.to_string())?;
+            } else if build_lib {
                 build_shared_library(&source_path, &output_path, target.as_deref())
                     .map_err(|error| error.to_string())?;
             } else if build_static_lib {
@@ -408,107 +390,10 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         "build-llvm" => {
-            let Some(path) = args.next() else {
-                return Err(
-                    "missing source file path\n\nUsage: rune build-llvm <file.rn> [--target triple] [-o output]"
-                        .to_string(),
-                );
-            };
-
-            let source_path = PathBuf::from(&path);
-            let bundle =
-                load_program_bundle_from_path(Path::new(&path)).map_err(|error| error.render())?;
-            check_program_with_context_all(&bundle.program)
-                .map_err(|failures| render_loaded_diagnostics(&bundle, &failures))?;
-            let mut target: Option<String> = None;
-            let mut output: Option<PathBuf> = None;
-            let mut build_options = BuildOptions::default();
-            while let Some(arg) = args.next() {
-                match arg.as_str() {
-                    "--target" => {
-                        let Some(value) = args.next() else {
-                            return Err(
-                                "missing value after `--target`\n\nUsage: rune build-llvm <file.rn> [--target triple] [-o output]"
-                                    .to_string(),
-                            );
-                        };
-                        target = Some(value);
-                    }
-                    "--link-lib" => {
-                        let Some(value) = args.next() else {
-                            return Err(
-                                "missing value after `--link-lib`\n\nUsage: rune build-llvm <file.rn> [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]"
-                                    .to_string(),
-                            );
-                        };
-                        build_options.link_libs.push(value);
-                    }
-                    "--link-search" => {
-                        let Some(value) = args.next() else {
-                            return Err(
-                                "missing value after `--link-search`\n\nUsage: rune build-llvm <file.rn> [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [-o output]"
-                                    .to_string(),
-                            );
-                        };
-                        build_options.link_search_paths.push(PathBuf::from(value));
-                    }
-                    "--link-arg" => {
-                        let Some(value) = args.next() else {
-                            return Err(
-                                "missing value after `--link-arg`\n\nUsage: rune build-llvm <file.rn> [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]"
-                                    .to_string(),
-                            );
-                        };
-                        build_options.link_args.push(value);
-                    }
-                    "--link-c-source" => {
-                        let Some(value) = args.next() else {
-                            return Err(
-                                "missing value after `--link-c-source`\n\nUsage: rune build-llvm <file.rn> [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]"
-                                    .to_string(),
-                            );
-                        };
-                        build_options.link_c_sources.push(PathBuf::from(value));
-                    }
-                    "-o" | "--output" => {
-                        let Some(value) = args.next() else {
-                            return Err(
-                                "missing value after `-o`\n\nUsage: rune build-llvm <file.rn> [--target triple] [-o output]"
-                                    .to_string(),
-                            );
-                        };
-                        output = Some(PathBuf::from(value));
-                    }
-                    _ => {
-                        return Err(
-                            "invalid arguments for `rune build-llvm`\n\nUsage: rune build-llvm <file.rn> [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]"
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-            let target_info = target_spec(target.as_deref()).map_err(|error| error.to_string())?;
-            let output_path = output.unwrap_or_else(|| {
-                let stem = source_path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("out");
-                let suffix = if target_info.exe_extension.is_empty() {
-                    ".llvm".to_string()
-                } else {
-                    format!(".llvm.{}", target_info.exe_extension)
-                };
-                source_path.with_file_name(format!("{stem}{suffix}"))
-            });
-            build_executable_llvm_with_options(
-                &source_path,
-                &output_path,
-                target.as_deref(),
-                &build_options,
+            Err(
+                "`rune build-llvm` is deprecated; use `rune build` instead. `build` already uses the LLVM-backed path by default."
+                    .to_string(),
             )
-                .map_err(|error| error.to_string())?;
-            println!("built {}", output_path.display());
-            Ok(())
         }
         "decompile" => {
             let Some(path) = args.next() else {
@@ -551,7 +436,7 @@ fn run() -> Result<(), String> {
             }
             for target in supported_targets() {
                 println!(
-                    "{}  exe=.{}  lib=.{}  static=.{}",
+                    "{}  exe=.{}  lib=.{}  static=.{}  obj=.{}",
                     target.triple,
                     if target.exe_extension.is_empty() {
                         "<none>"
@@ -559,7 +444,8 @@ fn run() -> Result<(), String> {
                         target.exe_extension
                     },
                     target.library_extension,
-                    target.static_library_extension
+                    target.static_library_extension,
+                    target.object_extension,
                 );
             }
             Ok(())
@@ -608,6 +494,12 @@ fn run() -> Result<(), String> {
             print_tool("ld64.lld", find_packaged_ld64_lld());
             print_tool("wasm-ld", find_packaged_wasm_ld());
             print_tool("wasmtime", find_packaged_wasmtime());
+
+            println!();
+            println!("Bundled Arduino AVR tools:");
+            print_tool("avr-gcc", find_arduino_avr_gcc());
+            print_tool("avr-objcopy", find_arduino_avr_objcopy());
+            print_tool("avrdude", find_arduino_avrdude());
 
             println!();
             println!("Windows dev assets:");
@@ -659,23 +551,30 @@ fn run() -> Result<(), String> {
         "debug" => {
             let Some(path) = args.next() else {
                 return Err(
-                    "missing source file path\n\nUsage: rune debug <file.rn> [-o output]"
+                    "missing source file path\n\nUsage: rune debug <file.rn> [--target triple] [-o output]"
                         .to_string(),
                 );
             };
 
             let mut output: Option<PathBuf> = None;
+            let mut target: Option<String> = None;
             while let Some(arg) = args.next() {
                 match arg.as_str() {
+                    "--target" => {
+                        let Some(value) = args.next() else {
+                            return Err("missing value after `--target`\n\nUsage: rune debug <file.rn> [--target triple] [-o output]".to_string());
+                        };
+                        target = Some(value);
+                    }
                     "-o" | "--output" => {
                         let Some(value) = args.next() else {
-                            return Err("missing value after `-o`\n\nUsage: rune debug <file.rn> [-o output]".to_string());
+                            return Err("missing value after `-o`\n\nUsage: rune debug <file.rn> [--target triple] [-o output]".to_string());
                         };
                         output = Some(PathBuf::from(value));
                     }
                     _ => {
                         return Err(
-                            "invalid arguments for `rune debug`\n\nUsage: rune debug <file.rn> [-o output]"
+                            "invalid arguments for `rune debug`\n\nUsage: rune debug <file.rn> [--target triple] [-o output]"
                                 .to_string(),
                         );
                     }
@@ -696,17 +595,10 @@ fn run() -> Result<(), String> {
             })?;
             optimize_program(&mut program);
             let ir = lower_program(&program).to_string();
-            let asm = rune::codegen::emit_program_with_context(&program).map_err(|failure| {
-                render_loaded_diagnostic(
-                    &bundle,
-                    &failure.function_name,
-                    &failure.error.message,
-                    failure.error.span,
-                )
-            })?;
+            let asm = emit_llvm_asm_text(&path, target.as_deref())?;
 
             let output_path = output.unwrap_or_else(|| default_debug_output_path(&source_path));
-            build_executable(&source_path, &output_path, None)
+            build_executable(&source_path, &output_path, target.as_deref())
                 .map_err(|error| error.to_string())?;
             let run_path = resolve_run_path(&output_path)?;
             let run_output = Command::new(&run_path)
@@ -820,7 +712,7 @@ fn pretty_path(path: &Path) -> String {
 }
 
 fn usage() -> String {
-    "Usage:\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune emit-asm <file.rn>\n  rune build <file.rn> [--lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]\n  rune build-llvm <file.rn> [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [-o output]".to_string()
+    "Usage:\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
 }
 
 fn display_kind(kind: &TokenKind) -> String {
@@ -830,6 +722,131 @@ fn display_kind(kind: &TokenKind) -> String {
         TokenKind::String(value) => format!("String({value:?})"),
         other => format!("{other:?}"),
     }
+}
+
+fn emit_llvm_asm_command(path: &str, target: Option<&str>) -> Result<(), String> {
+    let asm = emit_llvm_asm_text(path, target)?;
+    print!("{asm}");
+    Ok(())
+}
+
+fn emit_llvm_asm_text(path: &str, target: Option<&str>) -> Result<String, String> {
+    let bundle =
+        load_program_bundle_from_path(Path::new(path)).map_err(|error| error.render())?;
+    let mut program = bundle.program.clone();
+    ensure_llvm_backend_supported(&bundle)?;
+    let _checked = check_program_with_context(&program).map_err(|failure| {
+        render_loaded_diagnostic(
+            &bundle,
+            &failure.function_name,
+            &failure.error.message,
+            failure.error.span,
+        )
+    })?;
+    optimize_program(&mut program);
+    let target_info = target_spec(target).map_err(|error| error.to_string())?;
+    let temp_dir = std::env::temp_dir().join(format!(
+        "rune-emit-llvm-asm-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("failed to compute temp timestamp: {error}"))?
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir)
+        .map_err(|error| format!("failed to create `{}`: {error}", temp_dir.display()))?;
+    let output_path = temp_dir.join("out.s");
+    emit_assembly_file(&program, target_info.triple, &output_path)
+        .map_err(|error| render_llvm_backend_error(&bundle, &error.message))?;
+    let asm = fs::read_to_string(&output_path)
+        .map_err(|error| format!("failed to read `{}`: {error}", output_path.display()))?;
+    let _ = fs::remove_file(output_path);
+    let _ = fs::remove_dir(temp_dir);
+    Ok(asm)
+}
+
+fn ensure_llvm_backend_supported(bundle: &LoadedProgram) -> Result<(), String> {
+    if let Some((function_name, span)) = first_async_function(&bundle.program) {
+        return Err(render_loaded_diagnostic(
+            bundle,
+            &function_name,
+            "async functions are not supported by the current LLVM IR backend",
+            span,
+        ));
+    }
+    Ok(())
+}
+
+fn render_llvm_backend_error(bundle: &LoadedProgram, message: &str) -> String {
+    if let Some((function_name, span)) = llvm_backend_error_site(bundle, message) {
+        return render_loaded_diagnostic(bundle, &function_name, message, span);
+    }
+    message.to_string()
+}
+
+fn llvm_backend_error_site(bundle: &LoadedProgram, message: &str) -> Option<(String, rune::lexer::Span)> {
+    if message == "async functions are not supported by the current LLVM IR backend" {
+        return first_async_function(&bundle.program);
+    }
+
+    if let Some(function_name) = extract_backticked_name_after(message, "function `")
+        && let Some(span) = find_function_span(&bundle.program, &function_name)
+    {
+        return Some((function_name, span));
+    }
+
+    if let Some(function_name) = extract_backticked_name_after(message, " in `")
+        && let Some(span) = find_function_span(&bundle.program, &function_name)
+    {
+        return Some((function_name, span));
+    }
+
+    None
+}
+
+fn extract_backticked_name_after(message: &str, prefix: &str) -> Option<String> {
+    let remainder = message.strip_prefix(prefix).or_else(|| message.split(prefix).nth(1))?;
+    let end = remainder.find('`')?;
+    Some(remainder[..end].to_string())
+}
+
+fn first_async_function(program: &rune::parser::Program) -> Option<(String, rune::lexer::Span)> {
+    for item in &program.items {
+        match item {
+            rune::parser::Item::Function(function) if function.is_async => {
+                return Some((function.name.clone(), function.span));
+            }
+            rune::parser::Item::Struct(decl) => {
+                for method in &decl.methods {
+                    if method.is_async {
+                        return Some((method.name.clone(), method.span));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn find_function_span(program: &rune::parser::Program, name: &str) -> Option<rune::lexer::Span> {
+    for item in &program.items {
+        match item {
+            rune::parser::Item::Function(function) if function.name == name => {
+                return Some(function.span);
+            }
+            rune::parser::Item::Struct(decl) => {
+                for method in &decl.methods {
+                    if method.name == name
+                        || format!("{}__{}", decl.name, method.name) == name
+                    {
+                        return Some(method.span);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn default_debug_output_path(source_path: &Path) -> PathBuf {

@@ -159,3 +159,16 @@ fn emits_string_compare_runtime_call() {
     assert!(ir.contains("declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)"));
     assert!(ir.contains("call i32 @rune_rt_string_compare"));
 }
+
+#[test]
+fn emits_llvm_ir_for_class_method_calls() {
+    let ir = emit_llvm_ir_source(
+        "class Point:\n    x: i32\n    y: i32\n    def sum(self) -> i32:\n        return self.x + self.y\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    return point.sum()\n",
+    )
+    .expect("class method llvm ir should generate");
+
+    assert!(ir.contains("define i32 @Point__sum({ i32, i32 } %self)"));
+    assert!(ir.contains("extractvalue { i32, i32 }"));
+    assert!(ir.contains("call i32 @Point__sum({ i32, i32 }"));
+}

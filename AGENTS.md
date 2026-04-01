@@ -105,6 +105,24 @@ A language feature counts as implemented only when all applicable parts are comp
 
 If a feature touches ABI, layout, destruction, borrowing, dynamic dispatch, or FFI, those parts must also be finished before the feature can be called implemented.
 
+## Backend Parity Policy
+
+Backend-specific "not supported" gaps are not an acceptable resting state for in-scope language features.
+
+Rules:
+
+- if a feature is part of the current language or stdlib scope, it must compile through every backend we advertise for that scope
+- we must not rely on parser/semantic acceptance followed by backend rejection as the normal feature boundary
+- error messages like "X is not supported by the current backend" are only acceptable while a feature is still outside the declared scope
+- once a feature is documented or presented as part of the current Rune surface, backend implementation becomes mandatory
+- if backend parity is not ready, the feature must be removed from the claimed scope or finished properly
+
+The intended outcome is simple:
+
+- supported features compile
+- unsupported features stay out of scope
+- we do not ship language/library surfaces that die late in codegen
+
 ## Release Completeness Policy
 
 The language may be developed gradually, but any release must be complete for its declared scope.

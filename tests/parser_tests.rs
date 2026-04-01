@@ -274,6 +274,43 @@ fn parses_struct_declaration_and_constructor() {
 }
 
 #[test]
+fn parses_class_declaration_and_constructor() {
+    let program = parse_source(
+        "class Point:\n    x: i32\n    y: i32\n\n\
+         def main() -> i32:\n    let point: Point = Point(x=20, y=22)\n    return point.x\n",
+    )
+    .expect("program should parse");
+
+    match &program.items[0] {
+        Item::Struct(decl) => {
+            assert_eq!(decl.name, "Point");
+            assert_eq!(decl.fields.len(), 2);
+            assert_eq!(decl.fields[0].name, "x");
+            assert_eq!(decl.fields[1].name, "y");
+        }
+        other => panic!("expected class item lowered as struct, found {other:?}"),
+    }
+}
+
+#[test]
+fn parses_class_method_declaration() {
+    let program = parse_source(
+        "class Point:\n    x: i32\n    y: i32\n    def sum(self) -> i32:\n        return self.x + self.y\n",
+    )
+    .expect("class method should parse");
+
+    match &program.items[0] {
+        Item::Struct(decl) => {
+            assert_eq!(decl.name, "Point");
+            assert_eq!(decl.methods.len(), 1);
+            assert_eq!(decl.methods[0].name, "sum");
+            assert_eq!(decl.methods[0].params[0].name, "self");
+        }
+        other => panic!("expected class item lowered as struct, found {other:?}"),
+    }
+}
+
+#[test]
 fn parses_extern_function_declaration() {
     let program = parse_source("extern def add_from_c(a: i32, b: i32) -> i32\n")
         .expect("extern function should parse");
