@@ -1,0 +1,10 @@
+[package]
+name = "rune"
+version = "0.1.0"
+edition = "2024"
+description = "Rune language compiler and packaged toolchain"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/Kaede-Systems/Rune"
+homepage = "https://github.com/Kaede-Systems/Rune"
+publish = false

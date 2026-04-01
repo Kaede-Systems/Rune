@@ -1,0 +1,31 @@
+from env import arg_count, exists, get_bool, get_i32
+from network import tcp_connect, tcp_connect_timeout
+from system import cpu_count, pid
+from time import monotonic_ms, sleep_ms, unix_now
+
+def main() -> i32:
+    print("pid=")
+    println(pid())
+    print("cpus=")
+    println(cpu_count())
+    print("argc=")
+    println(arg_count())
+    print("has_path=")
+    println(exists("PATH"))
+    print("feature_enabled=")
+    println(get_bool("RUNE_FEATURE", false))
+    print("port=")
+    println(get_i32("PORT", 8080))
+    print("unix=")
+    println(unix_now())
+    print("mono_before=")
+    println(monotonic_ms())
+    let before: i64 = monotonic_ms()
+    sleep_ms(before - before)
+    print("mono_after=")
+    println(monotonic_ms())
+    print("tcp_65535=")
+    println(tcp_connect("127.0.0.1", 65535))
+    print("tcp_80_t50=")
+    println(tcp_connect_timeout("127.0.0.1", 80, 50))
+    return 0

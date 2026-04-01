@@ -1,0 +1,13 @@
+def echo(value) -> unit:
+    println(value)
+    return
+
+def choose(flag: bool) -> dynamic:
+    if flag:
+        return "yes"
+    return 42
+
+def main() -> i32:
+    echo(choose(true))
+    echo(choose(false))
+    return 0

@@ -1,0 +1,8 @@
+def main() -> i32:
+    let value = 1
+    println(value)
+    value = true
+    println(value)
+    value = "hello dynamic"
+    println(value)
+    return 0

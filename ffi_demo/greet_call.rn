@@ -1,0 +1,5 @@
+extern def greet_from_c(name: String) -> String
+
+def main() -> i32:
+    println(greet_from_c("Rune"))
+    return 0

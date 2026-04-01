@@ -1,0 +1,8 @@
+def main() -> i32:
+    let value = 1
+    value = true
+    if value and not false:
+        println("yes")
+    if false or value:
+        println("or")
+    return 0

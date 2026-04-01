@@ -1,0 +1,21 @@
+def pid() -> i32:
+    return __rune_builtin_system_pid()
+
+def cpu_count() -> i32:
+    return __rune_builtin_system_cpu_count()
+
+def exit(code: i32) -> unit:
+    __rune_builtin_system_exit(code)
+    return
+
+def quit(code: i32) -> unit:
+    exit(code)
+    return
+
+def exit_success() -> unit:
+    exit(0)
+    return
+
+def exit_failure() -> unit:
+    exit(1)
+    return

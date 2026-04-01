@@ -1,0 +1,5 @@
+def add(lhs: i32, rhs: i32) -> i32:
+    return lhs + rhs
+
+def main() -> i32:
+    return add(rhs=2, lhs=40)

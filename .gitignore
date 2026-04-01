@@ -1,0 +1,39 @@
+/target
+
+# Generated binaries and libraries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+*.pdb
+
+# Generated compiler outputs
+*.ll
+*.wasm
+
+# Temporary bundles and scratch files
+debug_tmp/
+rune_sync_bundle.tar
+llvm_dynamic_tmp.rn
+runtime_portable.c
+test.ll
+temp_use_rune.c
+ffi_demo/greet_call_linux*
+ffi_demo/greet_call_macos*
+
+# Local helper outputs
+*.pyc
+__pycache__/
+
+# Raw image generations kept out of VCS; curated assets live under assets/branding
+ChatGPT Image *.png
+
+# Local packaged toolchains are too large for source control.
+# Release bundles/installers are expected to carry these assets separately.
+tools/llvm21/
+tools/wasmtime/
+tools/py_wasmtime/

@@ -1,0 +1,10 @@
+struct Point:
+    x: i32
+    y: i32
+
+def main() -> i32:
+    let point: Point = Point(x=20, y=22)
+    println(point.x)
+    println(point.y)
+    println(point.x + point.y)
+    return 0

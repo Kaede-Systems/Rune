@@ -1,0 +1,80 @@
+def add(a: i32, b: i32) -> i32:
+    return a + b
+
+def sub(a: i32, b: i32) -> i32:
+    return a - b
+
+def mul(a: i32, b: i32) -> i32:
+    return a * b
+
+def div(a: i32, b: i32) -> i32:
+    return a / b
+
+def rem(a: i32, b: i32) -> i32:
+    return a % b
+
+def eq(a: i32, b: i32) -> bool:
+    return a == b
+
+def ne(a: i32, b: i32) -> bool:
+    return a != b
+
+def gt(a: i32, b: i32) -> bool:
+    return a > b
+
+def ge(a: i32, b: i32) -> bool:
+    return a >= b
+
+def lt(a: i32, b: i32) -> bool:
+    return a < b
+
+def le(a: i32, b: i32) -> bool:
+    return a <= b
+
+def run_benchmark(limit: i32) -> i64:
+    let i: i32 = 1
+    let total: i64 = int(0)
+
+    while i <= limit:
+        total = total + int(add(i, 3))
+        total = total + int(sub(i, 1))
+        total = total + int(mul(i, 2))
+        total = total + int(div(i + 8, 3))
+        total = total + int(rem(i + 11, 7))
+
+        if eq(rem(i, 2), 0):
+            total = total + int(1)
+        if ne(rem(i, 3), 0):
+            total = total + int(1)
+        if gt(i, 10):
+            total = total + int(1)
+        if ge(i, 10):
+            total = total + int(1)
+        if lt(i, limit):
+            total = total + int(1)
+        if le(i, limit):
+            total = total + int(1)
+
+        i = i + 1
+
+    return total
+
+def main() -> i32:
+    let x: i32 = 42
+    let y: i32 = 5
+
+    println("Rune calculator")
+    println("add=", add(x, y))
+    println("sub=", sub(x, y))
+    println("mul=", mul(x, y))
+    println("div=", div(x, y))
+    println("mod=", rem(x, y))
+    println("eq=", eq(x, y))
+    println("ne=", ne(x, y))
+    println("gt=", gt(x, y))
+    println("ge=", ge(x, y))
+    println("lt=", lt(x, y))
+    println("le=", le(x, y))
+    println("checksum=", run_benchmark(200000))
+
+    return 0

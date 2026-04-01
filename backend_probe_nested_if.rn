@@ -1,0 +1,5 @@
+def main() -> i32:
+    if 1 == 1:
+        if 2 == 2:
+            return 7
+    return 0

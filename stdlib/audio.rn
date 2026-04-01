@@ -1,0 +1,5 @@
+def bell() -> bool:
+    return __rune_builtin_audio_bell()
+
+def beep() -> bool:
+    return bell()

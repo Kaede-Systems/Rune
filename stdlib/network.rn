@@ -1,0 +1,11 @@
+def tcp_connect(host: String, port: i32) -> bool:
+    return __rune_builtin_network_tcp_connect(host, port)
+
+def tcp_connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool:
+    return __rune_builtin_network_tcp_connect_timeout(host, port, timeout_ms)
+
+def tcp_probe(host: String, port: i32) -> bool:
+    return tcp_connect(host, port)
+
+def tcp_probe_timeout(host: String, port: i32, timeout_ms: i32) -> bool:
+    return tcp_connect_timeout(host, port, timeout_ms)

@@ -1,0 +1,12 @@
+def main() -> i32:
+    let value = 40
+    if value == 40:
+        println("eq")
+    if value < 50:
+        println("lt")
+    value = "40"
+    if value == 40:
+        println("string-eq")
+    if value != 99:
+        println("ne")
+    return 0

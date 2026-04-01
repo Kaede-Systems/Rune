@@ -1,0 +1,11 @@
+struct Point:
+    x: i32
+    y: i32
+
+def sum_point(point: Point) -> i32:
+    return point.x + point.y
+
+def main() -> i32:
+    let point: Point = Point(x=20, y=22)
+    println(sum_point(point))
+    return 0

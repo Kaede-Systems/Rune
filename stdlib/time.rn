@@ -1,0 +1,19 @@
+def unix_now() -> i64:
+    return __rune_builtin_time_now_unix()
+
+def monotonic_ms() -> i64:
+    return __rune_builtin_time_monotonic_ms()
+
+def sleep_ms(ms: i64) -> unit:
+    __rune_builtin_time_sleep_ms(ms)
+    return
+
+def sleep(seconds: i64) -> unit:
+    sleep_ms(seconds * int("1000"))
+    return
+
+def sleep_until(deadline_ms: i64) -> unit:
+    let now: i64 = monotonic_ms()
+    if deadline_ms > now:
+        sleep_ms(deadline_ms - now)
+    return

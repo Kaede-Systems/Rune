@@ -1,0 +1,40 @@
+def clear() -> unit:
+    __rune_builtin_terminal_clear()
+    return
+
+def move_to(row: i32, col: i32) -> unit:
+    __rune_builtin_terminal_move_to(row, col)
+    return
+
+def hide_cursor() -> unit:
+    __rune_builtin_terminal_hide_cursor()
+    return
+
+def show_cursor() -> unit:
+    __rune_builtin_terminal_show_cursor()
+    return
+
+def set_title(title: String) -> unit:
+    __rune_builtin_terminal_set_title(title)
+    return
+
+def clear_screen() -> unit:
+    clear()
+    return
+
+def home() -> unit:
+    move_to(1, 1)
+    return
+
+def clear_and_home() -> unit:
+    clear()
+    move_to(1, 1)
+    return
+
+def hide() -> unit:
+    hide_cursor()
+    return
+
+def show() -> unit:
+    show_cursor()
+    return

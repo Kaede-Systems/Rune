@@ -1,0 +1,117 @@
+name: Release Bundles
+
+on:
+  push:
+    branches:
+      - release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rune-release-branch
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            runner: windows-latest
+            binary: target/release/rune.exe
+            bundle: rune-bundle-windows-x64.zip
+            archive: zip
+          - id: linux-x64
+            runner: ubuntu-latest
+            binary: target/release/rune
+            bundle: rune-bundle-linux-x64.tar.gz
+            archive: tar
+          - id: linux-arm64
+            runner: ubuntu-24.04-arm
+            binary: target/release/rune
+            bundle: rune-bundle-linux-arm64.tar.gz
+            archive: tar
+          - id: macos-x64
+            runner: macos-13
+            binary: target/release/rune
+            bundle: rune-bundle-macos-x64.tar.gz
+            archive: tar
+          - id: macos-arm64
+            runner: macos-14
+            binary: target/release/rune
+            bundle: rune-bundle-macos-arm64.tar.gz
+            archive: tar
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rune
+        run: cargo build --release
+
+      - name: Stage Unix bundle
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p bundle/bin bundle/share/rune bundle/installers
+          cp "${{ matrix.binary }}" bundle/bin/rune
+          chmod 755 bundle/bin/rune
+          cp installers/install-unix.sh bundle/installers/install-unix.sh
+          cp installers/README.md bundle/installers/README.md
+          tar -czf "${{ matrix.bundle }}" -C bundle .
+
+      - name: Stage Windows bundle
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bundle\bin -Force | Out-Null
+          New-Item -ItemType Directory -Path bundle\share\rune -Force | Out-Null
+          New-Item -ItemType Directory -Path bundle\installers -Force | Out-Null
+          Copy-Item "${{ matrix.binary }}" bundle\bin\rune.exe -Force
+          Copy-Item installers\install-windows.ps1 bundle\installers\install-windows.ps1 -Force
+          Copy-Item installers\README.md bundle\installers\README.md -Force
+          Compress-Archive -Path bundle\* -DestinationPath "${{ matrix.bundle }}" -Force
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bundle }}
+          path: ${{ matrix.bundle }}
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten release assets
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p flat
+          find release-assets -type f -maxdepth 2 -exec cp {} flat/ \;
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -eux
+          TAG="release-branch-latest"
+          TITLE="Release Branch Latest"
+          NOTES="Automated Rune release bundles from the release branch."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" flat/* --clobber
+          else
+            gh release create "$TAG" flat/* --title "$TITLE" --notes "$NOTES"
+          fi

@@ -1,0 +1,12 @@
+def rem(a: i32, b: i32) -> i32:
+    return a % b
+
+def main() -> i32:
+    let a: i32 = rem(10, 3)
+    println(a)
+    let value = 10
+    value = true
+    value = 10
+    value = value % 4
+    println(value)
+    return 0

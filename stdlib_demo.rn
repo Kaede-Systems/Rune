@@ -1,0 +1,9 @@
+from system import pid
+from time import unix_now
+
+def main() -> i32:
+    print("pid=")
+    println(pid())
+    print("unix=")
+    println(unix_now())
+    return 0

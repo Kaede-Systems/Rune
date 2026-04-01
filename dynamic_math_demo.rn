@@ -1,0 +1,9 @@
+def main() -> i32:
+    let value = 10
+    value = value - 3
+    println(value)
+    value = value * 5
+    println(value)
+    value = value / 7
+    println(value)
+    return 0

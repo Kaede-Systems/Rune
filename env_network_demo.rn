@@ -1,0 +1,21 @@
+from env import arg_count, exists, get_i32
+from network import tcp_connect, tcp_connect_timeout
+from system import cpu_count
+from time import monotonic_ms
+
+def main() -> i32:
+    print("argc=")
+    println(arg_count())
+    print("cpu_count=")
+    println(cpu_count())
+    print("has_path=")
+    println(exists("PATH"))
+    print("port=")
+    println(get_i32("PORT", 8080))
+    print("mono_ms=")
+    println(monotonic_ms())
+    print("tcp_localhost_65535=")
+    println(tcp_connect("127.0.0.1", 65535))
+    print("tcp_timeout_localhost_80=")
+    println(tcp_connect_timeout("127.0.0.1", 80, 50))
+    return 0

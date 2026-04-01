@@ -1,0 +1,14 @@
+def exists(path: String) -> bool:
+    return __rune_builtin_fs_exists(path)
+
+def read_string(path: String) -> String:
+    return __rune_builtin_fs_read_string(path)
+
+def read_text(path: String) -> String:
+    return read_string(path)
+
+def write_string(path: String, content: String) -> bool:
+    return __rune_builtin_fs_write_string(path, content)
+
+def write_text(path: String, content: String) -> bool:
+    return write_string(path, content)

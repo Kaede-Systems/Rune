@@ -1,0 +1,6 @@
+def main() -> i32:
+    eprint("warn=")
+    eprintln(42)
+    print("tick")
+    flush()
+    return 0

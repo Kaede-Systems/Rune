@@ -1,0 +1,26 @@
+def write(value) -> unit:
+    print(str(value))
+    return
+
+def writeln(value) -> unit:
+    println(str(value))
+    return
+
+def error(value) -> unit:
+    eprint(str(value))
+    return
+
+def errorln(value) -> unit:
+    eprintln(str(value))
+    return
+
+def flush_out() -> unit:
+    flush()
+    return
+
+def flush_err() -> unit:
+    eflush()
+    return
+
+def read_line() -> String:
+    return input()

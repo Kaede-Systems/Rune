@@ -1,0 +1,7 @@
+def main() -> i32:
+    let value = 40
+    value = value + 2
+    println(value)
+    value = value + "!"
+    println(value)
+    return 0
