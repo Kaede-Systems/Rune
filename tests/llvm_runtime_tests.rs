@@ -2,16 +2,25 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rune::build::build_executable_llvm;
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir() -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time should be after epoch")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("rune-llvm-runtime-test-{stamp}"));
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "rune-llvm-runtime-test-{}-{}-{}",
+        std::process::id(),
+        stamp,
+        unique
+    ));
     fs::create_dir_all(&dir).expect("failed to create temp dir");
     dir
 }
@@ -98,4 +107,28 @@ fn llvm_backend_builds_and_runs_dynamic_program_on_windows() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "true\n42\n! ok\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_string_int_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_string_int_demo.rn");
+    let exe_path = dir.join("llvm_string_int_demo.exe");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    println(int(\"123\"))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm string int program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built string int executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "123\n");
 }

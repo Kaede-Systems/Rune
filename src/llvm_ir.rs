@@ -175,7 +175,7 @@ impl<'a> Emitter<'a> {
         out.push_str(&format!(
             "define {} @{}(",
             llvm_function_return_type(sig)?,
-            function.name
+            llvm_internal_symbol_name(&function.name, sig)
         ));
         for (index, (name, ty)) in sig.params.iter().enumerate() {
             if index > 0 {
@@ -826,6 +826,17 @@ impl<'a> FunctionEmitter<'a> {
                         out.push_str(&format!("  {reg} = zext i1 {value} to i64\n"));
                         reg
                     }
+                    IrType::String => {
+                        let rendered = self.resolve_value(&arg.value, &IrType::String, out)?;
+                        let (ptr, len) = split_string_value(&rendered)?;
+                        self.declared_runtime
+                            .insert("declare i64 @rune_rt_string_to_i64(ptr, i64)\n".into());
+                        let reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {reg} = call i64 @rune_rt_string_to_i64({ptr}, {len})\n"
+                        ));
+                        reg
+                    }
                     IrType::Dynamic => {
                         let rendered = self.resolve_dynamic_value(&arg.value, out)?;
                         let (tag, payload, extra) = split_dynamic_value(&rendered)?;
@@ -839,7 +850,7 @@ impl<'a> FunctionEmitter<'a> {
                     }
                     _ => {
                         return Err(LlvmIrError {
-                            message: "`int` currently supports only bool, i32, i64, and dynamic in the LLVM IR backend".into(),
+                            message: "`int` currently supports only bool, i32, i64, String, and dynamic in the LLVM IR backend".into(),
                         });
                     }
                 };
@@ -1311,7 +1322,8 @@ impl<'a> FunctionEmitter<'a> {
 
         if sig.ret == IrType::Unit {
             out.push_str(&format!(
-                "  call void @{callee}({})\n",
+                "  call void @{}({})\n",
+                llvm_internal_symbol_name(callee, sig),
                 rendered_args.join(", ")
             ));
             if let Some(dst) = dst {
@@ -1329,7 +1341,11 @@ impl<'a> FunctionEmitter<'a> {
                 .insert("declare ptr @rune_rt_from_c_string(ptr)\n".into());
             self.declared_runtime
                 .insert("declare i64 @rune_rt_last_string_len()\n".into());
-            out.push_str(&format!("  {reg} = call ptr @{callee}({})\n", rendered_args.join(", ")));
+            out.push_str(&format!(
+                "  {reg} = call ptr @{}({})\n",
+                llvm_internal_symbol_name(callee, sig),
+                rendered_args.join(", ")
+            ));
             let owned_ptr = self.next_reg();
             out.push_str(&format!(
                 "  {owned_ptr} = call ptr @rune_rt_from_c_string(ptr {reg})\n"
@@ -1345,8 +1361,9 @@ impl<'a> FunctionEmitter<'a> {
         } else if matches!(sig.ret, IrType::String | IrType::Dynamic) {
             let aggregate_reg = self.next_reg();
             out.push_str(&format!(
-                "  {aggregate_reg} = call {} @{callee}({})\n",
+                "  {aggregate_reg} = call {} @{}({})\n",
                 llvm_internal_type(&sig.ret)?,
+                llvm_internal_symbol_name(callee, sig),
                 rendered_args.join(", ")
             ));
             if sig.ret == IrType::String {
@@ -1388,8 +1405,9 @@ impl<'a> FunctionEmitter<'a> {
         } else {
             let reg = self.next_reg();
             out.push_str(&format!(
-                "  {reg} = call {} @{callee}({})\n",
+                "  {reg} = call {} @{}({})\n",
                 llvm_scalar_type(&sig.ret)?,
+                llvm_internal_symbol_name(callee, sig),
                 rendered_args.join(", ")
             ));
             if let Some(dst) = dst {
@@ -1893,6 +1911,18 @@ fn type_ref_to_ir(ty: &TypeRef) -> Result<IrType, LlvmIrError> {
         other => Err(LlvmIrError {
             message: format!("type `{other}` is not yet supported by the current LLVM IR backend"),
         }),
+    }
+}
+
+fn llvm_internal_symbol_name(name: &str, sig: &FunctionSig) -> String {
+    if sig.is_extern || name == "main" {
+        return name.to_string();
+    }
+
+    if crate::codegen::native_internal_symbol_name(name) != name {
+        crate::codegen::native_internal_symbol_name(name)
+    } else {
+        name.to_string()
     }
 }
 

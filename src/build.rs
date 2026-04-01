@@ -2052,7 +2052,7 @@ fn rename_functions_for_library(program: &Program, asm: &str) -> String {
         let Item::Function(function) = item else {
             continue;
         };
-        let from = &function.name;
+        let from = crate::codegen::native_internal_symbol_name(&function.name);
         let to = format!("rune_export_internal_{}", function.name);
         renamed = renamed.replace(&format!(".globl {from}"), &format!(".globl {to}"));
         renamed = renamed.replace(&format!("\n{from}:\n"), &format!("\n{to}:\n"));

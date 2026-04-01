@@ -53,6 +53,74 @@ pub fn emit_program_with_context(program: &Program) -> Result<String, CodegenFai
     Ok(peephole_optimize_asm(&asm))
 }
 
+pub(crate) fn native_internal_symbol_name(name: &str) -> String {
+    if name == "main" {
+        return "main".to_string();
+    }
+
+    if should_mangle_native_symbol(name) {
+        format!("rune_fn_{name}")
+    } else {
+        name.to_string()
+    }
+}
+
+fn should_mangle_native_symbol(name: &str) -> bool {
+    matches!(
+        name,
+        "exit"
+            | "abort"
+            | "malloc"
+            | "calloc"
+            | "realloc"
+            | "free"
+            | "memcpy"
+            | "memmove"
+            | "memset"
+            | "strlen"
+            | "strcmp"
+            | "strncmp"
+            | "strcpy"
+            | "strncpy"
+            | "strcat"
+            | "strncat"
+            | "printf"
+            | "fprintf"
+            | "sprintf"
+            | "snprintf"
+            | "puts"
+            | "fputs"
+            | "putchar"
+            | "getchar"
+            | "fopen"
+            | "fclose"
+            | "fflush"
+            | "fread"
+            | "fwrite"
+            | "remove"
+            | "rename"
+            | "system"
+            | "time"
+            | "clock"
+            | "sleep"
+            | "open"
+            | "close"
+            | "read"
+            | "write"
+            | "socket"
+            | "bind"
+            | "listen"
+            | "accept"
+            | "connect"
+            | "send"
+            | "recv"
+            | "sendto"
+            | "recvfrom"
+            | "select"
+            | "poll"
+    )
+}
+
 struct Generator<'a> {
     program: &'a Program,
     function_names: BTreeSet<String>,
@@ -435,8 +503,9 @@ impl<'a> Generator<'a> {
             function.span,
         );
 
+        let symbol_name = native_internal_symbol_name(&function.name);
         self.output
-            .push_str(&format!(".globl {}\n{}:\n", function.name, function.name));
+            .push_str(&format!(".globl {symbol_name}\n{symbol_name}:\n"));
         self.output.push_str("    push rbp\n");
         self.output.push_str("    mov rbp, rsp\n");
         if stack_size > 0 {
@@ -522,8 +591,7 @@ impl<'a> Generator<'a> {
 
         emitter.emit_block(&mut self.output, &function.body)?;
 
-        self.output
-            .push_str(&format!("{}.return:\n", function.name));
+        self.output.push_str(&format!("{symbol_name}.return:\n"));
         if stack_size > 0 {
             self.output
                 .push_str(&format!("    add rsp, {stack_size}\n"));
@@ -660,7 +728,10 @@ impl<'a> FunctionEmitter<'a> {
                             stmt.span,
                         )?;
                         out.push_str("    xor eax, eax\n");
-                        out.push_str(&format!("    jmp {}.return\n", self.function_name));
+                        out.push_str(&format!(
+                            "    jmp {}.return\n",
+                            native_internal_symbol_name(self.function_name)
+                        ));
                         return Ok(());
                     }
                     if return_ty == IrType::Dynamic {
@@ -687,7 +758,10 @@ impl<'a> FunctionEmitter<'a> {
                         out.push_str("    xor eax, eax\n");
                     }
                 }
-                out.push_str(&format!("    jmp {}.return\n", self.function_name));
+                out.push_str(&format!(
+                    "    jmp {}.return\n",
+                    native_internal_symbol_name(self.function_name)
+                ));
                 Ok(())
             }
             Stmt::If(stmt) => {
@@ -771,7 +845,10 @@ impl<'a> FunctionEmitter<'a> {
         out.push_str(&format!("    mov r9, {}\n", meta.len()));
         out.push_str("    call rune_rt_raise\n");
         out.push_str("    mov eax, 102\n");
-        out.push_str(&format!("    jmp {}.return\n", self.function_name));
+        out.push_str(&format!(
+            "    jmp {}.return\n",
+            native_internal_symbol_name(self.function_name)
+        ));
         Ok(())
     }
 
@@ -787,7 +864,10 @@ impl<'a> FunctionEmitter<'a> {
         out.push_str(&format!("    mov r9, {}\n", context.len()));
         out.push_str("    call rune_rt_panic\n");
         out.push_str("    mov eax, 101\n");
-        out.push_str(&format!("    jmp {}.return\n", self.function_name));
+        out.push_str(&format!(
+            "    jmp {}.return\n",
+            native_internal_symbol_name(self.function_name)
+        ));
         Ok(())
     }
 
@@ -1647,7 +1727,12 @@ impl<'a> FunctionEmitter<'a> {
                     }
                 }
             }
-            out.push_str(&format!("    call {name}\n"));
+            let target_name = if callee_is_extern {
+                name.clone()
+            } else {
+                native_internal_symbol_name(name)
+            };
+            out.push_str(&format!("    call {target_name}\n"));
             if callee_is_extern && callee_return_ty == IrType::String {
                 out.push_str("    mov rcx, rax\n");
                 out.push_str("    call rune_rt_from_c_string\n");
@@ -1688,7 +1773,12 @@ impl<'a> FunctionEmitter<'a> {
         for index in 0..register_count {
             out.push_str(&format!("    pop {}\n", arg_regs[index]));
         }
-        out.push_str(&format!("    call {name}\n"));
+        let target_name = if callee_is_extern {
+            name.clone()
+        } else {
+            native_internal_symbol_name(name)
+        };
+        out.push_str(&format!("    call {target_name}\n"));
         if callee_is_extern && callee_return_ty == IrType::String {
             out.push_str("    mov rcx, rax\n");
             out.push_str("    call rune_rt_from_c_string\n");
@@ -2686,7 +2776,10 @@ impl<'a> FunctionEmitter<'a> {
             }
         }
         out.push_str(&format!("    lea rcx, [rbp-{base_offset}]\n"));
-        out.push_str(&format!("    call {callee_name}\n"));
+        out.push_str(&format!(
+            "    call {}\n",
+            native_internal_symbol_name(callee_name)
+        ));
         Ok(())
     }
 

@@ -138,3 +138,13 @@ fn emits_str_builtin_runtime_calls() {
     assert!(ir.contains("declare ptr @rune_rt_string_from_bool(i1)"));
     assert!(ir.contains("declare i64 @rune_rt_last_string_len()"));
 }
+
+#[test]
+fn emits_int_string_runtime_call() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i32:\n    println(int(\"123\"))\n    return 0\n",
+    )
+    .expect("llvm ir should generate for string int conversion");
+
+    assert!(ir.contains("declare i64 @rune_rt_string_to_i64(ptr, i64)"));
+}
