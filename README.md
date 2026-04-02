@@ -203,7 +203,7 @@ When the packaged LLVM C backend is available, the Uno path now goes through:
 
 Rune release bundles and installers now treat `llvm-cbe` as part of the packaged toolchain:
 
-- the `llvm-cbe` source tree is vendored in this repository
+- the `llvm-cbe` source tree is vendored in this repository under `tools/llvm-cbe`
 - CI builds a host `llvm-cbe` binary for each release bundle
 - installers verify that `llvm-cbe` exists and can build it locally against the packaged LLVM bundle if needed
 

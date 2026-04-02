@@ -602,8 +602,8 @@ fn emit_arduino_uno_precode(program: &Program) -> Result<String, BuildError> {
     if find_packaged_llvm_cbe().is_some() {
         let precode = emit_arduino_uno_precode_via_llvm_cbe(program)?;
         return Ok(format!(
-            "// --- rune_arduino_uno.ll ---\n{}\n// --- rune_arduino_uno.c ---\n{}\n// --- rune_arduino_uno_runtime.cpp ---\n{}",
-            precode.llvm_ir, precode.c_source, precode.runtime_cpp
+            "// --- rune_arduino_uno.ll ---\n{}\n// --- rune_arduino_uno.c ---\n{}\n// --- rune_arduino_runtime.hpp ---\n{}\n// --- rune_arduino_uno_runtime.cpp ---\n{}",
+            precode.llvm_ir, precode.c_source, precode.runtime_header, precode.runtime_cpp
         ));
     }
 
@@ -847,6 +847,7 @@ fn build_arduino_uno_hex_via_llvm_cbe(
 struct ArduinoUnoPrecodeArtifacts {
     llvm_ir: String,
     c_source: String,
+    runtime_header: String,
     runtime_cpp: String,
 }
 
@@ -855,6 +856,9 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
 ) -> Result<ArduinoUnoPrecodeArtifacts, BuildError> {
     let llvm_cbe = find_packaged_llvm_cbe().ok_or_else(|| {
         BuildError::ToolNotFound("packaged LLVM C backend tool not found".into())
+    })?;
+    let runtime_header_path = find_arduino_avr_runtime_header().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Rune Arduino AVR runtime header not found".into())
     })?;
     let entrypoint = detect_arduino_uno_entrypoint_kind(program).map_err(BuildError::Codegen)?;
     let llvm_ir = emit_llvm_ir(program).map_err(|error| {
@@ -895,6 +899,10 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
         source,
     })?;
     let c_source = rewrite_arduino_uno_cbe_source(&c_source, entrypoint);
+    let runtime_header = fs::read_to_string(&runtime_header_path).map_err(|source| BuildError::Io {
+        context: format!("failed to read `{}`", runtime_header_path.display()),
+        source,
+    })?;
     let runtime_cpp = emit_arduino_uno_cbe_runtime_cpp(entrypoint);
 
     let _ = fs::remove_file(&llvm_ir_path);
@@ -904,6 +912,7 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
     Ok(ArduinoUnoPrecodeArtifacts {
         llvm_ir,
         c_source,
+        runtime_header,
         runtime_cpp,
     })
 }

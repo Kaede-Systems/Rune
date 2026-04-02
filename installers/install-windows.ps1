@@ -56,7 +56,6 @@ function Test-LlvmCbeReady {
 function Get-LlvmCbeSourcePath {
     param([string]$ToolsRoot)
     foreach ($candidate in @(
-        (Join-Path $ToolsRoot "llvm-cbe-src"),
         (Join-Path $ToolsRoot "llvm-cbe")
     )) {
         if (Test-Path -LiteralPath (Join-Path $candidate "CMakeLists.txt")) {

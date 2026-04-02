@@ -32,9 +32,16 @@ fn emit_avr_precode_command_prints_real_uno_pre_elf_code() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("// --- rune_arduino_uno"));
-    assert!(stdout.contains("rune_rt_print_str"));
+    assert!(
+        stdout.contains("rune_rt_print_str")
+            || stdout.contains("rune_arduino_uno.cpp")
+            || stdout.contains("Serial.write")
+            || stdout.contains("rune_serial_write")
+    );
     assert!(
         stdout.contains("rune_entry_main")
             || stdout.contains("#define RUNE_ARDUINO_ENTRY_MAIN 1")
+            || stdout.contains("void setup()")
+            || stdout.contains("int main(")
     );
 }

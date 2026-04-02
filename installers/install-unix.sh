@@ -153,7 +153,7 @@ find_llvm_cmake_dir() {
 
 find_llvm_cbe_source_dir() {
     tools_root=$1
-    for candidate in "${tools_root}/llvm-cbe-src" "${tools_root}/llvm-cbe"; do
+    for candidate in "${tools_root}/llvm-cbe"; do
         if [ -f "${candidate}/CMakeLists.txt" ]; then
             printf '%s\n' "$candidate"
             return 0

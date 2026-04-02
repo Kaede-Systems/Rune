@@ -5,8 +5,7 @@ This directory is where Rune expects packaged toolchain assets to exist locally.
 Examples:
 
 - `tools/llvm21/`
-- `tools/llvm-cbe/` for local built binaries during development
-- `tools/llvm-cbe-src/` for the vendored LLVM C backend source tree
+- `tools/llvm-cbe/` for the vendored LLVM C backend source tree and local built binaries during development
 - `tools/wasmtime/`
 - `tools/arduino-avr/`
 
@@ -16,7 +15,7 @@ Source repo policy:
 
 - source code, tests, docs, installers, manifests, and runtime integration live in Git
 - packaged LLVM/LLD/Wasmtime/Arduino-AVR bundles are treated as release/distribution assets
-- the vendored `llvm-cbe` source tree lives in Git under `tools/llvm-cbe-src/`
+- the vendored `llvm-cbe` source tree lives in Git under `tools/llvm-cbe/`
 - host `llvm-cbe` binaries are packaged into release bundles under `tools/llvm-cbe/<host>/bin`
 
 Local development can still place those bundles here, and Rune will use them.

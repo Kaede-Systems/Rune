@@ -91,7 +91,7 @@ PY
           tar -xf .toolchain/llvm.tar.xz -C .toolchain/llvm
           LLVM_ROOT="$(find .toolchain/llvm -mindepth 1 -maxdepth 1 -type d | head -n 1)"
           test -n "$LLVM_ROOT"
-          cmake -S tools/llvm-cbe-src -B .toolchain/llvm-cbe-build -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" -DCMAKE_BUILD_TYPE=Release
+          cmake -S tools/llvm-cbe -B .toolchain/llvm-cbe-build -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" -DCMAKE_BUILD_TYPE=Release
           cmake --build .toolchain/llvm-cbe-build --config Release --target llvm-cbe -j2
 
       - name: Build llvm-cbe (Windows)
@@ -103,7 +103,7 @@ PY
           Invoke-WebRequest -Uri "${{ matrix.llvm_url }}" -OutFile $installer
           $llvmRoot = Join-Path (Resolve-Path .toolchain).Path "llvm\windows-x64"
           Start-Process -FilePath $installer -ArgumentList "/S", "/D=$llvmRoot" -Wait
-          cmake -S tools/llvm-cbe-src -B .toolchain\llvm-cbe-build -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR="$llvmRoot\lib\cmake\llvm"
+          cmake -S tools/llvm-cbe -B .toolchain\llvm-cbe-build -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR="$llvmRoot\lib\cmake\llvm"
           cmake --build .toolchain\llvm-cbe-build --config Release --target llvm-cbe
 
       - name: Stage Unix bundle
@@ -115,7 +115,7 @@ PY
           cp "${{ matrix.binary }}" bundle/bin/rune
           chmod 755 bundle/bin/rune
           printf '%s\n' "$RUNE_VERSION" > bundle/share/rune/VERSION
-          cp -R tools/llvm-cbe-src bundle/share/rune/tools/llvm-cbe-src
+          cp -R tools/llvm-cbe bundle/share/rune/tools/llvm-cbe
           cp .toolchain/llvm-cbe-build/tools/llvm-cbe/llvm-cbe bundle/share/rune/tools/llvm-cbe/${{ matrix.host_bundle }}/bin/llvm-cbe
           chmod 755 bundle/share/rune/tools/llvm-cbe/${{ matrix.host_bundle }}/bin/llvm-cbe
           cp installers/install-unix.sh bundle/installers/install-unix.sh
@@ -132,7 +132,7 @@ PY
           New-Item -ItemType Directory -Path bundle\installers -Force | Out-Null
           Copy-Item "${{ matrix.binary }}" bundle\bin\rune.exe -Force
           Set-Content -Path bundle\share\rune\VERSION -Value $env:RUNE_VERSION -NoNewline
-          Copy-Item tools\llvm-cbe-src bundle\share\rune\tools\llvm-cbe-src -Recurse -Force
+          Copy-Item tools\llvm-cbe bundle\share\rune\tools\llvm-cbe -Recurse -Force
           Copy-Item .toolchain\llvm-cbe-build\tools\llvm-cbe\Release\llvm-cbe.exe bundle\share\rune\tools\llvm-cbe\${{ matrix.host_bundle }}\bin\llvm-cbe.exe -Force
           Copy-Item installers\install-windows.ps1 bundle\installers\install-windows.ps1 -Force
           Copy-Item installers\README.md bundle\installers\README.md -Force

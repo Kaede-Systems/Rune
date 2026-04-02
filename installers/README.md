@@ -73,6 +73,6 @@ Developer/local install:
 - `latest` resolves to the moving `release-branch-latest` channel.
 - explicit versions resolve to immutable tags like `v0.2.0`.
 - The local-install mode is still useful when developing Rune from source.
-- Release bundles now include a host `llvm-cbe` binary and the vendored `llvm-cbe` source tree.
+- Release bundles now include a host `llvm-cbe` binary and the vendored `llvm-cbe` source tree under `tools/llvm-cbe`.
 - If a bundle does not already contain a host `llvm-cbe` binary, the installers build it locally against the packaged LLVM toolchain.
 - These installers are intended to pair with release assets published from CI, not with giant toolchain blobs committed into the source repository.
