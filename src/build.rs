@@ -1691,6 +1691,40 @@ fn emit_arduino_uno_stmt_expr(
             span: expr.span,
         });
     };
+    if let ExprKind::Field { base, name } = &callee.kind {
+        let base_rendered = emit_arduino_uno_expr(scope, functions, structs, base)?;
+        let ArduinoUnoType::Struct(struct_name) = &base_rendered.1 else {
+            return Err(CodegenError {
+                message: "Arduino Uno target method calls require a concrete class or struct receiver".into(),
+                span: callee.span,
+            });
+        };
+        let struct_sig = structs.get(struct_name).ok_or_else(|| CodegenError {
+            message: format!("Arduino Uno target is missing struct layout for `{struct_name}`"),
+            span: callee.span,
+        })?;
+        let method_sig = struct_sig.methods.get(name).ok_or_else(|| CodegenError {
+            message: format!("Arduino Uno target struct `{struct_name}` has no method `{name}`"),
+            span: callee.span,
+        })?;
+        let rendered = emit_arduino_uno_method_call(
+            scope,
+            functions,
+            structs,
+            struct_name,
+            name,
+            method_sig,
+            &base_rendered,
+            args,
+            expr.span,
+        )?;
+        if method_sig.return_type.is_some() {
+            out.push_str(&format!("{prefix}(void)({rendered});\n"));
+        } else {
+            out.push_str(&format!("{prefix}{rendered};\n"));
+        }
+        return Ok(());
+    }
     let ExprKind::Identifier(name) = &callee.kind else {
         let rendered = emit_arduino_uno_expr(scope, functions, structs, expr)?;
         match rendered.1 {

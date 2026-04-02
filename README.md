@@ -156,6 +156,19 @@ Build and flash the serial calculator example:
 cargo run -- build serial_calculator_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o serial_calculator_arduino.hex
 ```
 
+Build and flash the current Arduino quiz/buzzer examples:
+
+```powershell
+cargo run -- build serial_math_quiz_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o serial_math_quiz_arduino.hex
+cargo run -- build buzzer_serial_control_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o buzzer_serial_control_arduino.hex
+```
+
+Verify the AVR OOP/string runtime example on real hardware:
+
+```powershell
+cargo run -- build avr_oop_string_test.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o avr_oop_string_test.hex
+```
+
 ## Main Commands
 
 ```text
@@ -206,6 +219,20 @@ Rune release bundles and installers now treat `llvm-cbe` as part of the packaged
 - the `llvm-cbe` source tree is vendored in this repository under `tools/llvm-cbe`
 - CI builds a host `llvm-cbe` binary for each release bundle
 - installers verify that `llvm-cbe` exists and can build it locally against the packaged LLVM bundle if needed
+
+## Examples
+
+Current repo examples include:
+
+- [hello_arduino.rn](hello_arduino.rn): minimal Arduino Uno serial hello-world
+- [serial_math_quiz_arduino.rn](serial_math_quiz_arduino.rn): serial-driven positive math quiz with LED feedback
+- [serial_connector_arduino.rn](serial_connector_arduino.rn): host-side serial connector for the Uno quiz
+- [buzzer_arduino.rn](buzzer_arduino.rn): basic buzzer example for pins `8` and `7`
+- [buzzer_serial_control_arduino.rn](buzzer_serial_control_arduino.rn): interactive buzzer control over serial
+- [ultrasonic_distance_arduino.rn](ultrasonic_distance_arduino.rn): HC-SR04 distance reader example
+- [avr_oop_string_test.rn](avr_oop_string_test.rn): AVR class/method/string runtime smoke test
+- [calculator.rn](calculator.rn): native desktop calculator example
+- [wasm_demo.rn](wasm_demo.rn): simple WASM-oriented example
 
 The current toolchain state is documented in:
 

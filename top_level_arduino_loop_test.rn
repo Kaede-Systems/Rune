@@ -1,0 +1,12 @@
+from arduino import delay_ms, digital_out, led_builtin, uart_begin
+
+uart_begin(115200)
+println("Rune top-level Uno loop test")
+
+while true:
+    digital_out(led_builtin(), true)
+    println("led on")
+    delay_ms(300)
+    digital_out(led_builtin(), false)
+    println("led off")
+    delay_ms(300)

@@ -83,6 +83,15 @@ Recommended usage:
 - use `print`, `println`, and `input()` when you want the same high-level syntax as desktop Rune
 - use `uart_*` only when you specifically need byte-level serial control on the board
 
+Current Uno example files using this surface:
+
+- [hello_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/hello_arduino.rn)
+- [serial_math_quiz_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/serial_math_quiz_arduino.rn)
+- [buzzer_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/buzzer_arduino.rn)
+- [buzzer_serial_control_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/buzzer_serial_control_arduino.rn)
+- [ultrasonic_distance_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/ultrasonic_distance_arduino.rn)
+- [avr_oop_string_test.rn](/C:/Users/kaededevkentohinode/KUROX/avr_oop_string_test.rn)
+
 Current Arduino limitations:
 
 - this module is implemented for the current Uno embedded slice, not full Rune parity
