@@ -1290,7 +1290,8 @@ impl<'a> FunctionEmitter<'a> {
             | "__rune_builtin_system_target"
             | "__rune_builtin_system_board" => {
                 self.expect_plain_arity(callee, args, 0)?;
-                let reg = self.next_reg();
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
                 let runtime = match callee {
                     "__rune_builtin_system_platform" => "rune_rt_system_platform",
                     "__rune_builtin_system_arch" => "rune_rt_system_arch",
@@ -1300,9 +1301,13 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 self.declared_runtime
                     .insert(format!("declare ptr @{runtime}()\n"));
-                out.push_str(&format!("  {reg} = call ptr @{runtime}()\n"));
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!("  {ptr_reg} = call ptr @{runtime}()\n"));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
                 if let Some(dst) = dst {
-                    self.value_map.insert(dst.clone(), reg);
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
                 }
                 return Ok(());
             }
@@ -2411,9 +2416,7 @@ impl<'a> FunctionEmitter<'a> {
             }
             IrType::String => {
                 let rendered = self.resolve_value(value_name, ty, out)?;
-                let (ptr, len) = rendered.split_once(", ").ok_or_else(|| LlvmIrError {
-                    message: "internal LLVM string rendering bug".into(),
-                })?;
+                let (ptr, len) = split_string_value(&rendered)?;
                 let decl = if stderr {
                     "declare void @rune_rt_eprint_str(ptr, i64)\n"
                 } else {

@@ -3895,19 +3895,47 @@ fn object_file_name(target_spec: &TargetSpec) -> &'static str {
 }
 
 fn find_rustc() -> Option<PathBuf> {
-    let home = env::var_os("USERPROFILE")?;
-    let candidate = PathBuf::from(home)
-        .join(".rustup")
-        .join("toolchains")
-        .join("stable-x86_64-pc-windows-gnu")
-        .join("bin")
-        .join("rustc.exe");
-
-    if candidate.is_file() {
-        Some(candidate)
-    } else {
-        None
+    if let Some(explicit) = env::var_os("RUSTC") {
+        let candidate = PathBuf::from(explicit);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
+
+    let path_names: &[&str] = if cfg!(target_os = "windows") {
+        &["rustc.exe", "rustc"]
+    } else {
+        &["rustc"]
+    };
+    if let Some(path_var) = env::var_os("PATH") {
+        for dir in env::split_paths(&path_var) {
+            for name in path_names {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    let home = env::var_os(if cfg!(target_os = "windows") {
+        "USERPROFILE"
+    } else {
+        "HOME"
+    })?;
+    let rustup_bin = if cfg!(target_os = "windows") {
+        PathBuf::from(&home)
+            .join(".cargo")
+            .join("bin")
+            .join("rustc.exe")
+    } else {
+        PathBuf::from(&home).join(".cargo").join("bin").join("rustc")
+    };
+    if rustup_bin.is_file() {
+        return Some(rustup_bin);
+    }
+
+    None
 }
 
 fn portable_runtime_source() -> &'static str {
