@@ -48,6 +48,35 @@ function Test-WasmtimeReady {
     return [bool](Get-ChildItem -LiteralPath $Root -Recurse -Include wasmtime.exe,wasmtime -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
+function Test-LlvmCbeReady {
+    param([string]$Root)
+    return [bool](Get-ChildItem -LiteralPath $Root -Recurse -Include llvm-cbe.exe,llvm-cbe -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+function Get-LlvmCbeSourcePath {
+    param([string]$ToolsRoot)
+    foreach ($candidate in @(
+        (Join-Path $ToolsRoot "llvm-cbe-src"),
+        (Join-Path $ToolsRoot "llvm-cbe")
+    )) {
+        if (Test-Path -LiteralPath (Join-Path $candidate "CMakeLists.txt")) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Find-LlvmCmakeDir {
+    param([string]$Root)
+    $candidate = Get-ChildItem -LiteralPath $Root -Recurse -Directory -Filter llvm -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -like "*\\lib\\cmake\\llvm" } |
+        Select-Object -First 1
+    if ($candidate) {
+        return $candidate.FullName
+    }
+    return $null
+}
+
 function Download-ReleaseBundle {
     param(
         [string]$RepoName,
@@ -125,6 +154,7 @@ function Ensure-HostTools {
     $toolsRoot = Join-Path $DestinationRoot "share\\rune\\tools"
     $llvmDest = Join-Path $toolsRoot "llvm21\\$bundleName"
     $wasmtimeDest = Join-Path $toolsRoot "wasmtime\\extract\\$bundleName"
+    $llvmCbeDest = Join-Path $toolsRoot "llvm-cbe\\$bundleName"
     New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
 
     if (-not (Test-Path -LiteralPath $llvmDest) -or -not (Test-LlvmReady -Root $llvmDest)) {
@@ -160,6 +190,36 @@ function Ensure-HostTools {
         }
         Remove-Item -LiteralPath $wasmtimeDest -Recurse -Force -ErrorAction SilentlyContinue
         Move-Item -LiteralPath $source -Destination $wasmtimeDest
+    }
+
+    if (-not (Test-Path -LiteralPath $llvmCbeDest) -or -not (Test-LlvmCbeReady -Root $llvmCbeDest)) {
+        $llvmCbeSource = Get-LlvmCbeSourcePath -ToolsRoot $toolsRoot
+        if (-not $llvmCbeSource) {
+            throw "Packaged llvm-cbe source is missing, and no bundled llvm-cbe executable was found."
+        }
+
+        $llvmCmake = Find-LlvmCmakeDir -Root $llvmDest
+        if (-not $llvmCmake) {
+            throw "Downloaded LLVM bundle is missing lib\\cmake\\llvm"
+        }
+
+        $tempDir = Join-Path $env:TEMP ("rune-cbe-" + [guid]::NewGuid().ToString("N"))
+        $buildDir = Join-Path $tempDir "build"
+        New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+        cmake -S $llvmCbeSource -B $buildDir -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR=$llvmCmake
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to configure llvm-cbe"
+        }
+        cmake --build $buildDir --config Release --target llvm-cbe
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to build llvm-cbe"
+        }
+        $builtCbe = Join-Path $buildDir "tools\\llvm-cbe\\Release\\llvm-cbe.exe"
+        if (-not (Test-Path -LiteralPath $builtCbe)) {
+            throw "Built llvm-cbe binary not found"
+        }
+        New-Item -ItemType Directory -Path (Join-Path $llvmCbeDest "bin") -Force | Out-Null
+        Copy-Item -LiteralPath $builtCbe -Destination (Join-Path $llvmCbeDest "bin\\llvm-cbe.exe") -Force
     }
 }
 

@@ -18,6 +18,7 @@ Rune today has working vertical slices for:
 - imports and stdlib modules
 - C FFI in both directions for the currently supported ABI slice
 - packaged tooling for LLVM, LLD, Wasmtime, installers, and branding assets
+- vendored `llvm-cbe` source plus packaged host `llvm-cbe` binaries in release bundles
 
 Rune is ambitious, but the repository is kept honest. The language vision is larger than the current fully-complete release surface, and the docs call that out explicitly.
 
@@ -164,6 +165,7 @@ rune check file.rn
 rune emit-ir file.rn
 rune emit-asm file.rn
 rune emit-llvm-ir file.rn
+rune emit-avr-precode file.rn
 rune emit-c-header file.rn -o file.h
 rune build file.rn
 rune build file.rn --object --target thumbv6m-none-eabi -o firmware.o
@@ -198,6 +200,12 @@ When the packaged LLVM C backend is available, the Uno path now goes through:
 - packaged AVR GCC/G++
 - `.elf`
 - `.hex`
+
+Rune release bundles and installers now treat `llvm-cbe` as part of the packaged toolchain:
+
+- the `llvm-cbe` source tree is vendored in this repository
+- CI builds a host `llvm-cbe` binary for each release bundle
+- installers verify that `llvm-cbe` exists and can build it locally against the packaged LLVM bundle if needed
 
 The current toolchain state is documented in:
 

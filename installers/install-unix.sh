@@ -131,6 +131,37 @@ detect_tool_urls() {
     esac
 }
 
+test_llvm_ready() {
+    root=$1
+    [ -d "$root" ] && find "$root" -path '*/bin/opt' -type f | grep . >/dev/null 2>&1
+}
+
+test_wasmtime_ready() {
+    root=$1
+    [ -d "$root" ] && find "$root" \( -name wasmtime -o -name wasmtime.exe \) -type f | grep . >/dev/null 2>&1
+}
+
+test_llvm_cbe_ready() {
+    root=$1
+    [ -d "$root" ] && find "$root" \( -name llvm-cbe -o -name llvm-cbe.exe \) -type f | grep . >/dev/null 2>&1
+}
+
+find_llvm_cmake_dir() {
+    root=$1
+    find "$root" -type d -path '*/lib/cmake/llvm' | head -n 1
+}
+
+find_llvm_cbe_source_dir() {
+    tools_root=$1
+    for candidate in "${tools_root}/llvm-cbe-src" "${tools_root}/llvm-cbe"; do
+        if [ -f "${candidate}/CMakeLists.txt" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 download_release_bundle() {
     require_cmd curl
     require_cmd tar
@@ -215,23 +246,19 @@ ensure_host_tools() {
     tools_root="${dest_root}/share/rune/tools"
     llvm_dest="${tools_root}/llvm21/${host_bundle}"
     wasmtime_dest="${tools_root}/wasmtime/extract/${host_bundle}"
-    mkdir -p "${tools_root}/llvm21" "${tools_root}/wasmtime/extract"
+    llvm_cbe_dest="${tools_root}/llvm-cbe/${host_bundle}"
+    mkdir -p "${tools_root}/llvm21" "${tools_root}/wasmtime/extract" "${tools_root}/llvm-cbe"
 
     temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/rune-tools.XXXXXX")
 
-    llvm_ready=0
-    if [ -d "$llvm_dest" ] && find "$llvm_dest" -path '*/bin/opt' -type f | grep . >/dev/null 2>&1; then
-        llvm_ready=1
-    fi
-
-    if [ "$llvm_ready" -ne 1 ]; then
+    if ! test_llvm_ready "$llvm_dest"; then
         llvm_archive="${temp_dir}/llvm.tar.xz"
         printf 'Downloading LLVM toolchain for %s\n' "$host_bundle"
         curl -fL "$llvm_url" -o "$llvm_archive"
         llvm_stage="${temp_dir}/llvm-stage"
         mkdir -p "$llvm_stage"
         tar -xf "$llvm_archive" -C "$llvm_stage"
-        if ! find "$llvm_stage" -path '*/bin/opt' -type f | grep . >/dev/null 2>&1; then
+        if ! test_llvm_ready "$llvm_stage"; then
             printf 'downloaded LLVM bundle is missing opt\n' >&2
             exit 1
         fi
@@ -240,25 +267,46 @@ ensure_host_tools() {
         mv "$llvm_stage" "$llvm_dest"
     fi
 
-    wasmtime_ready=0
-    if [ -d "$wasmtime_dest" ] && find "$wasmtime_dest" \( -name wasmtime -o -name wasmtime.exe \) -type f | grep . >/dev/null 2>&1; then
-        wasmtime_ready=1
-    fi
-
-    if [ "$wasmtime_ready" -ne 1 ]; then
+    if ! test_wasmtime_ready "$wasmtime_dest"; then
         wasmtime_archive="${temp_dir}/wasmtime.tar.xz"
         printf 'Downloading Wasmtime for %s\n' "$host_bundle"
         curl -fL "$wasmtime_url" -o "$wasmtime_archive"
         wasmtime_stage="${temp_dir}/wasmtime-stage"
         mkdir -p "$wasmtime_stage"
         tar -xf "$wasmtime_archive" -C "$wasmtime_stage"
-        if ! find "$wasmtime_stage" \( -name wasmtime -o -name wasmtime.exe \) -type f | grep . >/dev/null 2>&1; then
+        if ! test_wasmtime_ready "$wasmtime_stage"; then
             printf 'downloaded Wasmtime bundle is missing the wasmtime binary\n' >&2
             exit 1
         fi
         rm -rf "$wasmtime_dest"
         mkdir -p "$(dirname "$wasmtime_dest")"
         mv "$wasmtime_stage" "$wasmtime_dest"
+    fi
+
+    if ! test_llvm_cbe_ready "$llvm_cbe_dest"; then
+        require_cmd cmake
+        llvm_cbe_source=$(find_llvm_cbe_source_dir "$tools_root" || true)
+        if [ -z "$llvm_cbe_source" ]; then
+            printf 'packaged llvm-cbe source is missing, and no bundled llvm-cbe executable was found\n' >&2
+            exit 1
+        fi
+        llvm_cmake_dir=$(find_llvm_cmake_dir "$llvm_dest")
+        if [ -z "$llvm_cmake_dir" ]; then
+            printf 'packaged LLVM bundle is missing lib/cmake/llvm\n' >&2
+            exit 1
+        fi
+        cbe_build="${temp_dir}/llvm-cbe-build"
+        cmake -S "$llvm_cbe_source" -B "$cbe_build" -DLLVM_DIR="$llvm_cmake_dir" -DCMAKE_BUILD_TYPE=Release
+        cmake --build "$cbe_build" --config Release --target llvm-cbe -j2
+        built_cbe=$(find "$cbe_build" -type f \( -name llvm-cbe -o -name llvm-cbe.exe \) | head -n 1)
+        if [ -z "$built_cbe" ]; then
+            printf 'llvm-cbe build did not produce a binary\n' >&2
+            exit 1
+        fi
+        rm -rf "$llvm_cbe_dest"
+        mkdir -p "${llvm_cbe_dest}/bin"
+        cp "$built_cbe" "${llvm_cbe_dest}/bin/llvm-cbe"
+        chmod 755 "${llvm_cbe_dest}/bin/llvm-cbe"
     fi
 }
 
