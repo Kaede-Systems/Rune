@@ -22,6 +22,7 @@ use rune::toolchain::{
     find_arduino_avrdude, find_packaged_ld_lld, find_packaged_ld64_lld,
     find_packaged_lld_link, find_packaged_llvm_tool, find_packaged_wasm_ld, find_packaged_wasmtime,
 };
+use rune::version::{display_version, release_tag};
 use rune::warnings::collect_warnings;
 
 fn main() -> ExitCode {
@@ -39,6 +40,12 @@ fn run() -> Result<(), String> {
     let Some(command) = args.next() else {
         return Err(usage());
     };
+
+    if matches!(command.as_str(), "--version" | "-V" | "version") {
+        println!("{}", display_version());
+        println!("release tag: {}", release_tag());
+        return Ok(());
+    }
 
     match command.as_str() {
         "lex" => {
@@ -712,7 +719,7 @@ fn pretty_path(path: &Path) -> String {
 }
 
 fn usage() -> String {
-    "Usage:\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
+    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
 }
 
 fn display_kind(kind: &TokenKind) -> String {

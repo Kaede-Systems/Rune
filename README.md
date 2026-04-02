@@ -215,11 +215,32 @@ Installer scripts:
 
 The installers are release-oriented now: if you do not pass a local binary path, they download the matching Rune release bundle for the current OS/arch from GitHub Releases and install it.
 
+Version commands:
+
+```text
+rune version
+rune --version
+```
+
 ## Release Automation
 
 The repository now includes [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-On pushes to the `release` branch, it builds host-native Rune bundles for the configured GitHub Actions matrix, packages them as `rune-bundle-*` assets, and publishes or updates the `release-branch-latest` GitHub Release.
+Branch flow:
+
+- `main` is the active development branch
+- `release` is the release-candidate and publishing branch
+
+When `main` is ready, it should be merged into `release`.
+
+On pushes to the `release` branch, CI now:
+
+- builds host-native Rune bundles for the configured matrix
+- publishes immutable versioned assets like `rune-v0.2.0-linux-x64.tar.gz`
+- publishes moving latest-channel assets like `rune-latest-linux-x64.tar.gz`
+- updates the `release-branch-latest` GitHub Release
+
+Versioning details are documented in [Docs/VERSIONING.md](Docs/VERSIONING.md).
 
 ## Arduino Uno Notes
 

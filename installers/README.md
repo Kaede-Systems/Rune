@@ -21,14 +21,10 @@ share/
     tools/
 ```
 
-Release bundle asset names:
+Release bundle asset names now follow two channels:
 
-- `rune-bundle-windows-x64.zip`
-- `rune-bundle-windows-arm64.zip`
-- `rune-bundle-linux-x64.tar.gz`
-- `rune-bundle-linux-arm64.tar.gz`
-- `rune-bundle-macos-x64.tar.gz`
-- `rune-bundle-macos-arm64.tar.gz`
+- immutable versioned assets like `rune-v0.2.0-linux-x64.tar.gz`
+- moving latest-channel assets like `rune-latest-linux-x64.tar.gz`
 
 ## Windows
 
@@ -38,10 +34,10 @@ Install from the latest GitHub release:
 powershell -ExecutionPolicy Bypass -File .\installers\install-windows.ps1
 ```
 
-Install from a specific repository/tag:
+Install from a specific repository/version:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\installers\install-windows.ps1 -Repo Kaede-Systems/Rune -Version v0.1.0
+powershell -ExecutionPolicy Bypass -File .\installers\install-windows.ps1 -Repo Kaede-Systems/Rune -Version 0.2.0
 ```
 
 Developer/local install:
@@ -59,10 +55,10 @@ chmod +x ./installers/install-unix.sh
 ./installers/install-unix.sh
 ```
 
-Install from a specific repository/tag:
+Install from a specific repository/version:
 
 ```bash
-./installers/install-unix.sh --repo Kaede-Systems/Rune --version v0.1.0
+./installers/install-unix.sh --repo Kaede-Systems/Rune --version 0.2.0
 ```
 
 Developer/local install:
@@ -74,5 +70,7 @@ Developer/local install:
 ## Notes
 
 - The release-install mode downloads the correct bundle for the current host.
+- `latest` resolves to the moving `release-branch-latest` channel.
+- explicit versions resolve to immutable tags like `v0.2.0`.
 - The local-install mode is still useful when developing Rune from source.
 - These installers are intended to pair with release assets published from CI, not with giant toolchain blobs committed into the source repository.

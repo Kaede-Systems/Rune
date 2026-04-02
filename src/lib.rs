@@ -10,4 +10,5 @@ pub mod optimize;
 pub mod parser;
 pub mod semantic;
 pub mod toolchain;
+pub mod version;
 pub mod warnings;

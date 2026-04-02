@@ -13,9 +13,9 @@ $WasmtimeVersion = "43.0.0"
 function Get-HostAssetName {
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($arch -match "ARM64") {
-        return "rune-bundle-windows-arm64.zip"
+        return "windows-arm64.zip"
     }
-    return "rune-bundle-windows-x64.zip"
+    return "windows-x64.zip"
 }
 
 function Get-HostBundleName {
@@ -32,17 +32,26 @@ function Download-ReleaseBundle {
         [string]$ReleaseVersion
     )
 
-    $assetName = Get-HostAssetName
+    $assetSuffix = Get-HostAssetName
+    $normalizedVersion = $ReleaseVersion
+    if ($normalizedVersion -ne "latest" -and $normalizedVersion -ne "release-branch-latest") {
+        if (-not $normalizedVersion.StartsWith("v")) {
+            $normalizedVersion = "v$normalizedVersion"
+        }
+    }
+    if ($normalizedVersion -eq "latest" -or $normalizedVersion -eq "release-branch-latest") {
+        $tag = "release-branch-latest"
+        $assetName = "rune-latest-$assetSuffix"
+    } else {
+        $tag = $normalizedVersion
+        $assetName = "rune-$tag-$assetSuffix"
+    }
     $tempDir = Join-Path $env:TEMP ("rune-install-" + [guid]::NewGuid().ToString("N"))
     $archivePath = Join-Path $tempDir $assetName
     $extractDir = Join-Path $tempDir "extract"
     New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
 
-    if ($ReleaseVersion -eq "latest") {
-        $url = "https://github.com/$RepoName/releases/latest/download/$assetName"
-    } else {
-        $url = "https://github.com/$RepoName/releases/download/$ReleaseVersion/$assetName"
-    }
+    $url = "https://github.com/$RepoName/releases/download/$tag/$assetName"
 
     Write-Host "Downloading $url"
     Invoke-WebRequest -Uri $url -OutFile $archivePath

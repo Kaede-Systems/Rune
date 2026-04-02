@@ -15,7 +15,7 @@ Modes:
 Examples:
   ./install-unix.sh ./rune
   ./install-unix.sh --repo Kaede-Systems/Rune
-  ./install-unix.sh --repo Kaede-Systems/Rune --version v0.1.0
+  ./install-unix.sh --repo Kaede-Systems/Rune --version 0.2.0
 EOF
 }
 
@@ -74,16 +74,16 @@ detect_asset_name() {
 
     case "${uname_s}:${uname_m}" in
         linux:x86_64|linux:amd64)
-            printf 'rune-bundle-linux-x64.tar.gz\n'
+            printf 'linux-x64.tar.gz\n'
             ;;
         linux:aarch64|linux:arm64)
-            printf 'rune-bundle-linux-arm64.tar.gz\n'
+            printf 'linux-arm64.tar.gz\n'
             ;;
         darwin:x86_64)
-            printf 'rune-bundle-macos-x64.tar.gz\n'
+            printf 'macos-x64.tar.gz\n'
             ;;
         darwin:arm64|darwin:aarch64)
-            printf 'rune-bundle-macos-arm64.tar.gz\n'
+            printf 'macos-arm64.tar.gz\n'
             ;;
         *)
             printf 'unsupported host: %s %s\n' "$uname_s" "$uname_m" >&2
@@ -127,15 +127,25 @@ download_release_bundle() {
     require_cmd curl
     require_cmd tar
 
-    asset_name=$(detect_asset_name)
+    asset_suffix=$(detect_asset_name)
+    normalized_version=$VERSION
+    if [ "$normalized_version" != "latest" ] && [ "$normalized_version" != "release-branch-latest" ]; then
+        case "$normalized_version" in
+            v*) ;;
+            *) normalized_version="v${normalized_version}" ;;
+        esac
+    fi
+    if [ "$normalized_version" = "latest" ] || [ "$normalized_version" = "release-branch-latest" ]; then
+        tag="release-branch-latest"
+        asset_name="rune-latest-${asset_suffix}"
+    else
+        tag="$normalized_version"
+        asset_name="rune-${tag}-${asset_suffix}"
+    fi
     temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/rune-install.XXXXXX")
     archive_path="${temp_dir}/${asset_name}"
 
-    if [ "$VERSION" = "latest" ]; then
-        url="https://github.com/${REPO}/releases/latest/download/${asset_name}"
-    else
-        url="https://github.com/${REPO}/releases/download/${VERSION}/${asset_name}"
-    fi
+    url="https://github.com/${REPO}/releases/download/${tag}/${asset_name}"
 
     printf 'Downloading %s\n' "$url"
     curl -fL "$url" -o "$archive_path"
