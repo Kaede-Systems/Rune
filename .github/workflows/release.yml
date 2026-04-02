@@ -35,12 +35,12 @@ jobs:
             bundle: rune-bundle-linux-arm64.tar.gz
             archive: tar
           - id: macos-x64
-            runner: macos-13
+            runner: macos-15-intel
             binary: target/release/rune
             bundle: rune-bundle-macos-x64.tar.gz
             archive: tar
           - id: macos-arm64
-            runner: macos-14
+            runner: macos-15
             binary: target/release/rune
             bundle: rune-bundle-macos-arm64.tar.gz
             archive: tar

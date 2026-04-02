@@ -1986,9 +1986,9 @@ impl<'a> Analyzer<'a> {
                         });
                     };
                     let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
-                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino pin")?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino pin")?;
                     let mode_ty = self.check_expr(mode_expr, scope, in_async)?;
-                    self.expect_type(&mode_ty, &Type::I32, mode_expr.span, "Arduino pin mode")?;
+                    self.expect_integer_type(&mode_ty, mode_expr.span, "Arduino pin mode")?;
                     Ok(Type::Unit)
                 }
                 "__rune_builtin_arduino_digital_write" => {
@@ -2005,7 +2005,7 @@ impl<'a> Analyzer<'a> {
                         });
                     };
                     let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
-                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino pin")?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino pin")?;
                     let value_ty = self.check_expr(value_expr, scope, in_async)?;
                     self.expect_type(&value_ty, &Type::Bool, value_expr.span, "Arduino digital value")?;
                     Ok(Type::Unit)
@@ -2024,8 +2024,27 @@ impl<'a> Analyzer<'a> {
                         });
                     };
                     let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
-                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino pin")?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino pin")?;
                     Ok(Type::Bool)
+                }
+                "__rune_builtin_arduino_analog_write" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_analog_write` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_analog_write` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino PWM pin")?;
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_integer_type(&value_ty, value_expr.span, "Arduino PWM value")?;
+                    Ok(Type::Unit)
                 }
                 "__rune_builtin_arduino_analog_read" => {
                     if args.len() != 1 {
@@ -2041,7 +2060,7 @@ impl<'a> Analyzer<'a> {
                         });
                     };
                     let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
-                    self.expect_type(&pin_ty, &Type::I32, pin_expr.span, "Arduino analog pin")?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino analog pin")?;
                     Ok(Type::I64)
                 }
                 "__rune_builtin_arduino_delay_ms" => {
@@ -2058,13 +2077,39 @@ impl<'a> Analyzer<'a> {
                         });
                     };
                     let ms_ty = self.check_expr(ms_expr, scope, in_async)?;
-                    self.expect_type(&ms_ty, &Type::I32, ms_expr.span, "Arduino delay milliseconds")?;
+                    self.expect_integer_type(&ms_ty, ms_expr.span, "Arduino delay milliseconds")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_delay_us" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_delay_us` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(us_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_delay_us` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let us_ty = self.check_expr(us_expr, scope, in_async)?;
+                    self.expect_integer_type(&us_ty, us_expr.span, "Arduino delay microseconds")?;
                     Ok(Type::Unit)
                 }
                 "__rune_builtin_arduino_millis" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
                             message: "`__rune_builtin_arduino_millis` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_micros" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_micros` takes no arguments".to_string(),
                             span,
                         });
                     }
@@ -2078,6 +2123,87 @@ impl<'a> Analyzer<'a> {
                         });
                     }
                     Ok(Type::String)
+                }
+                "__rune_builtin_arduino_mode_input"
+                | "__rune_builtin_arduino_mode_output"
+                | "__rune_builtin_arduino_mode_input_pullup"
+                | "__rune_builtin_arduino_led_builtin" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: format!("`{name}` takes no arguments"),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_uart_begin" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_begin` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(baud_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_begin` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let baud_ty = self.check_expr(baud_expr, scope, in_async)?;
+                    self.expect_integer_type(&baud_ty, baud_expr.span, "Arduino UART baud")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_uart_available" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_available` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_uart_read_byte" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_read_byte` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_uart_write_byte" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_write_byte` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_write_byte` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_integer_type(&value_ty, value_expr.span, "Arduino UART byte")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_uart_write" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_write` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(text_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_uart_write` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let text_ty = self.check_expr(text_expr, scope, in_async)?;
+                    self.expect_type(&text_ty, &Type::String, text_expr.span, "Arduino UART text")?;
+                    Ok(Type::Unit)
                 }
                 "__rune_builtin_terminal_clear" => {
                     if !args.is_empty() {
@@ -2210,6 +2336,25 @@ impl<'a> Analyzer<'a> {
             actual,
             Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::String
         )
+    }
+
+    fn expect_integer_type(
+        &self,
+        actual: &Type,
+        span: Span,
+        context: &str,
+    ) -> Result<(), SemanticError> {
+        if matches!(actual, Type::I32 | Type::I64) {
+            Ok(())
+        } else {
+            Err(SemanticError {
+                message: format!(
+                    "{context} expected `i32` or `i64`, found `{}`",
+                    actual.display_name()
+                ),
+                span,
+            })
+        }
     }
 
     fn is_integer_pair(&self, left: &Type, right: &Type) -> bool {
@@ -2439,10 +2584,22 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_arduino_pin_mode" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_digital_write" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_digital_read" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_analog_write" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_analog_read" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_delay_ms" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_delay_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_millis" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_micros" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_read_line" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_mode_input" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_mode_output" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_mode_input_pullup" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_led_builtin" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_uart_begin" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_uart_available" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_uart_read_byte" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_uart_write_byte" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_uart_write" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_clear" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_move_to" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_hide_cursor" => Some(Type::Unknown("builtin".to_string())),

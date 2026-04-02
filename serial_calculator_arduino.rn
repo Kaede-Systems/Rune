@@ -1,0 +1,83 @@
+from arduino import delay_ms, digital_write, led_builtin, mode_output, pin_mode, uart_begin, uart_read_byte, uart_write
+
+def main() -> i32:
+    uart_begin(115200)
+
+    let led: i64 = led_builtin()
+    let output_mode: i64 = mode_output()
+    pin_mode(led, output_mode)
+    digital_write(led, false)
+
+    uart_write("Rune serial calculator ready\r\n")
+    uart_write("Enter expressions like 11+2 or 40/5, then press Enter\r\n")
+
+    while true:
+        let left: i64 = 0
+        let right: i64 = 0
+        let op: i64 = 0
+        let saw_left_digit: bool = false
+        let saw_right_digit: bool = false
+        let valid: bool = true
+        let reading_right: bool = false
+
+        let done: bool = false
+        while not done:
+            let byte: i64 = uart_read_byte()
+            if byte < 0:
+                delay_ms(1)
+            elif byte == 13:
+                let _noop: i64 = 0
+            elif byte == 10:
+                done = true
+            else:
+                if byte >= 32 and byte <= 126:
+                    uart_write_byte(byte)
+
+                if byte >= 48 and byte <= 57:
+                    if reading_right:
+                        right = right * 10 + (byte - 48)
+                        saw_right_digit = true
+                    else:
+                        left = left * 10 + (byte - 48)
+                        saw_left_digit = true
+                elif byte == 43 or byte == 45 or byte == 42 or byte == 47:
+                    if op != 0 or not saw_left_digit:
+                        valid = false
+                    else:
+                        op = byte
+                        reading_right = true
+                    uart_write(" ")
+                elif byte == 32 or byte == 9:
+                    let _space: i64 = 0
+                else:
+                    valid = false
+
+        uart_write("\r\n")
+
+        if not valid or not saw_left_digit or op == 0 or not saw_right_digit:
+            uart_write("invalid expression, use forms like 11+2 or 40/5\r\n")
+        else:
+            let result: i64 = 0
+            let ok: bool = true
+
+            if op == 43:
+                result = left + right
+            elif op == 45:
+                result = left - right
+            elif op == 42:
+                result = left * right
+            elif op == 47:
+                if right == 0:
+                    ok = false
+                    uart_write("division by zero\r\n")
+                else:
+                    result = left / right
+
+            if ok:
+                uart_write("= ")
+                println(result)
+                digital_write(led, true)
+                delay_ms(60)
+                digital_write(led, false)
+
+    return 0

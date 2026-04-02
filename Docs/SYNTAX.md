@@ -208,6 +208,22 @@ from env import has
 from network import tcp_connect
 ```
 
+Parenthesized multiline imports are also supported:
+
+```rune
+from arduino import (
+    uart_begin,
+    uart_write,
+    uart_read_byte,
+)
+```
+
+The packaged `arduino` stdlib can be imported directly with:
+
+```rune
+from arduino import pin_mode, led_builtin, mode_output
+```
+
 ## Exceptions
 
 Declared exceptions:
@@ -259,6 +275,7 @@ Language-level builtins currently recognized:
 
 These top-level stdlib modules currently exist in [`stdlib/`](C:\Users\kaededevkentohinode\KUROX\stdlib):
 
+- `arduino`
 - `json`
 - `time`
 - `system`
@@ -332,6 +349,33 @@ Current exported functions:
 - `flush_out() -> unit`
 - `flush_err() -> unit`
 - `read_line() -> String`
+
+`arduino`
+- `pin_mode(pin: i64, mode: i64) -> unit`
+- `digital_write(pin: i64, value: bool) -> unit`
+- `digital_read(pin: i64) -> bool`
+- `analog_write(pin: i64, value: i64) -> unit`
+- `analog_read(pin: i64) -> i64`
+- `delay_ms(ms: i64) -> unit`
+- `delay_us(us: i64) -> unit`
+- `millis() -> i64`
+- `micros() -> i64`
+- `read_line() -> String`
+- `mode_input() -> i64`
+- `mode_output() -> i64`
+- `mode_input_pullup() -> i64`
+- `led_builtin() -> i64`
+- `uart_begin(baud: i64) -> unit`
+- `uart_available() -> i64`
+- `uart_read_byte() -> i64`
+- `uart_write_byte(value: i64) -> unit`
+- `uart_write(text: String) -> unit`
+
+Arduino Uno target notes:
+
+- `main()` is supported
+- Arduino-style `setup()` and `loop()` entrypoints are also supported on the Uno target
+- serial calculator style programs now build and flash through the packaged AVR path
 
 `json`
 - `parse(text: String) -> Json`

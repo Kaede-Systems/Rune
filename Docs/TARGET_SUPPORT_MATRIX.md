@@ -30,7 +30,7 @@ This document separates implemented support from planned support.
 | `thumbv6m-none-eabi` | Implemented for freestanding object/static-lib output | Suitable for Cortex-M0/M0+ style targets |
 | `thumbv7em-none-eabihf` | Implemented for freestanding object/static-lib output | Suitable for Cortex-M4/M7 style targets |
 | `riscv32-unknown-elf` | Implemented for freestanding object/static-lib output | Covers the current packaged `riscv32` LLVM backend slice |
-| `avr-atmega328p-arduino-uno` | Implemented for current Arduino Uno embedded slice | Produces `.hex` and sibling `.elf` through the packaged Arduino AVR core plus packaged `avr-gcc`/`avr-g++`/`objcopy`; current scope includes `main`, locals, control flow, and `print`/`println` |
+| `avr-atmega328p-arduino-uno` | Implemented for current Arduino Uno embedded slice | Produces `.hex` and sibling `.elf` through the packaged Arduino AVR core plus packaged `avr-gcc`/`avr-g++`/`objcopy`; current scope includes `main` or `setup()`/`loop()`, locals, control flow, serial output/input, UART helpers, board constants, and pin/timing operations |
 
 ### Not Yet Implemented
 
@@ -42,7 +42,8 @@ This document separates implemented support from planned support.
 ### Notes
 
 - Embedded support currently means freestanding `--object` and `--static-lib` output for LLVM-backed embedded targets
-- Arduino Uno is the current packaged-AVR exception: `rune build file.rn --target avr-atmega328p-arduino-uno` compiles a generated Rune sketch against the packaged `ArduinoCore-avr` sources and produces a real `.hex`; `--flash --port COMx` flashes it through packaged `avrdude`
+- Arduino Uno is the current packaged-AVR exception: `rune build file.rn --target avr-atmega328p-arduino-uno` compiles generated Rune C++ against the packaged `ArduinoCore-avr` sources and produces a real `.hex`; `--flash --port COMx` flashes it through packaged `avrdude`
+- The Arduino Uno surface now resolves `from arduino import ...` from the packaged stdlib root and supports parenthesized multiline imports
 - Raspberry Pi support stays under native Linux ARM64 where applicable, not under the freestanding embedded slice
 
 ## WASM Targets

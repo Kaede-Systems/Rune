@@ -4,6 +4,55 @@ This document lists the Rune standard library modules that are implemented today
 
 These modules live in [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib).
 
+## `arduino`
+
+```rune
+from arduino import (
+    pin_mode, digital_write, digital_read,
+    analog_write, analog_read,
+    delay_ms, delay_us, millis, micros,
+    read_line,
+    mode_input, mode_output, mode_input_pullup, led_builtin,
+    uart_begin, uart_available, uart_read_byte, uart_write_byte, uart_write,
+)
+```
+
+Exports:
+
+- `pin_mode(pin: i64, mode: i64) -> unit`
+- `digital_write(pin: i64, value: bool) -> unit`
+- `digital_read(pin: i64) -> bool`
+- `analog_write(pin: i64, value: i64) -> unit`
+- `analog_read(pin: i64) -> i64`
+- `delay_ms(ms: i64) -> unit`
+- `delay_us(us: i64) -> unit`
+- `millis() -> i64`
+- `micros() -> i64`
+- `read_line() -> String`
+- `mode_input() -> i64`
+- `mode_output() -> i64`
+- `mode_input_pullup() -> i64`
+- `led_builtin() -> i64`
+- `uart_begin(baud: i64) -> unit`
+- `uart_available() -> i64`
+- `uart_read_byte() -> i64`
+- `uart_write_byte(value: i64) -> unit`
+- `uart_write(text: String) -> unit`
+
+Current implemented Arduino scope:
+
+- packaged Uno-target stdlib resolution through `from arduino import ...`
+- serial text output with `print`, `println`, and `uart_write`
+- serial line input with `read_line()`
+- byte-oriented UART access with `uart_available`, `uart_read_byte`, and `uart_write_byte`
+- board constants and pin/timing helpers
+- Arduino-style `setup()` / `loop()` entrypoints on the Uno target
+
+Current Arduino limitations:
+
+- this module is implemented for the current Uno embedded slice, not full Rune parity
+- dynamic values and full class/OOP parity are not implemented on AVR yet
+
 ## `json`
 
 ```rune

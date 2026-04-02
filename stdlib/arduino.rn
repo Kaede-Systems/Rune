@@ -1,23 +1,64 @@
-def pin_mode(pin: i32, mode: i32) -> unit:
+def pin_mode(pin: i64, mode: i64) -> unit:
     __rune_builtin_arduino_pin_mode(pin, mode)
     return
 
-def digital_write(pin: i32, value: bool) -> unit:
+def digital_write(pin: i64, value: bool) -> unit:
     __rune_builtin_arduino_digital_write(pin, value)
     return
 
-def digital_read(pin: i32) -> bool:
+def digital_read(pin: i64) -> bool:
     return __rune_builtin_arduino_digital_read(pin)
 
-def analog_read(pin: i32) -> i64:
+def analog_write(pin: i64, value: i64) -> unit:
+    __rune_builtin_arduino_analog_write(pin, value)
+    return
+
+def analog_read(pin: i64) -> i64:
     return __rune_builtin_arduino_analog_read(pin)
 
-def delay_ms(ms: i32) -> unit:
+def delay_ms(ms: i64) -> unit:
     __rune_builtin_arduino_delay_ms(ms)
+    return
+
+def delay_us(us: i64) -> unit:
+    __rune_builtin_arduino_delay_us(us)
     return
 
 def millis() -> i64:
     return __rune_builtin_arduino_millis()
 
+def micros() -> i64:
+    return __rune_builtin_arduino_micros()
+
 def read_line() -> String:
     return __rune_builtin_arduino_read_line()
+
+def mode_input() -> i64:
+    return __rune_builtin_arduino_mode_input()
+
+def mode_output() -> i64:
+    return __rune_builtin_arduino_mode_output()
+
+def mode_input_pullup() -> i64:
+    return __rune_builtin_arduino_mode_input_pullup()
+
+def led_builtin() -> i64:
+    return __rune_builtin_arduino_led_builtin()
+
+def uart_begin(baud: i64) -> unit:
+    __rune_builtin_arduino_uart_begin(baud)
+    return
+
+def uart_available() -> i64:
+    return __rune_builtin_arduino_uart_available()
+
+def uart_read_byte() -> i64:
+    return __rune_builtin_arduino_uart_read_byte()
+
+def uart_write_byte(value: i64) -> unit:
+    __rune_builtin_arduino_uart_write_byte(value)
+    return
+
+def uart_write(text: String) -> unit:
+    __rune_builtin_arduino_uart_write(text)
+    return

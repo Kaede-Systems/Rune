@@ -1868,8 +1868,8 @@ impl<'a> FunctionEmitter<'a> {
                     span,
                 });
             };
-            self.emit_into_reg(out, "ecx", pin_expr)?;
-            self.emit_into_reg(out, "edx", mode_expr)?;
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "rdx", mode_expr)?;
             out.push_str("    call rune_rt_arduino_pin_mode\n");
             out.push_str("    xor eax, eax\n");
             return Ok(());
@@ -1883,7 +1883,7 @@ impl<'a> FunctionEmitter<'a> {
                     span,
                 });
             };
-            self.emit_into_reg(out, "ecx", pin_expr)?;
+            self.emit_into_reg(out, "rcx", pin_expr)?;
             self.emit_into_reg(out, "edx", value_expr)?;
             out.push_str("    call rune_rt_arduino_digital_write\n");
             out.push_str("    xor eax, eax\n");
@@ -1898,9 +1898,24 @@ impl<'a> FunctionEmitter<'a> {
                     span,
                 });
             };
-            self.emit_into_reg(out, "ecx", pin_expr)?;
+            self.emit_into_reg(out, "rcx", pin_expr)?;
             out.push_str("    call rune_rt_arduino_digital_read\n");
             out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_analog_write" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_analog_write` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "rdx", value_expr)?;
+            out.push_str("    call rune_rt_arduino_analog_write\n");
+            out.push_str("    xor eax, eax\n");
             return Ok(());
         }
 
@@ -1912,7 +1927,7 @@ impl<'a> FunctionEmitter<'a> {
                     span,
                 });
             };
-            self.emit_into_reg(out, "ecx", pin_expr)?;
+            self.emit_into_reg(out, "rcx", pin_expr)?;
             out.push_str("    call rune_rt_arduino_analog_read\n");
             return Ok(());
         }
@@ -1925,8 +1940,22 @@ impl<'a> FunctionEmitter<'a> {
                     span,
                 });
             };
-            self.emit_into_reg(out, "ecx", ms_expr)?;
+            self.emit_into_reg(out, "rcx", ms_expr)?;
             out.push_str("    call rune_rt_arduino_delay_ms\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_delay_us" {
+            let [CallArg::Positional(us_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_delay_us` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", us_expr)?;
+            out.push_str("    call rune_rt_arduino_delay_us\n");
             out.push_str("    xor eax, eax\n");
             return Ok(());
         }
@@ -1942,6 +1971,17 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_arduino_micros" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_micros` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_arduino_micros\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_arduino_read_line" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -1950,6 +1990,97 @@ impl<'a> FunctionEmitter<'a> {
                 });
             }
             out.push_str("    call rune_rt_arduino_read_line\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_uart_begin" {
+            let [CallArg::Positional(baud_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_uart_begin` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", baud_expr)?;
+            out.push_str("    call rune_rt_arduino_uart_begin\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_uart_available" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_uart_available` takes no arguments"
+                        .to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_arduino_uart_available\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_uart_read_byte" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_uart_read_byte` takes no arguments"
+                        .to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_arduino_uart_read_byte\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_uart_write_byte" {
+            let [CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_arduino_uart_write_byte` expects 1 positional argument"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", value_expr)?;
+            out.push_str("    call rune_rt_arduino_uart_write_byte\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_uart_write" {
+            let [CallArg::Positional(text_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_uart_write` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, text_expr, "rcx", "rdx", "Arduino UART text")?;
+            out.push_str("    call rune_rt_arduino_uart_write\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_arduino_mode_input"
+                | "__rune_builtin_arduino_mode_output"
+                | "__rune_builtin_arduino_mode_input_pullup"
+                | "__rune_builtin_arduino_led_builtin"
+        ) {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{name}` takes no arguments"),
+                    span,
+                });
+            }
+            let runtime = match name.as_str() {
+                "__rune_builtin_arduino_mode_input" => "rune_rt_arduino_mode_input",
+                "__rune_builtin_arduino_mode_output" => "rune_rt_arduino_mode_output",
+                "__rune_builtin_arduino_mode_input_pullup" => "rune_rt_arduino_mode_input_pullup",
+                "__rune_builtin_arduino_led_builtin" => "rune_rt_arduino_led_builtin",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
             return Ok(());
         }
 
@@ -3938,7 +4069,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"
-        | "__rune_builtin_arduino_millis" => Some(IrType::I64),
+        | "__rune_builtin_arduino_millis"
+        | "__rune_builtin_arduino_micros" => Some(IrType::I64),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix"
         | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
@@ -3951,11 +4083,22 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_terminal_set_title"
         | "__rune_builtin_arduino_pin_mode"
         | "__rune_builtin_arduino_digital_write"
-        | "__rune_builtin_arduino_delay_ms" => Some(IrType::Unit),
+        | "__rune_builtin_arduino_analog_write"
+        | "__rune_builtin_arduino_delay_ms"
+        | "__rune_builtin_arduino_delay_us"
+        | "__rune_builtin_arduino_uart_begin"
+        | "__rune_builtin_arduino_uart_write_byte"
+        | "__rune_builtin_arduino_uart_write" => Some(IrType::Unit),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"
-        | "__rune_builtin_env_arg_count" => Some(IrType::I32),
+        | "__rune_builtin_env_arg_count"
+        | "__rune_builtin_arduino_mode_input"
+        | "__rune_builtin_arduino_mode_output"
+        | "__rune_builtin_arduino_mode_input_pullup"
+        | "__rune_builtin_arduino_led_builtin"
+        | "__rune_builtin_arduino_uart_available"
+        | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"

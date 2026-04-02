@@ -622,34 +622,70 @@ enum ArduinoUnoType {
 }
 
 fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
-    let main = program
-        .items
-        .iter()
-        .find_map(|item| match item {
-            Item::Function(function) if function.name == "main" => Some(function),
-            _ => None,
-        })
-        .ok_or_else(|| CodegenError {
-            message: "Arduino Uno target requires a `main` function".into(),
-            span: crate::lexer::Span { line: 1, column: 1 },
-        })?;
+    let main = program.items.iter().find_map(|item| match item {
+        Item::Function(function) if function.name == "main" => Some(function),
+        _ => None,
+    });
+    let setup_fn = program.items.iter().find_map(|item| match item {
+        Item::Function(function) if function.name == "setup" => Some(function),
+        _ => None,
+    });
+    let loop_fn = program.items.iter().find_map(|item| match item {
+        Item::Function(function) if function.name == "loop" => Some(function),
+        _ => None,
+    });
 
-    if main.is_extern || main.is_async {
+    if main.is_some() && (setup_fn.is_some() || loop_fn.is_some()) {
         return Err(CodegenError {
-            message: "Arduino Uno target does not support extern or async `main`".into(),
-            span: main.span,
-        });
-    }
-    if !main.params.is_empty() {
-        return Err(CodegenError {
-            message: "Arduino Uno target requires `main()` with no parameters".into(),
-            span: main.span,
+            message: "Arduino Uno target expects either `main()` or `setup()`/`loop()`, not both".into(),
+            span: main.expect("checked above").span,
         });
     }
 
-    let mut body = String::new();
-    let mut scope = HashMap::new();
-    emit_arduino_uno_block(&mut body, &main.body.statements, &mut scope, 1)?;
+    let has_setup = setup_fn.is_some();
+    let has_loop = loop_fn.is_some();
+    let (setup_source, loop_source) = if let Some(main) = main {
+        if main.is_extern || main.is_async {
+            return Err(CodegenError {
+                message: "Arduino Uno target does not support extern or async `main`".into(),
+                span: main.span,
+            });
+        }
+        if !main.params.is_empty() {
+            return Err(CodegenError {
+                message: "Arduino Uno target requires `main()` with no parameters".into(),
+                span: main.span,
+            });
+        }
+        let mut body = String::new();
+        let mut scope = HashMap::new();
+        emit_arduino_uno_block(&mut body, &main.body.statements, &mut scope, 1)?;
+        (body, String::new())
+    } else {
+        let mut setup_body = String::new();
+        let mut loop_body = String::new();
+
+        if let Some(setup_fn) = setup_fn {
+            validate_arduino_uno_entry_fn(setup_fn, "setup")?;
+            let mut scope = HashMap::new();
+            emit_arduino_uno_block(&mut setup_body, &setup_fn.body.statements, &mut scope, 1)?;
+        }
+
+        if let Some(loop_fn) = loop_fn {
+            validate_arduino_uno_entry_fn(loop_fn, "loop")?;
+            let mut scope = HashMap::new();
+            emit_arduino_uno_block(&mut loop_body, &loop_fn.body.statements, &mut scope, 1)?;
+        }
+
+        if !has_setup && !has_loop {
+            return Err(CodegenError {
+                message: "Arduino Uno target requires `main()` or at least one of `setup()`/`loop()`".into(),
+                span: crate::lexer::Span { line: 1, column: 1 },
+            });
+        }
+
+        (setup_body, loop_body)
+    };
 
     Ok(format!(
         "#include <Arduino.h>\n#include <stdint.h>\n\n\
@@ -704,13 +740,34 @@ static const char* rune_serial_read_line(void) {{\n\
     rune_input_buffer[index] = '\\0';\n\
     return rune_input_buffer;\n\
 }}\n\n\
+static int rune_mode_input(void) {{ return INPUT; }}\n\
+static int rune_mode_output(void) {{ return OUTPUT; }}\n\
+static int rune_mode_input_pullup(void) {{ return INPUT_PULLUP; }}\n\
+static int rune_led_builtin(void) {{ return LED_BUILTIN; }}\n\n\
 void setup() {{\n\
     Serial.begin(115200);\n\
-{body}\
+{setup_source}\
 }}\n\n\
 void loop() {{\n\
+{loop_source}\
 }}\n"
     ))
+}
+
+fn validate_arduino_uno_entry_fn(function: &crate::parser::Function, name: &str) -> Result<(), CodegenError> {
+    if function.is_extern || function.is_async {
+        return Err(CodegenError {
+            message: format!("Arduino Uno target does not support extern or async `{name}`"),
+            span: function.span,
+        });
+    }
+    if !function.params.is_empty() {
+        return Err(CodegenError {
+            message: format!("Arduino Uno target requires `{name}()` with no parameters"),
+            span: function.span,
+        });
+    }
+    Ok(())
 }
 
 fn emit_arduino_uno_block(
@@ -909,6 +966,27 @@ fn emit_arduino_uno_stmt_expr(
             ));
             Ok(())
         }
+        "analog_write" => {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`analog_write` expects 2 positional arguments on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let pin_rendered = emit_arduino_uno_expr(scope, pin_expr)?;
+            let value_rendered = emit_arduino_uno_expr(scope, value_expr)?;
+            if pin_rendered.1 != ArduinoUnoType::I64 || value_rendered.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer pin and integer PWM value for `analog_write`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}analogWrite((uint8_t)({}), (int)({}));\n",
+                pin_rendered.0, value_rendered.0
+            ));
+            Ok(())
+        }
         "delay_ms" => {
             let [CallArg::Positional(value)] = args.as_slice() else {
                 return Err(CodegenError {
@@ -926,8 +1004,85 @@ fn emit_arduino_uno_stmt_expr(
             out.push_str(&format!("{prefix}delay((unsigned long)({}));\n", delay_rendered.0));
             Ok(())
         }
+        "delay_us" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`delay_us` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let delay_rendered = emit_arduino_uno_expr(scope, value)?;
+            if delay_rendered.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer microseconds for `delay_us`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}delayMicroseconds((unsigned int)({}));\n",
+                delay_rendered.0
+            ));
+            Ok(())
+        }
+        "uart_begin" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`uart_begin` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let baud_rendered = emit_arduino_uno_expr(scope, value)?;
+            if baud_rendered.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer baud for `uart_begin`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}Serial.begin((unsigned long)({}));\n",
+                baud_rendered.0
+            ));
+            Ok(())
+        }
+        "uart_write_byte" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`uart_write_byte` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let value_rendered = emit_arduino_uno_expr(scope, value)?;
+            if value_rendered.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer byte value for `uart_write_byte`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!(
+                "{prefix}Serial.write((uint8_t)({}));\n",
+                value_rendered.0
+            ));
+            Ok(())
+        }
+        "uart_write" => {
+            let [CallArg::Positional(value)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`uart_write` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let rendered = emit_arduino_uno_expr(scope, value)?;
+            if rendered.1 != ArduinoUnoType::String {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires String text for `uart_write`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!("{prefix}Serial.print({});\n", rendered.0));
+            Ok(())
+        }
         _ => Err(CodegenError {
-            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, and `delay_ms` statements".into(),
+            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, and `uart_write` statements".into(),
             span: callee.span,
         }),
     }
@@ -1120,6 +1275,15 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("((int64_t)millis())".into(), ArduinoUnoType::I64))
                 }
+                "micros" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`micros` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)micros())".into(), ArduinoUnoType::I64))
+                }
                 "input" | "read_line" => {
                     if !args.is_empty() {
                         return Err(CodegenError {
@@ -1129,8 +1293,62 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
                 }
+                "uart_available" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`uart_available` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)Serial.available())".into(), ArduinoUnoType::I64))
+                }
+                "uart_read_byte" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`uart_read_byte` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)Serial.read())".into(), ArduinoUnoType::I64))
+                }
+                "mode_input" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`mode_input` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)rune_mode_input())".into(), ArduinoUnoType::I64))
+                }
+                "mode_output" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`mode_output` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)rune_mode_output())".into(), ArduinoUnoType::I64))
+                }
+                "mode_input_pullup" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`mode_input_pullup` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)rune_mode_input_pullup())".into(), ArduinoUnoType::I64))
+                }
+                "led_builtin" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`led_builtin` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)rune_led_builtin())".into(), ArduinoUnoType::I64))
+                }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `millis`, `input`, and `read_line` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `millis`, `micros`, `input`, `read_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, and `led_builtin` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -3234,10 +3452,10 @@ pub extern "C" fn rune_rt_input_line() -> *const u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rune_rt_arduino_pin_mode(_pin: i32, _mode: i32) {}
+pub extern "C" fn rune_rt_arduino_pin_mode(_pin: i64, _mode: i64) {}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rune_rt_arduino_digital_write(pin: i32, value: bool) {
+pub extern "C" fn rune_rt_arduino_digital_write(pin: i64, value: bool) {
     if let Ok(index) = usize::try_from(pin) {
         RUNE_ARDUINO_DIGITAL_PINS.with(|pins| {
             let mut pins = pins.borrow_mut();
@@ -3249,7 +3467,7 @@ pub extern "C" fn rune_rt_arduino_digital_write(pin: i32, value: bool) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rune_rt_arduino_digital_read(pin: i32) -> bool {
+pub extern "C" fn rune_rt_arduino_digital_read(pin: i64) -> bool {
     usize::try_from(pin)
         .ok()
         .and_then(|index| {
@@ -3260,7 +3478,19 @@ pub extern "C" fn rune_rt_arduino_digital_read(pin: i32) -> bool {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rune_rt_arduino_analog_read(pin: i32) -> i64 {
+pub extern "C" fn rune_rt_arduino_analog_write(pin: i64, value: i64) {
+    if let Ok(index) = usize::try_from(pin) {
+        RUNE_ARDUINO_ANALOG_PINS.with(|pins| {
+            let mut pins = pins.borrow_mut();
+            if index < pins.len() {
+                pins[index] = value as i64;
+            }
+        });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_analog_read(pin: i64) -> i64 {
     usize::try_from(pin)
         .ok()
         .and_then(|index| {
@@ -3270,9 +3500,16 @@ pub extern "C" fn rune_rt_arduino_analog_read(pin: i32) -> i64 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rune_rt_arduino_delay_ms(ms: i32) {
+pub extern "C" fn rune_rt_arduino_delay_ms(ms: i64) {
     if ms > 0 {
         std::thread::sleep(Duration::from_millis(ms as u64));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_delay_us(us: i64) {
+    if us > 0 {
+        std::thread::sleep(Duration::from_micros(us as u64));
     }
 }
 
@@ -3283,8 +3520,53 @@ pub extern "C" fn rune_rt_arduino_millis() -> i64 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_micros() -> i64 {
+    let start = RUNE_ARDUINO_START.get_or_init(Instant::now);
+    start.elapsed().as_micros() as i64
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_read_line() -> *const u8 {
     rune_rt_input_line()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_mode_input() -> i64 { 0 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_mode_output() -> i64 { 1 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_mode_input_pullup() -> i64 { 2 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_led_builtin() -> i64 { 13 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_uart_begin(_baud: i64) {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_uart_available() -> i64 {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_uart_read_byte() -> i64 {
+    -1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_uart_write_byte(value: i64) {
+    let byte = [value as u8];
+    let _ = io::stdout().write_all(&byte);
+    let _ = io::stdout().flush();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_uart_write(ptr: *const u8, len: i64) {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let _ = io::stdout().write_all(bytes);
+    let _ = io::stdout().flush();
 }
 
 #[unsafe(no_mangle)]

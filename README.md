@@ -67,6 +67,7 @@ Current stdlib modules live under [stdlib](stdlib):
 - `terminal`
 - `time`
 - `audio`
+- `arduino`
 
 ### FFI
 
@@ -130,6 +131,12 @@ Build and flash to a serial port:
 
 ```powershell
 cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o hello_arduino.hex
+```
+
+Build and flash the serial calculator example:
+
+```powershell
+cargo run -- build serial_calculator_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o serial_calculator_arduino.hex
 ```
 
 ## Main Commands
@@ -213,6 +220,37 @@ The installers are release-oriented now: if you do not pass a local binary path,
 The repository now includes [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 On pushes to the `release` branch, it builds host-native Rune bundles for the configured GitHub Actions matrix, packages them as `rune-bundle-*` assets, and publishes or updates the `release-branch-latest` GitHub Release.
+
+## Arduino Uno Notes
+
+The current Arduino Uno slice now supports:
+
+- `main()` firmware entry
+- or Arduino-style `setup()` / `loop()` entrypoints
+- packaged `arduino` stdlib resolution from `stdlib/arduino.rn`
+- serial I/O through `print`, `println`, `read_line`, and UART helpers
+- pin/timing helpers like `pin_mode`, `digital_write`, `analog_write`, `delay_ms`, `millis`, and board constants
+- real `.hex` generation and flashing with packaged AVR tools
+
+Example:
+
+```rune
+from arduino import (
+    uart_begin,
+    uart_write,
+    led_builtin,
+    mode_output,
+    pin_mode,
+)
+
+def setup() -> unit:
+    uart_begin(115200)
+    pin_mode(led_builtin(), mode_output())
+    uart_write("Rune on Uno!\r\n")
+
+def loop() -> unit:
+    return
+```
 
 ## Development Rules
 

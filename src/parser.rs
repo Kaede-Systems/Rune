@@ -351,12 +351,26 @@ impl Parser {
         let (level, module) = self.parse_module_path_with_level()?;
         self.expect_simple(TokenKind::Import, "expected `import` after module path")?;
         let mut names = Vec::new();
+        let wrapped = self.match_simple(&TokenKind::LParen);
+        if wrapped {
+            self.skip_parenthesized_import_layout();
+        }
         loop {
             let (name, _) = self.expect_identifier("expected imported name")?;
             names.push(name);
             if !self.match_simple(&TokenKind::Comma) {
                 break;
             }
+            if wrapped {
+                self.skip_parenthesized_import_layout();
+                if self.check(&TokenKind::RParen) {
+                    break;
+                }
+            }
+        }
+        if wrapped {
+            self.skip_parenthesized_import_layout();
+            self.expect_simple(TokenKind::RParen, "expected `)` after imported names")?;
         }
         self.expect_simple(TokenKind::Newline, "expected newline after import")?;
         Ok(ImportDecl {
@@ -901,6 +915,15 @@ impl Parser {
 
     fn skip_newlines(&mut self) {
         while self.match_simple(&TokenKind::Newline) {}
+    }
+
+    fn skip_parenthesized_import_layout(&mut self) {
+        while matches!(
+            self.peek().kind,
+            TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent
+        ) {
+            self.advance();
+        }
     }
 
     fn peek_is_identifier_eq(&self) -> bool {

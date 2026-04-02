@@ -537,6 +537,99 @@ fn builds_arduino_uno_hex_with_arduino_stdlib_runtime_calls() {
 }
 
 #[test]
+fn builds_arduino_uno_hex_with_pwm_and_board_constants() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_pwm.rn");
+    let output_path = dir.join("arduino_uno_pwm.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import pin_mode, analog_write, delay_us, micros, mode_output, led_builtin\n\n\
+         def main() -> i32:\n    let led: i64 = led_builtin()\n    let output_mode: i64 = mode_output()\n    pin_mode(led, output_mode)\n    analog_write(led, 128)\n    delay_us(10)\n    println(micros() >= 0)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno pwm hex build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno pwm hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_hex_with_uart_calls() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_uart.rn");
+    let output_path = dir.join("arduino_uno_uart.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import uart_begin, uart_available, uart_read_byte, uart_write, uart_write_byte\n\n\
+         def main() -> i32:\n    uart_begin(115200)\n    uart_write(\"Rune UART ready\")\n    uart_write_byte(10)\n    let available: i64 = uart_available()\n    if available > 0:\n        let value: i64 = uart_read_byte()\n        println(value)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno uart hex build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno uart hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_serial_calculator_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("serial_calculator_arduino.rn");
+    let output_path = dir.join("serial_calculator_arduino.hex");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("stdlib").join("arduino.rn"), dir.join("arduino.rn"))
+        .expect("failed to stage arduino stdlib");
+    fs::copy(root.join("serial_calculator_arduino.rn"), &source_path)
+        .expect("failed to stage serial calculator example");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno serial calculator example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read serial calculator hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_setup_and_loop_entrypoints() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_setup_loop.rn");
+    let output_path = dir.join("arduino_uno_setup_loop.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import delay_ms, digital_write, led_builtin, mode_output, pin_mode\n\n\
+         def setup() -> unit:\n    let led: i64 = led_builtin()\n    pin_mode(led, mode_output())\n\n\
+         def loop() -> unit:\n    let led: i64 = led_builtin()\n    digital_write(led, true)\n    delay_ms(5)\n    digital_write(led, false)\n    delay_ms(5)\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno setup/loop build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno setup/loop hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_and_runs_program_with_c_ffi_on_windows() {
     let _guard = build_lock()
         .lock()

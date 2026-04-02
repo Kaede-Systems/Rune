@@ -210,6 +210,30 @@ fn parses_relative_import_items() {
 }
 
 #[test]
+fn parses_parenthesized_multiline_import_items() {
+    let program = parse_source(
+        "from arduino import (\n    uart_begin,\n    uart_write,\n    uart_read_byte,\n)\n\ndef main() -> i32:\n    return 0\n",
+    )
+    .expect("program should parse");
+
+    match &program.items[0] {
+        Item::Import(import) => {
+            assert_eq!(import.level, 0);
+            assert_eq!(import.module, vec!["arduino"]);
+            assert_eq!(
+                import.names.as_ref().expect("expected imported names"),
+                &vec![
+                    "uart_begin".to_string(),
+                    "uart_write".to_string(),
+                    "uart_read_byte".to_string()
+                ]
+            );
+        }
+        other => panic!("expected import item, found {other:?}"),
+    }
+}
+
+#[test]
 fn parses_boolean_operators() {
     let program = parse_source(
         "def main() -> unit:\n    let value = not false or true and false\n    return\n",

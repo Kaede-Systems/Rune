@@ -46,4 +46,8 @@ tools/llvm21/
 tools/wasmtime/
 tools/py_wasmtime/
 tools/llvm-xpack-win64/
+tools/arduino-avr/
 tools/*.zip
+
+# Generated headers from local experiments
+calculator_riscv32.h
