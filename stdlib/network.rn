@@ -24,3 +24,21 @@ def tcp_send(host: String, port: i32, data: String) -> bool:
 
 def udp_send(host: String, port: i32, data: String) -> bool:
     return __rune_builtin_network_udp_send(host, port, data)
+
+def tcp_send_line(host: String, port: i32, data: String) -> bool:
+    return tcp_send(host, port, data + "\n")
+
+def udp_send_line(host: String, port: i32, data: String) -> bool:
+    return udp_send(host, port, data + "\n")
+
+def tcp_send_i64(host: String, port: i32, value: i64) -> bool:
+    return tcp_send(host, port, str(value))
+
+def udp_send_i64(host: String, port: i32, value: i64) -> bool:
+    return udp_send(host, port, str(value))
+
+def tcp_send_bool(host: String, port: i32, value: bool) -> bool:
+    return tcp_send(host, port, str(value))
+
+def udp_send_bool(host: String, port: i32, value: bool) -> bool:
+    return udp_send(host, port, str(value))

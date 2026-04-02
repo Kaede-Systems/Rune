@@ -338,6 +338,31 @@ fn builds_and_runs_class_return_program() {
 }
 
 #[test]
+fn builds_and_runs_object_returning_and_object_accepting_method_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_object_method_demo.rn");
+    let exe_path = dir.join("class_object_method_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def bump(self) -> Counter:\n        return Counter(value=self.value + 1)\n    def add(self, other: Counter) -> i32:\n        return self.value + other.value\n\n\
+         def main() -> i32:\n    let left: Counter = Counter(value=4)\n    let right: Counter = Counter(value=8)\n    let next: Counter = left.bump()\n    println(next.value)\n    println(left.add(right))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("object method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run object method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "5\n12\n");
+}
+
+#[test]
 fn builds_and_runs_fs_terminal_and_audio_program() {
     let dir = temp_dir();
     let source_path = dir.join("fs_terminal_audio_demo.rn");

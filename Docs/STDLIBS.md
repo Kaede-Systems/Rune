@@ -235,6 +235,8 @@ Exports:
 from network import tcp_connect, tcp_connect_timeout
 from network import tcp_probe, tcp_probe_timeout
 from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
+from network import tcp_send_line, udp_send_line
+from network import tcp_send_i64, udp_send_i64, tcp_send_bool, udp_send_bool
 ```
 
 Exports:
@@ -248,6 +250,12 @@ Exports:
 - `udp_bind(host: String, port: i32) -> bool`
 - `tcp_send(host: String, port: i32, data: String) -> bool`
 - `udp_send(host: String, port: i32, data: String) -> bool`
+- `tcp_send_line(host: String, port: i32, data: String) -> bool`
+- `udp_send_line(host: String, port: i32, data: String) -> bool`
+- `tcp_send_i64(host: String, port: i32, value: i64) -> bool`
+- `udp_send_i64(host: String, port: i32, value: i64) -> bool`
+- `tcp_send_bool(host: String, port: i32, value: bool) -> bool`
+- `udp_send_bool(host: String, port: i32, value: bool) -> bool`
 
 Current implemented network scope:
 
@@ -255,6 +263,41 @@ Current implemented network scope:
 - timeout-aware TCP probe
 - TCP bind/listen availability checks
 - UDP bind availability checks
+- TCP/UDP send convenience wrappers for lines, integers, and booleans
+
+## `serial`
+
+```rune
+from serial import open, close, recv_line, recv_nonempty
+from serial import send, send_line
+from serial import send_i64, send_line_i64, send_bool, send_line_bool
+```
+
+Exports:
+
+- `begin(baud: i64) -> unit`
+- `open(port: String, baud: i64) -> bool`
+- `is_open() -> bool`
+- `close() -> unit`
+- `available() -> i64`
+- `read_byte() -> i64`
+- `recv_line() -> String`
+- `recv_nonempty() -> String`
+- `write(text: String) -> unit`
+- `write_line(text: String) -> unit`
+- `send(text: String) -> bool`
+- `send_line(text: String) -> bool`
+- `send_i64(value: i64) -> bool`
+- `send_line_i64(value: i64) -> bool`
+- `send_bool(value: bool) -> bool`
+- `send_line_bool(value: bool) -> bool`
+
+Current implemented serial scope:
+
+- native host serial open/close/read-line/write on Windows
+- native host serial build support on Linux/macOS through the same stdlib surface
+- Arduino/embedded serial routing through the same Rune `serial` module
+- convenience helpers for non-empty reads and scalar sending
 
 Not implemented in this module yet:
 

@@ -35,6 +35,12 @@ def recv_line() -> String:
         return input()
     return __rune_builtin_serial_read_line()
 
+def recv_nonempty() -> String:
+    let line: String = recv_line()
+    while line == "":
+        line = recv_line()
+    return line
+
 def write(text: String) -> unit:
     if __rune_builtin_system_is_embedded():
         __rune_builtin_arduino_uart_write(text)
@@ -62,3 +68,15 @@ def send_line(text: String) -> bool:
         __rune_builtin_arduino_uart_write_byte(10)
         return true
     return __rune_builtin_serial_write_line(text)
+
+def send_i64(value: i64) -> bool:
+    return send(str(value))
+
+def send_line_i64(value: i64) -> bool:
+    return send_line(str(value))
+
+def send_bool(value: bool) -> bool:
+    return send(str(value))
+
+def send_line_bool(value: bool) -> bool:
+    return send_line(str(value))

@@ -904,6 +904,30 @@ fn builds_arduino_uno_with_class_method_calls_using_self_fields() {
 }
 
 #[test]
+fn builds_arduino_uno_with_object_returning_and_object_accepting_methods() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_oop_combo.rn");
+    let output_path = dir.join("arduino_uno_oop_combo.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def bump(self) -> Counter:\n        return Counter(value=self.value + 1)\n    def add(self, other: Counter) -> i32:\n        return self.value + other.value\n\n\
+         def main() -> i32:\n    let left: Counter = Counter(value=4)\n    let right: Counter = Counter(value=8)\n    let next: Counter = left.bump()\n    println(next.value)\n    println(left.add(right))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno object-returning method build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno oop combo hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_and_runs_program_with_c_ffi_on_windows() {
     let _guard = build_lock()
         .lock()

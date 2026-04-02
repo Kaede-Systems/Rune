@@ -48,6 +48,7 @@ def loop() -> unit:
     let now: i64 = millis()
     let question: Question = choose_question(now + 37)
     ask(question)
+    write_line("answer>")
     let text: String = input()
     write("you answered ")
     write_line(text)

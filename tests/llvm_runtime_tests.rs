@@ -286,6 +286,31 @@ fn llvm_backend_builds_and_runs_class_method_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_object_method_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_object_method_demo.rn");
+    let exe_path = dir.join("llvm_class_object_method_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def bump(self) -> Counter:\n        return Counter(value=self.value + 1)\n    def add(self, other: Counter) -> i32:\n        return self.value + other.value\n\n\
+         def main() -> i32:\n    let left: Counter = Counter(value=4)\n    let right: Counter = Counter(value=8)\n    let next: Counter = left.bump()\n    println(next.value)\n    println(left.add(right))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm object method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built object method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "5\n12\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_network_send_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_network_send_demo.rn");
