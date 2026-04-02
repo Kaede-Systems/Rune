@@ -61,6 +61,7 @@ fn collect_locals_and_uses_in_block(
 ) {
     for stmt in &block.statements {
         match stmt {
+            Stmt::Block(stmt) => collect_locals_and_uses_in_block(&stmt.block, declared, used),
             Stmt::Let(stmt) => {
                 declared.push((stmt.name.clone(), stmt.span));
                 collect_used_identifiers_in_expr(&stmt.value, used);
@@ -99,6 +100,7 @@ fn collect_locals_and_uses_in_block(
 fn collect_calls_in_block(block: &crate::parser::Block, called: &mut BTreeSet<String>) {
     for stmt in &block.statements {
         match stmt {
+            Stmt::Block(stmt) => collect_calls_in_block(&stmt.block, called),
             Stmt::Let(stmt) => collect_calls_in_expr(&stmt.value, called),
             Stmt::Assign(stmt) => collect_calls_in_expr(&stmt.value, called),
             Stmt::Return(stmt) => {

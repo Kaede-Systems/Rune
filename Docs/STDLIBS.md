@@ -9,10 +9,14 @@ These modules live in [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib).
 ```rune
 from arduino import (
     pin_mode, digital_write, digital_read,
-    analog_write, analog_read,
+    analog_write, analog_read, analog_reference,
+    pulse_in, shift_out, tone, no_tone,
     delay_ms, delay_us, millis, micros,
     read_line,
     mode_input, mode_output, mode_input_pullup, led_builtin,
+    high, low,
+    bit_order_lsb_first, bit_order_msb_first,
+    analog_ref_default, analog_ref_internal, analog_ref_external,
     uart_begin, uart_available, uart_read_byte, uart_write_byte, uart_write,
 )
 ```
@@ -24,6 +28,11 @@ Exports:
 - `digital_read(pin: i64) -> bool`
 - `analog_write(pin: i64, value: i64) -> unit`
 - `analog_read(pin: i64) -> i64`
+- `analog_reference(mode: i64) -> unit`
+- `pulse_in(pin: i64, state: bool, timeout_us: i64) -> i64`
+- `shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit`
+- `tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit`
+- `no_tone(pin: i64) -> unit`
 - `delay_ms(ms: i64) -> unit`
 - `delay_us(us: i64) -> unit`
 - `millis() -> i64`
@@ -33,6 +42,13 @@ Exports:
 - `mode_output() -> i64`
 - `mode_input_pullup() -> i64`
 - `led_builtin() -> i64`
+- `high() -> i64`
+- `low() -> i64`
+- `bit_order_lsb_first() -> i64`
+- `bit_order_msb_first() -> i64`
+- `analog_ref_default() -> i64`
+- `analog_ref_internal() -> i64`
+- `analog_ref_external() -> i64`
 - `uart_begin(baud: i64) -> unit`
 - `uart_available() -> i64`
 - `uart_read_byte() -> i64`
@@ -46,6 +62,7 @@ Current implemented Arduino scope:
 - serial line input with normal Rune `input()` and `read_line()`
 - byte-oriented UART access with `uart_available`, `uart_read_byte`, and `uart_write_byte`
 - board constants and pin/timing helpers
+- PWM, pulse timing, tone generation, shift register output, and analog reference selection
 - Arduino-style `setup()` / `loop()` entrypoints on the Uno target
 
 Recommended usage:
@@ -269,3 +286,10 @@ Exports:
 Current implemented audio scope:
 
 - terminal bell / beep signal
+For Arduino targets, prefer the shared Rune I/O surface where possible:
+
+- `print(...)`
+- `println(...)`
+- `input()`
+
+These lower to serial I/O on the Uno target. The `uart_*` functions remain available in `arduino` for lower-level byte-oriented serial control.

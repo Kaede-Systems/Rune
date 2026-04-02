@@ -211,6 +211,15 @@ fn collect_local_infos(
 ) {
     for stmt in &block.statements {
         match stmt {
+            Stmt::Block(stmt) => {
+                collect_local_infos(
+                    &stmt.block,
+                    struct_layouts,
+                    struct_methods,
+                    function_returns,
+                    infos,
+                )
+            }
             Stmt::Let(stmt) => {
                 infos.insert(
                     stmt.name.clone(),
@@ -491,6 +500,7 @@ impl Lowerer {
 
     fn lower_stmt(&mut self, stmt: &Stmt) {
         match stmt {
+            Stmt::Block(stmt) => self.lower_block(&stmt.block),
             Stmt::Let(stmt) => {
                 let value = self.lower_expr(&stmt.value);
                 self.instructions.push(IrInst::Copy {

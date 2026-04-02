@@ -34,6 +34,7 @@ fn optimize_block(block: &mut Block) {
 
 fn optimize_stmt(stmt: &mut Stmt) {
     match stmt {
+        Stmt::Block(stmt) => optimize_block(&mut stmt.block),
         Stmt::Let(LetStmt { value, .. }) => optimize_expr(value),
         Stmt::Assign(stmt) => optimize_expr(&mut stmt.value),
         Stmt::Return(ReturnStmt { value, .. }) => {
@@ -236,6 +237,7 @@ enum ControlFlowFold {
 
 fn fold_control_flow(stmt: Stmt) -> ControlFlowFold {
     match stmt {
+        Stmt::Block(stmt) => ControlFlowFold::Inline(stmt.block.statements),
         Stmt::If(if_stmt) => {
             if let Some(value) = bool_value(&if_stmt.condition) {
                 if value {

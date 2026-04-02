@@ -59,3 +59,20 @@ fn emits_linux_assembly_file_via_llvm_backend() {
     assert!(asm.contains("main:"));
     assert!(asm.contains("callq"));
 }
+
+#[test]
+fn emits_linux_assembly_file_for_script_style_source() {
+    let dir = temp_dir();
+    let source_path = dir.join("script_main.rn");
+    let output_path = dir.join("script_main.s");
+    fs::write(&source_path, "println(\"Hello World boi\")\n").expect("failed to write source");
+
+    let mut program = load_program_from_path(&source_path).expect("script should load");
+    check_program(&program).expect("script should type check");
+    optimize_program(&mut program);
+    emit_assembly_file(&program, "x86_64-unknown-linux-gnu", &output_path)
+        .expect("llvm assembly emission should succeed for script source");
+
+    let asm = fs::read_to_string(&output_path).expect("assembly file should exist");
+    assert!(asm.contains("main:"));
+}

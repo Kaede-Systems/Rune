@@ -16,6 +16,25 @@ def analog_write(pin: i64, value: i64) -> unit:
 def analog_read(pin: i64) -> i64:
     return __rune_builtin_arduino_analog_read(pin)
 
+def analog_reference(mode: i64) -> unit:
+    __rune_builtin_arduino_analog_reference(mode)
+    return
+
+def pulse_in(pin: i64, state: bool, timeout_us: i64) -> i64:
+    return __rune_builtin_arduino_pulse_in(pin, state, timeout_us)
+
+def shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit:
+    __rune_builtin_arduino_shift_out(data_pin, clock_pin, bit_order, value)
+    return
+
+def tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit:
+    __rune_builtin_arduino_tone(pin, frequency_hz, duration_ms)
+    return
+
+def no_tone(pin: i64) -> unit:
+    __rune_builtin_arduino_no_tone(pin)
+    return
+
 def delay_ms(ms: i64) -> unit:
     __rune_builtin_arduino_delay_ms(ms)
     return
@@ -44,6 +63,27 @@ def mode_input_pullup() -> i64:
 
 def led_builtin() -> i64:
     return __rune_builtin_arduino_led_builtin()
+
+def high() -> i64:
+    return __rune_builtin_arduino_high()
+
+def low() -> i64:
+    return __rune_builtin_arduino_low()
+
+def bit_order_lsb_first() -> i64:
+    return __rune_builtin_arduino_bit_order_lsb_first()
+
+def bit_order_msb_first() -> i64:
+    return __rune_builtin_arduino_bit_order_msb_first()
+
+def analog_ref_default() -> i64:
+    return __rune_builtin_arduino_analog_ref_default()
+
+def analog_ref_internal() -> i64:
+    return __rune_builtin_arduino_analog_ref_internal()
+
+def analog_ref_external() -> i64:
+    return __rune_builtin_arduino_analog_ref_external()
 
 def uart_begin(baud: i64) -> unit:
     __rune_builtin_arduino_uart_begin(baud)

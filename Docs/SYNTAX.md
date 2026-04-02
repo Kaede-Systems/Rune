@@ -356,6 +356,11 @@ Current exported functions:
 - `digital_read(pin: i64) -> bool`
 - `analog_write(pin: i64, value: i64) -> unit`
 - `analog_read(pin: i64) -> i64`
+- `analog_reference(mode: i64) -> unit`
+- `pulse_in(pin: i64, state: bool, timeout_us: i64) -> i64`
+- `shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit`
+- `tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit`
+- `no_tone(pin: i64) -> unit`
 - `delay_ms(ms: i64) -> unit`
 - `delay_us(us: i64) -> unit`
 - `millis() -> i64`
@@ -365,6 +370,13 @@ Current exported functions:
 - `mode_output() -> i64`
 - `mode_input_pullup() -> i64`
 - `led_builtin() -> i64`
+- `high() -> i64`
+- `low() -> i64`
+- `bit_order_lsb_first() -> i64`
+- `bit_order_msb_first() -> i64`
+- `analog_ref_default() -> i64`
+- `analog_ref_internal() -> i64`
+- `analog_ref_external() -> i64`
 - `uart_begin(baud: i64) -> unit`
 - `uart_available() -> i64`
 - `uart_read_byte() -> i64`
@@ -419,3 +431,12 @@ Still not fully complete for native release scope:
 - complete OOP/ABC surface
 - full HTTP / WS / server APIs
 - full `raise` / exception propagation model
+On Arduino Uno targets, the ordinary Rune I/O surface stays available:
+
+```rune
+print("left> ")
+let left: i64 = int(input())
+println(left)
+```
+
+That keeps ordinary programs closer to native Rune syntax while `uart_*` remains available for lower-level hardware-oriented serial work.

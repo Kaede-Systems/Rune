@@ -75,6 +75,7 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
+    Block(BlockStmt),
     Let(LetStmt),
     Assign(AssignStmt),
     Return(ReturnStmt),
@@ -83,6 +84,12 @@ pub enum Stmt {
     Raise(RaiseStmt),
     Panic(PanicStmt),
     Expr(ExprStmt),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockStmt {
+    pub block: Block,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,20 +253,70 @@ pub fn parse_tokens(tokens: Vec<Token>) -> Result<Program, ParseError> {
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
+    synthetic_counter: usize,
 }
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, index: 0 }
+        Self {
+            tokens,
+            index: 0,
+            synthetic_counter: 0,
+        }
     }
 
     fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut items = Vec::new();
+        let mut top_level_statements = Vec::new();
         self.skip_newlines();
 
         while !self.at_end() {
-            items.push(self.parse_item()?);
+            if self.peek_starts_top_level_stmt() {
+                top_level_statements.push(self.parse_stmt()?);
+            } else {
+                items.push(self.parse_item()?);
+            }
             self.skip_newlines();
+        }
+
+        if !top_level_statements.is_empty() {
+            if items
+                .iter()
+                .any(|item| matches!(item, Item::Function(function) if function.name == "main"))
+            {
+                return Err(ParseError {
+                    message: "top-level statements cannot be combined with an explicit `main()`"
+                        .to_string(),
+                    span: top_level_statements[0].span(),
+                });
+            }
+
+            let main_span = top_level_statements[0].span();
+            if !matches!(top_level_statements.last(), Some(Stmt::Return(_))) {
+                top_level_statements.push(Stmt::Return(ReturnStmt {
+                    value: Some(Expr {
+                        kind: ExprKind::Integer("0".to_string()),
+                        span: main_span,
+                    }),
+                    span: main_span,
+                }));
+            }
+
+            items.push(Item::Function(Function {
+                is_extern: false,
+                is_async: false,
+                name: "main".to_string(),
+                params: Vec::new(),
+                return_type: Some(TypeRef {
+                    name: "i32".to_string(),
+                    span: main_span,
+                }),
+                raises: None,
+                body: Block {
+                    statements: top_level_statements,
+                },
+                span: main_span,
+            }));
         }
 
         Ok(Program { items })
@@ -499,6 +556,7 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek().kind.clone() {
+            TokenKind::For => self.parse_for_stmt(),
             TokenKind::Let => Ok(Stmt::Let(self.parse_let_stmt()?)),
             TokenKind::Identifier(_) if self.peek_is_identifier_eq() => {
                 Ok(Stmt::Assign(self.parse_assign_stmt()?))
@@ -510,6 +568,108 @@ impl Parser {
             TokenKind::Panic => Ok(Stmt::Panic(self.parse_panic_stmt()?)),
             _ => Ok(Stmt::Expr(self.parse_expr_stmt()?)),
         }
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.expect_simple(TokenKind::For, "expected `for`")?;
+        let (name, _) = self.expect_identifier("expected loop variable name")?;
+        self.expect_simple(TokenKind::In, "expected `in` after loop variable")?;
+        let iterable = self.parse_expr()?;
+        let range_args = self.normalize_range_call_expr(&iterable)?;
+        self.expect_simple(TokenKind::Colon, "expected `:` after for loop iterable")?;
+        self.expect_simple(TokenKind::Newline, "expected newline after for loop header")?;
+        let user_body = self.parse_block()?;
+
+        let start_name = self.next_synthetic_name("range_start");
+        let stop_name = self.next_synthetic_name("range_stop");
+        let step_name = self.next_synthetic_name("range_step");
+
+        let [start_expr, stop_expr, step_expr] = range_args.as_slice() else {
+            unreachable!("range normalization always produces three arguments");
+        };
+
+        let start_ident = ident_expr(&start_name, span);
+        let stop_ident = ident_expr(&stop_name, span);
+        let step_ident = ident_expr(&step_name, span);
+        let loop_ident = ident_expr(&name, span);
+
+        let mut while_body = user_body.statements;
+        while_body.push(Stmt::Assign(AssignStmt {
+            name: name.clone(),
+            value: binary_expr(loop_ident.clone(), BinaryOp::Add, step_ident.clone(), span),
+            span,
+        }));
+
+        Ok(Stmt::Block(BlockStmt {
+            span,
+            block: Block {
+                statements: vec![
+                    typed_let_stmt(&start_name, "i64", int_call_expr(start_expr.clone(), span), span),
+                    typed_let_stmt(&stop_name, "i64", int_call_expr(stop_expr.clone(), span), span),
+                    typed_let_stmt(&step_name, "i64", int_call_expr(step_expr.clone(), span), span),
+                    Stmt::If(IfStmt {
+                        condition: binary_expr(
+                            step_ident.clone(),
+                            BinaryOp::EqualEqual,
+                            integer_expr("0", span),
+                            span,
+                        ),
+                        then_block: Block {
+                            statements: vec![Stmt::Panic(PanicStmt {
+                                value: string_expr("range step cannot be 0", span),
+                                span,
+                            })],
+                        },
+                        elif_blocks: Vec::new(),
+                        else_block: None,
+                        span,
+                    }),
+                    typed_let_stmt(&name, "i64", start_ident.clone(), span),
+                    Stmt::While(WhileStmt {
+                        condition: binary_expr(
+                            binary_expr(
+                                binary_expr(
+                                    step_ident.clone(),
+                                    BinaryOp::Greater,
+                                    integer_expr("0", span),
+                                    span,
+                                ),
+                                BinaryOp::And,
+                                binary_expr(
+                                    loop_ident.clone(),
+                                    BinaryOp::Less,
+                                    stop_ident.clone(),
+                                    span,
+                                ),
+                                span,
+                            ),
+                            BinaryOp::Or,
+                            binary_expr(
+                                binary_expr(
+                                    step_ident.clone(),
+                                    BinaryOp::Less,
+                                    integer_expr("0", span),
+                                    span,
+                                ),
+                                BinaryOp::And,
+                                binary_expr(
+                                    loop_ident.clone(),
+                                    BinaryOp::Greater,
+                                    stop_ident.clone(),
+                                    span,
+                                ),
+                                span,
+                            ),
+                            span,
+                        ),
+                        body: Block {
+                            statements: while_body,
+                        },
+                        span,
+                    }),
+                ],
+            },
+        }))
     }
 
     fn parse_let_stmt(&mut self) -> Result<LetStmt, ParseError> {
@@ -828,6 +988,7 @@ impl Parser {
                     },
                     span,
                 };
+                expr = self.rewrite_special_call(expr)?;
                 continue;
             }
 
@@ -926,6 +1087,29 @@ impl Parser {
         }
     }
 
+    fn peek_starts_top_level_stmt(&self) -> bool {
+        matches!(
+            self.peek().kind,
+            TokenKind::For
+                |
+            TokenKind::Let
+                | TokenKind::Return
+                | TokenKind::If
+                | TokenKind::While
+                | TokenKind::Raise
+                | TokenKind::Panic
+                | TokenKind::Identifier(_)
+                | TokenKind::Integer(_)
+                | TokenKind::String(_)
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::LParen
+                | TokenKind::Await
+                | TokenKind::Minus
+                | TokenKind::Not
+        )
+    }
+
     fn peek_is_identifier_eq(&self) -> bool {
         matches!(self.peek().kind, TokenKind::Identifier(_))
             && self
@@ -952,4 +1136,153 @@ impl Parser {
     fn previous(&self) -> &Token {
         &self.tokens[self.index - 1]
     }
+
+    fn next_synthetic_name(&mut self, prefix: &str) -> String {
+        let value = format!("__rune_{prefix}_{}", self.synthetic_counter);
+        self.synthetic_counter += 1;
+        value
+    }
+
+    fn rewrite_special_call(&self, expr: Expr) -> Result<Expr, ParseError> {
+        let ExprKind::Call { callee, args } = &expr.kind else {
+            return Ok(expr);
+        };
+        let ExprKind::Identifier(name) = &callee.kind else {
+            return Ok(expr);
+        };
+        if name != "sum" {
+            return Ok(expr);
+        }
+        let [CallArg::Positional(range_expr)] = args.as_slice() else {
+            return Ok(expr);
+        };
+        let normalized = self.normalize_range_call_expr(range_expr)?;
+        Ok(Expr {
+            kind: ExprKind::Call {
+                callee: Box::new(ident_expr("__rune_builtin_sum_range", expr.span)),
+                args: normalized.into_iter().map(CallArg::Positional).collect(),
+            },
+            span: expr.span,
+        })
+    }
+
+    fn normalize_range_call_expr(&self, expr: &Expr) -> Result<Vec<Expr>, ParseError> {
+        let ExprKind::Call { callee, args } = &expr.kind else {
+            return Err(ParseError {
+                message: "current `for` loops require `range(...)`".to_string(),
+                span: expr.span,
+            });
+        };
+        let ExprKind::Identifier(name) = &callee.kind else {
+            return Err(ParseError {
+                message: "current `for` loops require `range(...)`".to_string(),
+                span: callee.span,
+            });
+        };
+        if name != "range" {
+            return Err(ParseError {
+                message: "current `for` loops require `range(...)`".to_string(),
+                span: callee.span,
+            });
+        }
+
+        let positional = args
+            .iter()
+            .map(|arg| match arg {
+                CallArg::Positional(expr) => Ok(expr.clone()),
+                CallArg::Keyword { span, .. } => Err(ParseError {
+                    message: "`range(...)` does not accept keyword arguments".to_string(),
+                    span: *span,
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        match positional.as_slice() {
+            [stop] => Ok(vec![
+                integer_expr("0", expr.span),
+                stop.clone(),
+                integer_expr("1", expr.span),
+            ]),
+            [start, stop] => Ok(vec![
+                start.clone(),
+                stop.clone(),
+                integer_expr("1", expr.span),
+            ]),
+            [start, stop, step] => Ok(vec![start.clone(), stop.clone(), step.clone()]),
+            _ => Err(ParseError {
+                message: "`range(...)` expects 1, 2, or 3 positional arguments".to_string(),
+                span: expr.span,
+            }),
+        }
+    }
+}
+
+impl Stmt {
+    fn span(&self) -> Span {
+        match self {
+            Stmt::Block(stmt) => stmt.span,
+            Stmt::Let(stmt) => stmt.span,
+            Stmt::Assign(stmt) => stmt.span,
+            Stmt::Return(stmt) => stmt.span,
+            Stmt::If(stmt) => stmt.span,
+            Stmt::While(stmt) => stmt.span,
+            Stmt::Raise(stmt) => stmt.span,
+            Stmt::Panic(stmt) => stmt.span,
+            Stmt::Expr(stmt) => stmt.expr.span,
+        }
+    }
+}
+
+fn ident_expr(name: &str, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Identifier(name.to_string()),
+        span,
+    }
+}
+
+fn integer_expr(value: &str, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Integer(value.to_string()),
+        span,
+    }
+}
+
+fn string_expr(value: &str, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::String(value.to_string()),
+        span,
+    }
+}
+
+fn binary_expr(left: Expr, op: BinaryOp, right: Expr, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        },
+        span,
+    }
+}
+
+fn int_call_expr(value: Expr, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Call {
+            callee: Box::new(ident_expr("int", span)),
+            args: vec![CallArg::Positional(value)],
+        },
+        span,
+    }
+}
+
+fn typed_let_stmt(name: &str, ty_name: &str, value: Expr, span: Span) -> Stmt {
+    Stmt::Let(LetStmt {
+        name: name.to_string(),
+        ty: Some(TypeRef {
+            name: ty_name.to_string(),
+            span,
+        }),
+        value,
+        span,
+    })
 }

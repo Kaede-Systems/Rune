@@ -1247,6 +1247,22 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_sum_range" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let start = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let stop = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let step = self.resolve_value(&args[2].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_sum_range(i64, i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_sum_range(i64 {start}, i64 {stop}, i64 {step})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_system_pid" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
@@ -1775,6 +1791,79 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_arduino_analog_reference" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let mode = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_analog_reference(i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_analog_reference(i64 {mode})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_pulse_in" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let state = self.resolve_value(&args[1].value, &IrType::Bool, out)?;
+                let timeout = self.resolve_value(&args[2].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_pulse_in(i64, i1, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_arduino_pulse_in(i64 {pin}, i1 {state}, i64 {timeout})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_shift_out" => {
+                self.expect_plain_arity(callee, args, 4)?;
+                let data_pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let clock_pin = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let bit_order = self.resolve_value(&args[2].value, &IrType::I64, out)?;
+                let value = self.resolve_value(&args[3].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_shift_out(i64, i64, i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_shift_out(i64 {data_pin}, i64 {clock_pin}, i64 {bit_order}, i64 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_tone" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let frequency = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let duration = self.resolve_value(&args[2].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_tone(i64, i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_tone(i64 {pin}, i64 {frequency}, i64 {duration})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_no_tone" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_no_tone(i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_no_tone(i64 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
             "__rune_builtin_arduino_delay_ms" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let ms = self.resolve_value(&args[0].value, &IrType::I64, out)?;
@@ -1842,7 +1931,14 @@ impl<'a> FunctionEmitter<'a> {
             "__rune_builtin_arduino_mode_input"
             | "__rune_builtin_arduino_mode_output"
             | "__rune_builtin_arduino_mode_input_pullup"
-            | "__rune_builtin_arduino_led_builtin" => {
+            | "__rune_builtin_arduino_led_builtin"
+            | "__rune_builtin_arduino_high"
+            | "__rune_builtin_arduino_low"
+            | "__rune_builtin_arduino_bit_order_lsb_first"
+            | "__rune_builtin_arduino_bit_order_msb_first"
+            | "__rune_builtin_arduino_analog_ref_default"
+            | "__rune_builtin_arduino_analog_ref_internal"
+            | "__rune_builtin_arduino_analog_ref_external" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
                 let runtime = match callee {
@@ -1852,6 +1948,23 @@ impl<'a> FunctionEmitter<'a> {
                         "rune_rt_arduino_mode_input_pullup"
                     }
                     "__rune_builtin_arduino_led_builtin" => "rune_rt_arduino_led_builtin",
+                    "__rune_builtin_arduino_high" => "rune_rt_arduino_high",
+                    "__rune_builtin_arduino_low" => "rune_rt_arduino_low",
+                    "__rune_builtin_arduino_bit_order_lsb_first" => {
+                        "rune_rt_arduino_bit_order_lsb_first"
+                    }
+                    "__rune_builtin_arduino_bit_order_msb_first" => {
+                        "rune_rt_arduino_bit_order_msb_first"
+                    }
+                    "__rune_builtin_arduino_analog_ref_default" => {
+                        "rune_rt_arduino_analog_ref_default"
+                    }
+                    "__rune_builtin_arduino_analog_ref_internal" => {
+                        "rune_rt_arduino_analog_ref_internal"
+                    }
+                    "__rune_builtin_arduino_analog_ref_external" => {
+                        "rune_rt_arduino_analog_ref_external"
+                    }
                     _ => unreachable!(),
                 };
                 self.declared_runtime
@@ -2702,8 +2815,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"
+        | "__rune_builtin_arduino_pulse_in"
         | "__rune_builtin_arduino_millis"
-        | "__rune_builtin_arduino_micros" => Some(IrType::I64),
+        | "__rune_builtin_arduino_micros"
+        | "__rune_builtin_sum_range" => Some(IrType::I64),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
@@ -2716,6 +2831,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_pin_mode"
         | "__rune_builtin_arduino_digital_write"
         | "__rune_builtin_arduino_analog_write"
+        | "__rune_builtin_arduino_analog_reference"
+        | "__rune_builtin_arduino_shift_out"
+        | "__rune_builtin_arduino_tone"
+        | "__rune_builtin_arduino_no_tone"
         | "__rune_builtin_arduino_delay_ms"
         | "__rune_builtin_arduino_delay_us"
         | "__rune_builtin_arduino_uart_begin"
@@ -2729,6 +2848,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_mode_output"
         | "__rune_builtin_arduino_mode_input_pullup"
         | "__rune_builtin_arduino_led_builtin"
+        | "__rune_builtin_arduino_high"
+        | "__rune_builtin_arduino_low"
+        | "__rune_builtin_arduino_bit_order_lsb_first"
+        | "__rune_builtin_arduino_bit_order_msb_first"
+        | "__rune_builtin_arduino_analog_ref_default"
+        | "__rune_builtin_arduino_analog_ref_internal"
+        | "__rune_builtin_arduino_analog_ref_external"
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
         "__rune_builtin_env_exists"

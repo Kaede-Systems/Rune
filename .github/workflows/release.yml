@@ -104,14 +104,15 @@ jobs:
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -eux
           TAG="release-branch-latest"
           TITLE="Release Branch Latest"
           NOTES="Automated Rune release bundles from the release branch."
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" flat/* --clobber
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" flat/* --clobber --repo "$GH_REPO"
           else
-            gh release create "$TAG" flat/* --title "$TITLE" --notes "$NOTES"
+            gh release create "$TAG" flat/* --title "$TITLE" --notes "$NOTES" --repo "$GH_REPO"
           fi

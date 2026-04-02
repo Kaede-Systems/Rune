@@ -673,6 +673,16 @@ impl<'a> Analyzer<'a> {
         in_async: bool,
     ) -> Result<(), SemanticError> {
         match stmt {
+            Stmt::Block(stmt) => {
+                let mut block_scope = scope.clone();
+                self.check_block(
+                    &stmt.block,
+                    &mut block_scope,
+                    expected_return,
+                    expected_raises,
+                    in_async,
+                )
+            }
             Stmt::Let(stmt) => self.check_let(stmt, scope, in_async),
             Stmt::Assign(stmt) => self.check_assign(stmt, scope, in_async),
             Stmt::Return(stmt) => self.check_return(stmt, scope, expected_return, in_async),
@@ -734,6 +744,17 @@ impl<'a> Analyzer<'a> {
         errors: &mut Vec<SemanticError>,
     ) {
         match stmt {
+            Stmt::Block(block_stmt) => {
+                let mut block_scope = scope.clone();
+                self.check_block_collect(
+                    &block_stmt.block,
+                    &mut block_scope,
+                    expected_return,
+                    expected_raises,
+                    in_async,
+                    errors,
+                );
+            }
             Stmt::Let(let_stmt) => {
                 if let Err(error) = self.check_let(let_stmt, scope, in_async) {
                     errors.push(error);
@@ -1375,6 +1396,32 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&actual, &Type::String, expr.span, "exception message")?;
                     Ok(Type::Exception(name.to_string()))
                 }
+                "__rune_builtin_sum_range" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: "`sum(range(...))` expects a normalized 3-argument range"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    for arg in args {
+                        let CallArg::Positional(expr) = arg else {
+                            return Err(SemanticError {
+                                message:
+                                    "`sum(range(...))` does not accept keyword arguments".to_string(),
+                                span,
+                            });
+                        };
+                        let actual = self.check_expr(expr, scope, in_async)?;
+                        self.expect_integer_type(&actual, expr.span, "range argument")?;
+                    }
+                    Ok(Type::I64)
+                }
+                "range" => Err(SemanticError {
+                    message: "`range(...)` is currently supported only in `for` loops and `sum(...)`"
+                        .to_string(),
+                    span,
+                }),
                 "__rune_builtin_time_now_unix" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -2063,6 +2110,105 @@ impl<'a> Analyzer<'a> {
                     self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino analog pin")?;
                     Ok(Type::I64)
                 }
+                "__rune_builtin_arduino_analog_reference" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_analog_reference` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(mode_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_analog_reference` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let mode_ty = self.check_expr(mode_expr, scope, in_async)?;
+                    self.expect_integer_type(&mode_ty, mode_expr.span, "Arduino analog reference mode")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_pulse_in" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_pulse_in` expects 3 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(state_expr), CallArg::Positional(timeout_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_pulse_in` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino pulse pin")?;
+                    let state_ty = self.check_expr(state_expr, scope, in_async)?;
+                    self.expect_type(&state_ty, &Type::Bool, state_expr.span, "Arduino pulse state")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_integer_type(&timeout_ty, timeout_expr.span, "Arduino pulse timeout")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_shift_out" => {
+                    if args.len() != 4 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_shift_out` expects 4 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(data_pin_expr), CallArg::Positional(clock_pin_expr), CallArg::Positional(bit_order_expr), CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_shift_out` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let data_pin_ty = self.check_expr(data_pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&data_pin_ty, data_pin_expr.span, "Arduino shiftOut data pin")?;
+                    let clock_pin_ty = self.check_expr(clock_pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&clock_pin_ty, clock_pin_expr.span, "Arduino shiftOut clock pin")?;
+                    let bit_order_ty = self.check_expr(bit_order_expr, scope, in_async)?;
+                    self.expect_integer_type(&bit_order_ty, bit_order_expr.span, "Arduino shiftOut bit order")?;
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_integer_type(&value_ty, value_expr.span, "Arduino shiftOut value")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_tone" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_tone` expects 3 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(freq_expr), CallArg::Positional(duration_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_tone` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino tone pin")?;
+                    let freq_ty = self.check_expr(freq_expr, scope, in_async)?;
+                    self.expect_integer_type(&freq_ty, freq_expr.span, "Arduino tone frequency")?;
+                    let duration_ty = self.check_expr(duration_expr, scope, in_async)?;
+                    self.expect_integer_type(&duration_ty, duration_expr.span, "Arduino tone duration")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_no_tone" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_no_tone` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_no_tone` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino noTone pin")?;
+                    Ok(Type::Unit)
+                }
                 "__rune_builtin_arduino_delay_ms" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
@@ -2127,7 +2273,14 @@ impl<'a> Analyzer<'a> {
                 "__rune_builtin_arduino_mode_input"
                 | "__rune_builtin_arduino_mode_output"
                 | "__rune_builtin_arduino_mode_input_pullup"
-                | "__rune_builtin_arduino_led_builtin" => {
+                | "__rune_builtin_arduino_led_builtin"
+                | "__rune_builtin_arduino_high"
+                | "__rune_builtin_arduino_low"
+                | "__rune_builtin_arduino_bit_order_lsb_first"
+                | "__rune_builtin_arduino_bit_order_msb_first"
+                | "__rune_builtin_arduino_analog_ref_default"
+                | "__rune_builtin_arduino_analog_ref_internal"
+                | "__rune_builtin_arduino_analog_ref_external" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
                             message: format!("`{name}` takes no arguments"),
@@ -2586,6 +2739,11 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_arduino_digital_read" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_analog_write" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_analog_read" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_analog_reference" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_pulse_in" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_shift_out" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_tone" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_no_tone" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_delay_ms" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_delay_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_millis" => Some(Type::Unknown("builtin".to_string())),
@@ -2595,6 +2753,13 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_arduino_mode_output" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_mode_input_pullup" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_led_builtin" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_high" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_low" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_bit_order_lsb_first" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_bit_order_msb_first" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_analog_ref_default" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_analog_ref_internal" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_analog_ref_external" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_begin" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_available" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_read_byte" => Some(Type::Unknown("builtin".to_string())),
@@ -2606,6 +2771,8 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_terminal_show_cursor" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_set_title" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_audio_bell" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_sum_range" => Some(Type::I64),
+        "range" => Some(Type::Unknown("builtin".to_string())),
         _ => None,
     }
 }

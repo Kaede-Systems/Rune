@@ -687,6 +687,7 @@ fn method_owner_from_registered_name(name: &str) -> Option<String> {
 fn collect_locals(block: &Block, locals: &mut BTreeSet<String>) -> Result<(), CodegenError> {
     for stmt in &block.statements {
         match stmt {
+            Stmt::Block(stmt) => collect_locals(&stmt.block, locals)?,
             Stmt::Let(let_stmt) => {
                 if !locals.insert(let_stmt.name.clone()) {
                     return Err(CodegenError {
@@ -787,6 +788,7 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_stmt(&mut self, out: &mut String, stmt: &Stmt) -> Result<(), CodegenError> {
         match stmt {
+            Stmt::Block(stmt) => self.emit_block(out, &stmt.block),
             Stmt::Let(stmt) => self.emit_let(out, stmt),
             Stmt::Assign(stmt) => self.emit_assign(out, stmt),
             Stmt::Return(stmt) => {
@@ -1402,6 +1404,32 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_sum_range" {
+            if args.len() != 3 {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_sum_range` expects 3 arguments".to_string(),
+                    span,
+                });
+            }
+            let [
+                CallArg::Positional(start_expr),
+                CallArg::Positional(stop_expr),
+                CallArg::Positional(step_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_sum_range` does not accept keyword arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", start_expr)?;
+            self.emit_into_reg(out, "rdx", stop_expr)?;
+            self.emit_into_reg(out, "r8", step_expr)?;
+            out.push_str("    call rune_rt_sum_range\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_system_pid" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -1932,6 +1960,83 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_arduino_analog_reference" {
+            let [CallArg::Positional(mode_expr)] = args else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_arduino_analog_reference` expects 1 positional argument"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", mode_expr)?;
+            out.push_str("    call rune_rt_arduino_analog_reference\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_pulse_in" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(state_expr), CallArg::Positional(timeout_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_pulse_in` expects 3 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "edx", state_expr)?;
+            self.emit_into_reg(out, "r8", timeout_expr)?;
+            out.push_str("    call rune_rt_arduino_pulse_in\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_shift_out" {
+            let [CallArg::Positional(data_pin_expr), CallArg::Positional(clock_pin_expr), CallArg::Positional(bit_order_expr), CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_shift_out` expects 4 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", data_pin_expr)?;
+            self.emit_into_reg(out, "rdx", clock_pin_expr)?;
+            self.emit_into_reg(out, "r8", bit_order_expr)?;
+            self.emit_into_reg(out, "r9", value_expr)?;
+            out.push_str("    call rune_rt_arduino_shift_out\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_tone" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(freq_expr), CallArg::Positional(duration_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_tone` expects 3 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "rdx", freq_expr)?;
+            self.emit_into_reg(out, "r8", duration_expr)?;
+            out.push_str("    call rune_rt_arduino_tone\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_no_tone" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_no_tone` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            out.push_str("    call rune_rt_arduino_no_tone\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_arduino_delay_ms" {
             let [CallArg::Positional(ms_expr)] = args else {
                 return Err(CodegenError {
@@ -2066,6 +2171,13 @@ impl<'a> FunctionEmitter<'a> {
                 | "__rune_builtin_arduino_mode_output"
                 | "__rune_builtin_arduino_mode_input_pullup"
                 | "__rune_builtin_arduino_led_builtin"
+                | "__rune_builtin_arduino_high"
+                | "__rune_builtin_arduino_low"
+                | "__rune_builtin_arduino_bit_order_lsb_first"
+                | "__rune_builtin_arduino_bit_order_msb_first"
+                | "__rune_builtin_arduino_analog_ref_default"
+                | "__rune_builtin_arduino_analog_ref_internal"
+                | "__rune_builtin_arduino_analog_ref_external"
         ) {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -2078,6 +2190,23 @@ impl<'a> FunctionEmitter<'a> {
                 "__rune_builtin_arduino_mode_output" => "rune_rt_arduino_mode_output",
                 "__rune_builtin_arduino_mode_input_pullup" => "rune_rt_arduino_mode_input_pullup",
                 "__rune_builtin_arduino_led_builtin" => "rune_rt_arduino_led_builtin",
+                "__rune_builtin_arduino_high" => "rune_rt_arduino_high",
+                "__rune_builtin_arduino_low" => "rune_rt_arduino_low",
+                "__rune_builtin_arduino_bit_order_lsb_first" => {
+                    "rune_rt_arduino_bit_order_lsb_first"
+                }
+                "__rune_builtin_arduino_bit_order_msb_first" => {
+                    "rune_rt_arduino_bit_order_msb_first"
+                }
+                "__rune_builtin_arduino_analog_ref_default" => {
+                    "rune_rt_arduino_analog_ref_default"
+                }
+                "__rune_builtin_arduino_analog_ref_internal" => {
+                    "rune_rt_arduino_analog_ref_internal"
+                }
+                "__rune_builtin_arduino_analog_ref_external" => {
+                    "rune_rt_arduino_analog_ref_external"
+                }
                 _ => unreachable!(),
             };
             out.push_str(&format!("    call {runtime}\n"));
@@ -4069,8 +4198,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"
+        | "__rune_builtin_arduino_pulse_in"
         | "__rune_builtin_arduino_millis"
-        | "__rune_builtin_arduino_micros" => Some(IrType::I64),
+        | "__rune_builtin_arduino_micros"
+        | "__rune_builtin_sum_range" => Some(IrType::I64),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix"
         | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
@@ -4084,6 +4215,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_pin_mode"
         | "__rune_builtin_arduino_digital_write"
         | "__rune_builtin_arduino_analog_write"
+        | "__rune_builtin_arduino_analog_reference"
+        | "__rune_builtin_arduino_shift_out"
+        | "__rune_builtin_arduino_tone"
+        | "__rune_builtin_arduino_no_tone"
         | "__rune_builtin_arduino_delay_ms"
         | "__rune_builtin_arduino_delay_us"
         | "__rune_builtin_arduino_uart_begin"
@@ -4097,6 +4232,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_mode_output"
         | "__rune_builtin_arduino_mode_input_pullup"
         | "__rune_builtin_arduino_led_builtin"
+        | "__rune_builtin_arduino_high"
+        | "__rune_builtin_arduino_low"
+        | "__rune_builtin_arduino_bit_order_lsb_first"
+        | "__rune_builtin_arduino_bit_order_msb_first"
+        | "__rune_builtin_arduino_analog_ref_default"
+        | "__rune_builtin_arduino_analog_ref_internal"
+        | "__rune_builtin_arduino_analog_ref_external"
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
         "__rune_builtin_env_exists"

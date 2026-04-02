@@ -335,6 +335,32 @@ fn parses_class_method_declaration() {
 }
 
 #[test]
+fn parses_top_level_script_statements_as_synthetic_main() {
+    let program = parse_source("println(\"Hello World boi\")\n").expect("script should parse");
+
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected synthetic main function");
+    };
+    assert_eq!(function.name, "main");
+    assert_eq!(
+        function.return_type.as_ref().map(|ty| ty.name.as_str()),
+        Some("i32")
+    );
+    assert_eq!(function.body.statements.len(), 2);
+    assert!(matches!(function.body.statements[0], Stmt::Expr(_)));
+    assert!(matches!(function.body.statements[1], Stmt::Return(_)));
+}
+
+#[test]
+fn rejects_top_level_statements_mixed_with_explicit_main() {
+    let error = parse_source("println(\"hi\")\n\ndef main() -> i32:\n    return 0\n")
+        .expect_err("top-level statements mixed with main should fail");
+    assert!(error
+        .message
+        .contains("top-level statements cannot be combined with an explicit `main()`"));
+}
+
+#[test]
 fn parses_extern_function_declaration() {
     let program = parse_source("extern def add_from_c(a: i32, b: i32) -> i32\n")
         .expect("extern function should parse");
