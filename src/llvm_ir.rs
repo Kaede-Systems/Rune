@@ -2074,6 +2074,77 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_serial_open" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let baud = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_serial_open(ptr, i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_serial_open({ptr}, {len}, i64 {baud})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_serial_is_open" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_serial_is_open()\n".into());
+                out.push_str(&format!("  {reg} = call i1 @rune_rt_serial_is_open()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_serial_close" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_serial_close()\n".into());
+                out.push_str("  call void @rune_rt_serial_close()\n");
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_serial_read_line" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_serial_read_line()\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!("  {ptr_reg} = call ptr @rune_rt_serial_read_line()\n"));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_serial_write" | "__rune_builtin_serial_write_line" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let runtime = if callee == "__rune_builtin_serial_write" {
+                    "rune_rt_serial_write"
+                } else {
+                    "rune_rt_serial_write_line"
+                };
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert(format!("declare i1 @{runtime}(ptr, i64)\n"));
+                out.push_str(&format!("  {reg} = call i1 @{runtime}({ptr}, {len})\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_terminal_clear" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 self.declared_runtime
@@ -2838,7 +2909,9 @@ fn field_call_return_type(
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
-        "input" | "__rune_builtin_arduino_read_line" => Some(IrType::String),
+        "input" | "__rune_builtin_arduino_read_line" | "__rune_builtin_serial_read_line" => {
+            Some(IrType::String)
+        }
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
@@ -2882,7 +2955,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_delay_us"
         | "__rune_builtin_arduino_uart_begin"
         | "__rune_builtin_arduino_uart_write_byte"
-        | "__rune_builtin_arduino_uart_write" => Some(IrType::Unit),
+        | "__rune_builtin_arduino_uart_write"
+        | "__rune_builtin_serial_close" => Some(IrType::Unit),
         "__rune_builtin_arduino_mode_input"
         | "__rune_builtin_arduino_mode_output"
         | "__rune_builtin_arduino_mode_input_pullup"
@@ -2896,6 +2970,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_analog_ref_external"
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
+        "__rune_builtin_serial_open"
+        | "__rune_builtin_serial_is_open"
+        | "__rune_builtin_serial_write"
+        | "__rune_builtin_serial_write_line" => Some(IrType::Bool),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"

@@ -2246,6 +2246,74 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_serial_open" {
+            let [CallArg::Positional(port_expr), CallArg::Positional(baud_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_open` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, port_expr, "rcx", "rdx", "serial port name")?;
+            self.emit_into_reg(out, "r8", baud_expr)?;
+            out.push_str("    call rune_rt_serial_open\n");
+            out.push_str("    movzx eax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_serial_is_open" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_is_open` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_is_open\n");
+            out.push_str("    movzx eax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_serial_close" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_close` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_close\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_serial_read_line" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_read_line` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_read_line\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_serial_write" || name == "__rune_builtin_serial_write_line" {
+            let [CallArg::Positional(text_expr)] = args else {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 1 positional argument"),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, text_expr, "rcx", "rdx", "serial text")?;
+            let runtime = if name == "__rune_builtin_serial_write" {
+                "rune_rt_serial_write"
+            } else {
+                "rune_rt_serial_write_line"
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            out.push_str("    movzx eax, al\n");
+            return Ok(());
+        }
+
         if matches!(
             name.as_str(),
             "__rune_builtin_arduino_mode_input"
@@ -3036,18 +3104,33 @@ impl<'a> FunctionEmitter<'a> {
 
         if let ExprKind::Call { callee, args } = &expr.kind
             && let ExprKind::Identifier(name) = &callee.kind
-            && name == "__rune_builtin_fs_read_string"
+            && matches!(
+                name.as_str(),
+                "__rune_builtin_fs_read_string" | "__rune_builtin_serial_read_line"
+            )
         {
-            let [CallArg::Positional(path_expr)] = args.as_slice() else {
-                return Err(CodegenError {
-                    message:
-                        "`__rune_builtin_fs_read_string` expects 1 positional argument in the native backend"
-                            .into(),
-                    span: expr.span,
-                });
-            };
-            self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
-            out.push_str("    call rune_rt_fs_read_string\n");
+            if name == "__rune_builtin_fs_read_string" {
+                let [CallArg::Positional(path_expr)] = args.as_slice() else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_fs_read_string` expects 1 positional argument in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
+                out.push_str("    call rune_rt_fs_read_string\n");
+            } else {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_serial_read_line` expects 0 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                }
+                out.push_str("    call rune_rt_serial_read_line\n");
+            }
             self.capture_runtime_string_result(out, ptr_reg, len_reg);
             return Ok(());
         }
@@ -4296,7 +4379,9 @@ fn type_ref_to_ir_type(ty: Option<&crate::parser::TypeRef>) -> IrType {
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
-        "input" | "__rune_builtin_arduino_read_line" => Some(IrType::String),
+        "input" | "__rune_builtin_arduino_read_line" | "__rune_builtin_serial_read_line" => {
+            Some(IrType::String)
+        }
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
@@ -4341,7 +4426,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_delay_us"
         | "__rune_builtin_arduino_uart_begin"
         | "__rune_builtin_arduino_uart_write_byte"
-        | "__rune_builtin_arduino_uart_write" => Some(IrType::Unit),
+        | "__rune_builtin_arduino_uart_write"
+        | "__rune_builtin_serial_close" => Some(IrType::Unit),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"
@@ -4359,6 +4445,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_analog_ref_external"
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
+        "__rune_builtin_serial_open"
+        | "__rune_builtin_serial_is_open"
+        | "__rune_builtin_serial_write"
+        | "__rune_builtin_serial_write_line" => Some(IrType::Bool),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"

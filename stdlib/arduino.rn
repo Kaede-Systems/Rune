@@ -102,3 +102,19 @@ def uart_write_byte(value: i64) -> unit:
 def uart_write(text: String) -> unit:
     __rune_builtin_arduino_uart_write(text)
     return
+
+def blink(pin: i64, times: i64, on_ms: i64, off_ms: i64) -> unit:
+    let count: i64 = 0
+    while count < times:
+        digital_write(pin, true)
+        delay_ms(on_ms)
+        digital_write(pin, false)
+        delay_ms(off_ms)
+        count = count + 1
+    return
+
+def blink_builtin(times: i64, on_ms: i64, off_ms: i64) -> unit:
+    let pin: i64 = led_builtin()
+    pin_mode(pin, mode_output())
+    blink(pin, times, on_ms, off_ms)
+    return

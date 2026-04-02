@@ -75,6 +75,48 @@ Current Arduino limitations:
 - this module is implemented for the current Uno embedded slice, not full Rune parity
 - dynamic values and full class/OOP parity are not implemented on AVR yet
 
+## `serial`
+
+```rune
+from serial import begin, open, is_open, close
+from serial import available, read_byte, recv_line, write, write_line, send, send_line
+```
+
+Exports:
+
+- `begin(baud: i64) -> unit`
+- `open(port: String, baud: i64) -> bool`
+- `is_open() -> bool`
+- `close() -> unit`
+- `available() -> i64`
+- `read_byte() -> i64`
+- `recv_line() -> String`
+- `write(text: String) -> unit`
+- `write_line(text: String) -> unit`
+- `send(text: String) -> bool`
+- `send_line(text: String) -> bool`
+
+Current implemented serial scope:
+
+- shared serial-facing Rune surface for embedded and host code
+- on Arduino Uno:
+  - `begin` lowers to `uart_begin`
+  - `open` behaves like `begin`
+  - `write` and `write_line` lower to UART writes
+  - `send` and `send_line` lower to UART writes and report success
+  - `recv_line` lowers to the normal embedded input surface
+- on non-embedded targets:
+  - `open` opens a host serial port such as `COM5`
+  - `is_open`, `close`, `send`, `send_line`, and `recv_line` talk to the active host serial connection
+  - `write` / `write_line` still lower to `print` / `println`
+
+Current serial limitations:
+
+- this is a single-active-connection text serial layer, not a full multi-port device API
+- text line input stays on the normal Rune `input()` surface
+- lower-level byte control remains in `arduino` via `uart_*`
+- current host serial scope is for native host builds, not browser/WASM targets
+
 ## `json`
 
 ```rune

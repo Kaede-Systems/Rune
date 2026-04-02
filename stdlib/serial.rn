@@ -1,0 +1,64 @@
+def begin(baud: i64) -> unit:
+    if __rune_builtin_system_is_embedded():
+        __rune_builtin_arduino_uart_begin(baud)
+    return
+
+def open(port: String, baud: i64) -> bool:
+    if __rune_builtin_system_is_embedded():
+        __rune_builtin_arduino_uart_begin(baud)
+        return true
+    return __rune_builtin_serial_open(port, baud)
+
+def is_open() -> bool:
+    if __rune_builtin_system_is_embedded():
+        return true
+    return __rune_builtin_serial_is_open()
+
+def close() -> unit:
+    if __rune_builtin_system_is_embedded():
+        return
+    __rune_builtin_serial_close()
+    return
+
+def available() -> i64:
+    if __rune_builtin_system_is_embedded():
+        return __rune_builtin_arduino_uart_available()
+    return 0
+
+def read_byte() -> i64:
+    if __rune_builtin_system_is_embedded():
+        return __rune_builtin_arduino_uart_read_byte()
+    return -1
+
+def recv_line() -> String:
+    if __rune_builtin_system_is_embedded():
+        return input()
+    return __rune_builtin_serial_read_line()
+
+def write(text: String) -> unit:
+    if __rune_builtin_system_is_embedded():
+        __rune_builtin_arduino_uart_write(text)
+        return
+    print(text)
+    return
+
+def write_line(text: String) -> unit:
+    if __rune_builtin_system_is_embedded():
+        __rune_builtin_arduino_uart_write(text)
+        __rune_builtin_arduino_uart_write_byte(10)
+        return
+    println(text)
+    return
+
+def send(text: String) -> bool:
+    if __rune_builtin_system_is_embedded():
+        __rune_builtin_arduino_uart_write(text)
+        return true
+    return __rune_builtin_serial_write(text)
+
+def send_line(text: String) -> bool:
+    if __rune_builtin_system_is_embedded():
+        __rune_builtin_arduino_uart_write(text)
+        __rune_builtin_arduino_uart_write_byte(10)
+        return true
+    return __rune_builtin_serial_write_line(text)

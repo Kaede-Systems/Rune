@@ -1,5 +1,7 @@
 # Rune
 
+![Rune logo](assets/branding/rune-logo-lockup.png)
+
 Rune is a native compiled programming language with Python-inspired syntax, a real Rust compiler, an internal IR, an LLVM-backed target path, a native backend, packaged tooling, and a growing standard library.
 
 This repository is the actual compiler and toolchain workspace. It follows the repository rules in [AGENTS.md](AGENTS.md): no scaffolds, no placeholder features, and no claiming support beyond what is implemented end to end.
@@ -63,6 +65,7 @@ Current stdlib modules live under [stdlib](stdlib):
 - `fs`
 - `io`
 - `network`
+- `serial`
 - `system`
 - `terminal`
 - `time`

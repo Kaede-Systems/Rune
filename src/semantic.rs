@@ -2379,6 +2379,69 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&text_ty, &Type::String, text_expr.span, "Arduino UART text")?;
                     Ok(Type::Unit)
                 }
+                "__rune_builtin_serial_open" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_open` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(port_expr), CallArg::Positional(baud_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_open` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::String, port_expr.span, "serial port name")?;
+                    let baud_ty = self.check_expr(baud_expr, scope, in_async)?;
+                    self.expect_integer_type(&baud_ty, baud_expr.span, "serial baud")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_serial_is_open" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_is_open` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_serial_close" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_close` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_serial_read_line" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_read_line` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::String)
+                }
+                "__rune_builtin_serial_write" | "__rune_builtin_serial_write_line" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 1 argument"),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(text_expr)] = args else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let text_ty = self.check_expr(text_expr, scope, in_async)?;
+                    self.expect_type(&text_ty, &Type::String, text_expr.span, "serial text")?;
+                    Ok(Type::Bool)
+                }
                 "__rune_builtin_terminal_clear" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -2792,6 +2855,12 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_arduino_uart_read_byte" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_write_byte" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_open" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_is_open" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_close" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_read_line" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_write_line" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_clear" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_move_to" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_hide_cursor" => Some(Type::Unknown("builtin".to_string())),

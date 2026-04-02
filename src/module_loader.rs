@@ -386,7 +386,7 @@ fn resolve_module_path(base_dir: &Path, import: &ImportDecl) -> PathBuf {
     if import.level == 0 {
         let roots = [
             "system", "sys", "time", "network", "env", "fs", "terminal", "audio", "io",
-            "json", "arduino",
+            "json", "arduino", "serial",
         ];
         if import
             .module

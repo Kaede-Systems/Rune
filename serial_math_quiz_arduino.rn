@@ -1,0 +1,63 @@
+from arduino import blink_builtin, delay_ms, millis
+from serial import begin, write, write_line
+
+class Question:
+    a: i64
+    b: i64
+    op: String
+    answer: i64
+
+    def is_correct(self, guess: i64) -> bool:
+        return guess == self.answer
+
+def make_add_question(a: i64, b: i64) -> Question:
+    return Question(a=a, b=b, op="+", answer=a + b)
+
+def make_mul_question(a: i64, b: i64) -> Question:
+    return Question(a=a, b=b, op="*", answer=a * b)
+
+def make_sub_question(a: i64, b: i64) -> Question:
+    if a >= b:
+        return Question(a=a, b=b, op="-", answer=a - b)
+    return Question(a=b, b=a, op="-", answer=b - a)
+
+def choose_question(round_seed: i64) -> Question:
+    let a: i64 = round_seed % 10
+    let op_index: i64 = (round_seed / 3) % 3
+    let raw_b: i64 = (round_seed / 7) % 10
+    if op_index == 0:
+        return make_add_question(a, raw_b)
+    if op_index == 1:
+        return make_mul_question(a, raw_b)
+    return make_sub_question(a, raw_b)
+
+def ask(question: Question) -> unit:
+    write(str(question.a))
+    write(question.op)
+    write(str(question.b))
+    write_line(" = ?")
+    return
+
+def setup() -> unit:
+    begin(115200)
+    write_line("Rune math quiz ready")
+    write_line("Answer single-digit positive addition, subtraction, or multiplication")
+    return
+
+def loop() -> unit:
+    let now: i64 = millis()
+    let question: Question = choose_question(now + 37)
+    ask(question)
+    let text: String = input()
+    write("you answered ")
+    write_line(text)
+    let guess: i64 = int(text)
+    if question.is_correct(guess):
+        write_line("correct")
+        blink_builtin(3, 120, 120)
+    else:
+        write("wrong, correct answer is ")
+        write_line(str(question.answer))
+        blink_builtin(1, 400, 200)
+    delay_ms(500)
+    return

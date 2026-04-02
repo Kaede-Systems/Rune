@@ -1428,8 +1428,17 @@ fn emit_arduino_uno_stmt_expr(
             out.push_str(&format!("{prefix}Serial.print({});\n", rendered.0));
             Ok(())
         }
+        "close" => {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`close` takes no arguments on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            }
+            Ok(())
+        }
         _ => Err(CodegenError {
-            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `tone`, `no_tone`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, and `uart_write` statements".into(),
+            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `tone`, `no_tone`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `send`, and `send_line` statements".into(),
             span: callee.span,
         }),
     }
@@ -1764,6 +1773,72 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
                 }
+                "open" => {
+                    let [CallArg::Positional(_port_expr), CallArg::Positional(baud_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`open` expects 2 positional arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let baud = emit_arduino_uno_expr(scope, functions, structs, baud_expr)?;
+                    if baud.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer baud for `open`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("(Serial.begin((unsigned long)({})), true)", baud.0), ArduinoUnoType::Bool))
+                }
+                "is_open" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`is_open` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("true".into(), ArduinoUnoType::Bool))
+                }
+                "recv_line" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`recv_line` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
+                }
+                "send" => {
+                    let [CallArg::Positional(value_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`send` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let rendered = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
+                    if rendered.1 != ArduinoUnoType::String {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires String text for `send`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("(Serial.print({}), true)", rendered.0), ArduinoUnoType::Bool))
+                }
+                "send_line" => {
+                    let [CallArg::Positional(value_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`send_line` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let rendered = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
+                    if rendered.1 != ArduinoUnoType::String {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires String text for `send_line`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("(Serial.println({}), true)", rendered.0), ArduinoUnoType::Bool))
+                }
                 "str" => {
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -2016,7 +2091,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `millis`, `micros`, `input`, `read_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `millis`, `micros`, `input`, `read_line`, `open`, `is_open`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -2621,6 +2696,12 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_arduino_uart_read_byte" => "uart_read_byte",
         "__rune_builtin_arduino_uart_write_byte" => "uart_write_byte",
         "__rune_builtin_arduino_uart_write" => "uart_write",
+        "__rune_builtin_serial_open" => "open",
+        "__rune_builtin_serial_is_open" => "is_open",
+        "__rune_builtin_serial_close" => "close",
+        "__rune_builtin_serial_read_line" => "recv_line",
+        "__rune_builtin_serial_write" => "send",
+        "__rune_builtin_serial_write_line" => "send_line",
         "__rune_builtin_sum_range" => "sum_range",
         "__rune_builtin_system_pid" => "pid",
         "__rune_builtin_system_cpu_count" => "cpu_count",
@@ -2656,6 +2737,12 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "micros"
             | "input"
             | "read_line"
+            | "open"
+            | "is_open"
+            | "close"
+            | "recv_line"
+            | "send"
+            | "send_line"
             | "str"
             | "int"
             | "sum_range"
@@ -4650,9 +4737,10 @@ fn rust_runtime_support_body() -> &'static str {
     r#"use std::cell::{Cell, RefCell};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 #[cfg(not(target_os = "wasi"))]
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::process::Command;
 use std::sync::OnceLock;
 use std::thread_local;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -4665,6 +4753,7 @@ thread_local! {
 }
 
 static RUNE_ARDUINO_START: OnceLock<Instant> = OnceLock::new();
+static RUNE_HOST_SERIAL: OnceLock<std::sync::Mutex<Option<std::fs::File>>> = OnceLock::new();
 
 fn rune_rt_store_string(value: String) -> *const u8 {
     let len = value.len();
@@ -4678,6 +4767,70 @@ fn rune_rt_store_string(value: String) -> *const u8 {
         RUNE_LAST_STRING_LEN.with(|last_len| last_len.set(len as i64));
         ptr
     })
+}
+
+fn rune_rt_serial_handle() -> &'static std::sync::Mutex<Option<std::fs::File>> {
+    RUNE_HOST_SERIAL.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn rune_rt_configure_serial_port(port_name: &str, baud: i64) -> bool {
+    if baud <= 0 {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let status = Command::new("cmd")
+            .args([
+                "/C",
+                "mode",
+                port_name,
+                &format!("BAUD={baud}"),
+                "PARITY=n",
+                "DATA=8",
+                "STOP=1",
+            ])
+            .status();
+        return matches!(status, Ok(exit) if exit.success());
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let port_flag = if cfg!(target_os = "macos") { "-f" } else { "-F" };
+        let status = Command::new("stty")
+            .args([
+                port_flag,
+                port_name,
+                &baud.to_string(),
+                "raw",
+                "-echo",
+                "cs8",
+                "-cstopb",
+                "-parenb",
+                "min",
+                "0",
+                "time",
+                "1",
+            ])
+            .status();
+        return matches!(status, Ok(exit) if exit.success());
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+fn rune_rt_open_serial_file(port_name: &str) -> io::Result<std::fs::File> {
+    #[cfg(target_os = "windows")]
+    let normalized = if port_name.starts_with(r"\\.\") {
+        port_name.to_string()
+    } else {
+        format!(r"\\.\{port_name}")
+    };
+    #[cfg(not(target_os = "windows"))]
+    let normalized = port_name.to_string();
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(normalized)
 }
 
 fn rune_rt_host_platform_name() -> &'static str {
@@ -5012,6 +5165,121 @@ pub extern "C" fn rune_rt_arduino_uart_write(ptr: *const u8, len: i64) {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let _ = io::stdout().write_all(bytes);
     let _ = io::stdout().flush();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_open(port_ptr: *const u8, port_len: i64, baud: i64) -> bool {
+    if port_ptr.is_null() || port_len < 0 || baud <= 0 {
+        return false;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(port_ptr, port_len as usize) };
+    let Ok(port_name) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    if !rune_rt_configure_serial_port(port_name, baud) {
+        return false;
+    }
+    let Ok(port) = rune_rt_open_serial_file(port_name) else {
+        return false;
+    };
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *guard = Some(port);
+    true
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_is_open() -> bool {
+    rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .is_some()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_close() {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *guard = None;
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_write(ptr: *const u8, len: i64) -> bool {
+    if ptr.is_null() || len < 0 {
+        return false;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(port) = guard.as_mut() else {
+        return false;
+    };
+    if port.write_all(bytes).is_err() {
+        return false;
+    }
+    port.flush().is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_write_line(ptr: *const u8, len: i64) -> bool {
+    if ptr.is_null() || len < 0 {
+        return false;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(port) = guard.as_mut() else {
+        return false;
+    };
+    if port.write_all(bytes).is_err() {
+        return false;
+    }
+    if port.write_all(b"\n").is_err() {
+        return false;
+    }
+    port.flush().is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_read_line() -> *const u8 {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(port) = guard.as_mut() else {
+        return rune_rt_store_string(String::new());
+    };
+
+    let mut bytes = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        match port.read(&mut byte) {
+            Ok(0) => {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Ok(_) => {
+                if byte[0] == b'\n' {
+                    break;
+                }
+                if byte[0] != b'\r' {
+                    bytes.push(byte[0]);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+                if !bytes.is_empty() {
+                    break;
+                }
+            }
+            Err(_) => return rune_rt_store_string(String::new()),
+        }
+    }
+
+    let line = String::from_utf8_lossy(&bytes).to_string();
+    rune_rt_store_string(line)
 }
 
 #[unsafe(no_mangle)]

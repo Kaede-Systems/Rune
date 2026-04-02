@@ -605,6 +605,43 @@ fn builds_arduino_uno_serial_calculator_example() {
 }
 
 #[test]
+fn builds_arduino_uno_serial_math_quiz_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("serial_math_quiz_arduino.rn");
+    let output_path = dir.join("serial_math_quiz_arduino.hex");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("serial_math_quiz_arduino.rn"), &source_path)
+        .expect("failed to stage serial math quiz example");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno serial math quiz example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read serial math quiz hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_host_serial_connector_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("serial_connector_arduino.rn");
+    let output_path = dir.join(if cfg!(windows) {
+        "serial_connector_arduino.exe"
+    } else {
+        "serial_connector_arduino"
+    });
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("serial_connector_arduino.rn"), &source_path)
+        .expect("failed to stage serial connector example");
+
+    build_executable(&source_path, &output_path, None)
+        .expect("host serial connector example should build");
+
+    assert!(output_path.is_file(), "expected host connector output to exist");
+}
+
+#[test]
 fn builds_arduino_uno_with_shared_input_print_surface() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_shared_io.rn");
