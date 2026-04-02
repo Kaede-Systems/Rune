@@ -1017,6 +1017,7 @@ impl Parser {
             TokenKind::Identifier(name) => ExprKind::Identifier(name),
             TokenKind::Integer(value) => ExprKind::Integer(value),
             TokenKind::String(value) => ExprKind::String(value),
+            TokenKind::FString(value) => return parse_fstring_expr(&value, token.span),
             TokenKind::True => ExprKind::Bool(true),
             TokenKind::False => ExprKind::Bool(false),
             TokenKind::LParen => {
@@ -1101,6 +1102,7 @@ impl Parser {
                 | TokenKind::Identifier(_)
                 | TokenKind::Integer(_)
                 | TokenKind::String(_)
+                | TokenKind::FString(_)
                 | TokenKind::True
                 | TokenKind::False
                 | TokenKind::LParen
@@ -1254,6 +1256,16 @@ fn string_expr(value: &str, span: Span) -> Expr {
     }
 }
 
+fn call_expr(callee: Expr, args: Vec<CallArg>, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Call {
+            callee: Box::new(callee),
+            args,
+        },
+        span,
+    }
+}
+
 fn binary_expr(left: Expr, op: BinaryOp, right: Expr, span: Span) -> Expr {
     Expr {
         kind: ExprKind::Binary {
@@ -1263,6 +1275,158 @@ fn binary_expr(left: Expr, op: BinaryOp, right: Expr, span: Span) -> Expr {
         },
         span,
     }
+}
+
+fn parse_fstring_expr(value: &str, span: Span) -> Result<Expr, ParseError> {
+    let segments = parse_fstring_segments(value, span)?;
+    let mut parts = Vec::new();
+    for segment in segments {
+        match segment {
+            FStringSegment::Text(text) => {
+                if !text.is_empty() {
+                    parts.push(string_expr(&text, span));
+                }
+            }
+            FStringSegment::Expr(expr) => {
+                let str_call = call_expr(
+                    ident_expr("str", span),
+                    vec![CallArg::Positional(expr)],
+                    span,
+                );
+                parts.push(str_call);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return Ok(string_expr("", span));
+    }
+
+    let mut iter = parts.into_iter();
+    let mut expr = iter.next().expect("parts is not empty");
+    for part in iter {
+        expr = binary_expr(expr, BinaryOp::Add, part, span);
+    }
+    Ok(expr)
+}
+
+#[derive(Debug)]
+enum FStringSegment {
+    Text(String),
+    Expr(Expr),
+}
+
+fn parse_fstring_segments(value: &str, span: Span) -> Result<Vec<FStringSegment>, ParseError> {
+    let chars = value.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    let mut text = String::new();
+    let mut segments = Vec::new();
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '{' {
+            if index + 1 < chars.len() && chars[index + 1] == '{' {
+                text.push('{');
+                index += 2;
+                continue;
+            }
+
+            if !text.is_empty() {
+                segments.push(FStringSegment::Text(std::mem::take(&mut text)));
+            }
+
+            index += 1;
+            let expr_start = index;
+            let mut depth = 1usize;
+            let mut in_string = false;
+            let mut escaping = false;
+
+            while index < chars.len() {
+                let current = chars[index];
+                if in_string {
+                    if escaping {
+                        escaping = false;
+                    } else if current == '\\' {
+                        escaping = true;
+                    } else if current == '"' {
+                        in_string = false;
+                    }
+                    index += 1;
+                    continue;
+                }
+
+                match current {
+                    '"' => {
+                        in_string = true;
+                        index += 1;
+                    }
+                    '{' => {
+                        depth += 1;
+                        index += 1;
+                    }
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            let expr_text = chars[expr_start..index].iter().collect::<String>();
+                            let expr = parse_inline_expr(expr_text.trim(), span)?;
+                            segments.push(FStringSegment::Expr(expr));
+                            index += 1;
+                            break;
+                        }
+                        index += 1;
+                    }
+                    _ => index += 1,
+                }
+            }
+
+            if depth != 0 {
+                return Err(ParseError {
+                    message: "unterminated f-string expression".to_string(),
+                    span,
+                });
+            }
+
+            continue;
+        }
+
+        if ch == '}' {
+            if index + 1 < chars.len() && chars[index + 1] == '}' {
+                text.push('}');
+                index += 2;
+                continue;
+            }
+            return Err(ParseError {
+                message: "single `}` is not allowed in f-string".to_string(),
+                span,
+            });
+        }
+
+        text.push(ch);
+        index += 1;
+    }
+
+    if !text.is_empty() {
+        segments.push(FStringSegment::Text(text));
+    }
+
+    Ok(segments)
+}
+
+fn parse_inline_expr(source: &str, span: Span) -> Result<Expr, ParseError> {
+    let tokens = lex(source).map_err(|error| ParseError {
+        message: error.message,
+        span: error.span,
+    })?;
+    let mut parser = Parser::new(tokens);
+    let expr = parser.parse_expr()?;
+    parser.skip_newlines();
+    if !parser.at_end() {
+        return Err(ParseError {
+            message: "unexpected trailing tokens in f-string expression".to_string(),
+            span,
+        });
+    }
+    Ok(expr)
 }
 
 fn int_call_expr(value: Expr, span: Span) -> Expr {

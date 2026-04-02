@@ -41,6 +41,7 @@ pub enum TokenKind {
     Identifier(String),
     Integer(String),
     String(String),
+    FString(String),
     Newline,
     Indent,
     Dedent,
@@ -235,6 +236,28 @@ impl<'a> Lexer<'a> {
             match ch {
                 ' ' => {}
                 '#' => break,
+                'f' => {
+                    if let Some((_, '"')) = chars.peek().copied() {
+                        chars.next();
+                        let start_column = column;
+                        let value = self.lex_string_contents(&mut chars, start_column)?;
+                        self.push(TokenKind::FString(value), start_column);
+                    } else {
+                        let start = offset;
+                        let mut end = offset + ch.len_utf8();
+                        while let Some((next_offset, next_ch)) = chars.peek().copied() {
+                            if next_ch.is_ascii_alphanumeric() || next_ch == '_' {
+                                chars.next();
+                                end = next_offset + next_ch.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+                        let text = &content[start..end];
+                        let kind = keyword_or_ident(text);
+                        self.push(kind, column);
+                    }
+                }
                 'a'..='z' | 'A'..='Z' | '_' => {
                     let start = offset;
                     let mut end = offset + ch.len_utf8();
@@ -265,44 +288,7 @@ impl<'a> Lexer<'a> {
                 }
                 '"' => {
                     let start_column = column;
-                    let mut value = String::new();
-                    let mut closed = false;
-
-                    while let Some((_, next_ch)) = chars.next() {
-                        match next_ch {
-                            '"' => {
-                                closed = true;
-                                break;
-                            }
-                            '\\' => {
-                                let Some((_, escaped)) = chars.next() else {
-                                    return Err(
-                                        self.error("unterminated escape sequence", start_column)
-                                    );
-                                };
-                                let translated = match escaped {
-                                    'n' => '\n',
-                                    'r' => '\r',
-                                    't' => '\t',
-                                    '\\' => '\\',
-                                    '"' => '"',
-                                    other => {
-                                        return Err(self.error(
-                                            &format!("unsupported escape sequence \\{}", other),
-                                            start_column,
-                                        ));
-                                    }
-                                };
-                                value.push(translated);
-                            }
-                            other => value.push(other),
-                        }
-                    }
-
-                    if !closed {
-                        return Err(self.error("unterminated string literal", start_column));
-                    }
-
+                    let value = self.lex_string_contents(&mut chars, start_column)?;
                     self.push(TokenKind::String(value), start_column);
                 }
                 '(' => self.push(TokenKind::LParen, column),
@@ -422,6 +408,53 @@ impl<'a> Lexer<'a> {
                 column,
             },
         }
+    }
+
+    fn lex_string_contents<I>(
+        &self,
+        chars: &mut std::iter::Peekable<I>,
+        start_column: usize,
+    ) -> Result<String, LexError>
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        let mut value = String::new();
+        let mut closed = false;
+
+        while let Some((_, next_ch)) = chars.next() {
+            match next_ch {
+                '"' => {
+                    closed = true;
+                    break;
+                }
+                '\\' => {
+                    let Some((_, escaped)) = chars.next() else {
+                        return Err(self.error("unterminated escape sequence", start_column));
+                    };
+                    let translated = match escaped {
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        '\\' => '\\',
+                        '"' => '"',
+                        other => {
+                            return Err(self.error(
+                                &format!("unsupported escape sequence \\{}", other),
+                                start_column,
+                            ));
+                        }
+                    };
+                    value.push(translated);
+                }
+                other => value.push(other),
+            }
+        }
+
+        if !closed {
+            return Err(self.error("unterminated string literal", start_column));
+        }
+
+        Ok(value)
     }
 }
 

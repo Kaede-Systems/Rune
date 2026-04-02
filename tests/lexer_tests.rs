@@ -105,3 +105,9 @@ fn rejects_unterminated_block_comment() {
         .expect_err("unterminated block comments must fail");
     assert!(error.message.contains("unterminated block comment"));
 }
+
+#[test]
+fn lexes_fstrings() {
+    let tokens = kinds("def main() -> unit:\n    println(f\"hello {42}\")\n");
+    assert!(tokens.contains(&TokenKind::FString("hello {42}".into())));
+}

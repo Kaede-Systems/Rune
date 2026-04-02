@@ -279,6 +279,15 @@ fn checks_class_construction_and_field_access() {
 }
 
 #[test]
+fn checks_fstrings() {
+    let checked = check_source(
+        "def main() -> unit:\n    let value: String = f\"sum={40 + 2} ok={true}\"\n    println(value)\n    return\n",
+    )
+    .expect("f-strings should check");
+    assert_eq!(checked.functions[0].return_type, Type::Unit);
+}
+
+#[test]
 fn checks_class_method_call() {
     let checked = check_source(
         "class Point:\n    x: i32\n    y: i32\n    def sum(self) -> i32:\n        return self.x + self.y\n\n\

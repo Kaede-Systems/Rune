@@ -317,6 +317,18 @@ fn lowers_dynamic_numeric_arithmetic_through_runtime_helper() {
 }
 
 #[test]
+fn lowers_fstrings_through_string_helpers() {
+    let asm = emit_asm_source(
+        "def main() -> i32:\n    let value: String = f\"sum={40 + 2} ok={true}\"\n    println(value)\n    return 0\n",
+    )
+    .expect("f-strings should lower");
+
+    assert!(asm.contains("call rune_rt_string_from_i64"));
+    assert!(asm.contains("call rune_rt_string_from_bool"));
+    assert!(asm.contains("call rune_rt_string_concat"));
+}
+
+#[test]
 fn lowers_boolean_operators_and_dynamic_truthiness() {
     let asm = emit_asm_source(
         "def main() -> i32:\n    let value = 1\n    value = true\n    if value and not false:\n        println(\"yes\")\n    return 0\n",

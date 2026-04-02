@@ -377,3 +377,25 @@ fn parses_extern_function_declaration() {
     );
     assert!(function.body.statements.is_empty());
 }
+
+#[test]
+fn parses_fstrings_as_string_expressions() {
+    let program =
+        parse_source("def main() -> unit:\n    println(f\"hello {40 + 2}\")\n    return\n")
+            .expect("f-string program should parse");
+
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function item");
+    };
+    let Stmt::Expr(expr_stmt) = &function.body.statements[0] else {
+        panic!("expected expression statement");
+    };
+
+    match &expr_stmt.expr.kind {
+        ExprKind::Call { args, .. } => match &args[0] {
+            CallArg::Positional(expr) => assert!(matches!(expr.kind, ExprKind::Binary { .. })),
+            other => panic!("expected positional argument, found {other:?}"),
+        },
+        other => panic!("expected call expression, found {other:?}"),
+    }
+}

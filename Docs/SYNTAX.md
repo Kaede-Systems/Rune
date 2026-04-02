@@ -86,6 +86,7 @@ Current C FFI import scope:
 - explicit linker inputs via `rune build --link-lib`, `--link-search`, or `--link-arg`
 - line comments use `#`
 - block comments use `/* ... */`
+- f-strings use `f"..."` with `{expr}` interpolation and `{{` / `}}` escapes
 - automatic C source compilation for executable builds via `rune build --link-c-source file.c`
 - Rune shared and static library builds now also emit a matching C header next to the library artifact
 - C consumer flow is verified on Windows against the generated header and Rune static libraries

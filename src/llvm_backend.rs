@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::llvm_ir::{LlvmIrError, emit_llvm_ir};
@@ -148,11 +149,13 @@ where
 }
 
 fn create_temp_dir() -> Result<PathBuf, LlvmBackendError> {
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    let dir = env::temp_dir().join(format!("rune-llvm-{stamp}"));
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = env::temp_dir().join(format!("rune-llvm-{}-{stamp}-{unique}", std::process::id()));
     fs::create_dir_all(&dir).map_err(|error| LlvmBackendError {
         message: format!(
             "failed to create temporary LLVM directory `{}`: {error}",
