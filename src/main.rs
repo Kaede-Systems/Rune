@@ -6,7 +6,8 @@ use std::process::ExitCode;
 
 use rune::build::{
     BuildOptions, build_executable, build_executable_with_options, build_object_file,
-    build_shared_library, build_static_library, emit_c_header, supported_targets, target_spec,
+    build_shared_library, build_static_library, emit_avr_precode, emit_c_header,
+    supported_targets, target_spec,
 };
 use rune::diagnostics::render_file_diagnostic;
 use rune::ir::lower_program;
@@ -268,6 +269,42 @@ fn run() -> Result<(), String> {
             let output_path = output.unwrap_or_else(|| source_path.with_extension("h"));
             emit_c_header(&source_path, &output_path).map_err(|error| error.to_string())?;
             println!("wrote {}", output_path.display());
+            Ok(())
+        }
+        "emit-avr-precode" => {
+            let Some(path) = args.next() else {
+                return Err(
+                    "missing source file path\n\nUsage: rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]"
+                        .to_string(),
+                );
+            };
+
+            let mut target: Option<String> = None;
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--target" => {
+                        let Some(value) = args.next() else {
+                            return Err(
+                                "missing value after `--target`\n\nUsage: rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]"
+                                    .to_string(),
+                            );
+                        };
+                        target = Some(value);
+                    }
+                    _ => {
+                        return Err(
+                            "invalid arguments for `rune emit-avr-precode`\n\nUsage: rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+
+            let precode =
+                emit_avr_precode(Path::new(&path), target.as_deref()).map_err(|error| {
+                    error.to_string()
+                })?;
+            print!("{precode}");
             Ok(())
         }
         "build" => {
@@ -719,7 +756,7 @@ fn pretty_path(path: &Path) -> String {
 }
 
 fn usage() -> String {
-    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
+    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
 }
 
 fn display_kind(kind: &TokenKind) -> String {

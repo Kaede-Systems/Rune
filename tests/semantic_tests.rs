@@ -131,10 +131,10 @@ fn accepts_direct_json_equality() {
 }
 
 #[test]
-fn defaults_untyped_locals_to_dynamic() {
+fn infers_untyped_locals_from_values() {
     let checked =
         check_source("def main() -> unit:\n    let value = 42\n    println(value)\n    return\n")
-            .expect("untyped locals should check as dynamic");
+            .expect("untyped locals should check through inference");
     assert_eq!(checked.functions[0].return_type, Type::Unit);
 }
 
@@ -169,12 +169,23 @@ fn rejects_reassignment_for_mismatched_static_types() {
 }
 
 #[test]
-fn accepts_dynamic_reassignment_to_new_types() {
+fn accepts_explicit_dynamic_reassignment_to_new_types() {
     let checked = check_source(
-        "def main() -> unit:\n    let value = 1\n    value = true\n    value = \"hi\"\n    return\n",
+        "def main() -> unit:\n    let value: dynamic = 1\n    value = true\n    value = \"hi\"\n    return\n",
     )
-    .expect("dynamic reassignment should allow type changes");
+    .expect("explicit dynamic reassignment should allow type changes");
     assert_eq!(checked.functions[0].return_type, Type::Unit);
+}
+
+#[test]
+fn infers_struct_type_for_untyped_object_locals() {
+    let checked = check_source(
+        "class Point:\n    x: i32\n    def value(self) -> i32:\n        return self.x\n\n\
+         def make() -> Point:\n    return Point(x=7)\n\n\
+         def main() -> i32:\n    let point = make()\n    return point.value()\n",
+    )
+    .expect("untyped object locals should infer their struct type");
+    assert_eq!(checked.functions.len(), 3);
 }
 
 #[test]

@@ -30,7 +30,7 @@ Rune is aiming at:
 - optional dynamic typing
 - stronger static typing where declared
 - low-level systems access
-- OOP and richer type-system work over time
+- OOP with working concrete classes/methods today, and richer polymorphism over time
 - cross-target native builds
 - WASM and WASI support
 - freestanding embedded object/static-library output for supported LLVM targets
@@ -46,6 +46,7 @@ Rune is aiming at:
 - `rune emit-ir`
 - `rune emit-asm` (LLVM-backed assembly emission)
 - `rune emit-llvm-ir`
+- `rune emit-avr-precode` for real Uno pre-ELF code inspection
 - `rune debug`
 
 ### Backends
@@ -71,6 +72,12 @@ Current stdlib modules live under [stdlib](stdlib):
 - `time`
 - `audio`
 - `arduino`
+
+Current class-style stdlib wrappers include:
+
+- `serial.SerialPort`
+- `network.TcpClient`
+- `network.UdpEndpoint`
 
 ### FFI
 
@@ -115,6 +122,12 @@ Emit target assembly:
 
 ```powershell
 cargo run -- emit-asm calculator.rn --target x86_64-unknown-linux-gnu
+```
+
+Inspect the real Arduino Uno pre-ELF generated code:
+
+```powershell
+cargo run -- emit-avr-precode buzzer_serial_control_arduino.rn
 ```
 
 Build WASI and run it through packaged Wasmtime:
@@ -176,6 +189,15 @@ For embedded targets, Rune currently supports freestanding object/static-library
 - `riscv32-unknown-elf`
 
 Arduino Uno is implemented through the packaged Arduino AVR core plus AVR GCC/G++/objcopy/avrdude toolchain path. Xtensa ESP32 is not claimed as implemented yet.
+
+When the packaged LLVM C backend is available, the Uno path now goes through:
+
+- Rune -> LLVM IR
+- `llvm-cbe`
+- transient C
+- packaged AVR GCC/G++
+- `.elf`
+- `.hex`
 
 The current toolchain state is documented in:
 

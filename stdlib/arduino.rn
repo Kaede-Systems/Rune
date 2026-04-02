@@ -16,6 +16,12 @@ def analog_write(pin: i64, value: i64) -> unit:
 def analog_read(pin: i64) -> i64:
     return __rune_builtin_arduino_analog_read(pin)
 
+def analog_in(channel: i64) -> i64:
+    return analog_read(channel)
+
+def pwm_duty_max() -> i64:
+    return 255
+
 def analog_reference(mode: i64) -> unit:
     __rune_builtin_arduino_analog_reference(mode)
     return
@@ -118,3 +124,123 @@ def blink_builtin(times: i64, on_ms: i64, off_ms: i64) -> unit:
     pin_mode(pin, mode_output())
     blink(pin, times, on_ms, off_ms)
     return
+
+def pwm_write(pin: i64, duty: i64) -> unit:
+    analog_write(pin, duty)
+    return
+
+def digital_out(pin: i64, value: bool) -> unit:
+    pin_mode(pin, mode_output())
+    digital_write(pin, value)
+    return
+
+def digital_in(pin: i64) -> bool:
+    pin_mode(pin, mode_input())
+    return digital_read(pin)
+
+def digital_in_pullup(pin: i64) -> bool:
+    pin_mode(pin, mode_input_pullup())
+    return digital_read(pin)
+
+def analog_read_voltage_mv(pin: i64, reference_mv: i64) -> i64:
+    let reading: i64 = analog_read(pin)
+    return (reading * reference_mv) / 1023
+
+def analog_in_voltage_mv(channel: i64, reference_mv: i64) -> i64:
+    return analog_read_voltage_mv(channel, reference_mv)
+
+def analog_read_percent(pin: i64) -> i64:
+    let reading: i64 = analog_read(pin)
+    return (reading * 100) / 1023
+
+def analog_in_percent(channel: i64) -> i64:
+    return analog_read_percent(channel)
+
+def default_reference_mv() -> i64:
+    return 5000
+
+def internal_reference_mv() -> i64:
+    return 1100
+
+class DigitalPin:
+    pin: i64
+
+    def output(self) -> unit:
+        pin_mode(self.pin, mode_output())
+        return
+
+    def input(self) -> unit:
+        pin_mode(self.pin, mode_input())
+        return
+
+    def input_pullup(self) -> unit:
+        pin_mode(self.pin, mode_input_pullup())
+        return
+
+    def write(self, value: bool) -> unit:
+        digital_write(self.pin, value)
+        return
+
+    def high(self) -> unit:
+        digital_write(self.pin, true)
+        return
+
+    def low(self) -> unit:
+        digital_write(self.pin, false)
+        return
+
+    def read(self) -> bool:
+        return digital_read(self.pin)
+
+    def toggle(self) -> unit:
+        digital_write(self.pin, not digital_read(self.pin))
+        return
+
+    def blink(self, times: i64, on_ms: i64, off_ms: i64) -> unit:
+        self.output()
+        let count: i64 = 0
+        while count < times:
+            self.high()
+            delay_ms(on_ms)
+            self.low()
+            delay_ms(off_ms)
+            count = count + 1
+        return
+
+    def pulse(self, on_ms: i64, off_ms: i64) -> unit:
+        self.output()
+        self.high()
+        delay_ms(on_ms)
+        self.low()
+        delay_ms(off_ms)
+        return
+
+class PwmPin:
+    pin: i64
+
+    def output(self) -> unit:
+        pin_mode(self.pin, mode_output())
+        return
+
+    def write(self, duty: i64) -> unit:
+        pwm_write(self.pin, duty)
+        return
+
+    def max_duty(self) -> i64:
+        return pwm_duty_max()
+
+    def off(self) -> unit:
+        analog_write(self.pin, 0)
+        return
+
+class AnalogPin:
+    pin: i64
+
+    def read(self) -> i64:
+        return analog_read(self.pin)
+
+    def read_voltage_mv(self, reference_mv: i64) -> i64:
+        return analog_read_voltage_mv(self.pin, reference_mv)
+
+    def read_percent(self) -> i64:
+        return analog_read_percent(self.pin)

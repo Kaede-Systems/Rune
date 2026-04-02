@@ -311,6 +311,31 @@ fn llvm_backend_builds_and_runs_object_method_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_string_returning_method_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_string_method_demo.rn");
+    let exe_path = dir.join("llvm_class_string_method_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Greeter:\n    name: String\n    def greet(self) -> String:\n        return \"hi \" + self.name\n\n\
+         def main() -> i32:\n    let greeter = Greeter(name=\"Rune\")\n    println(greeter.greet())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm string-returning method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built string-returning method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "hi Rune\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_network_send_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_network_send_demo.rn");
@@ -334,6 +359,38 @@ def main() -> i32:
     let output = Command::new(&exe_path)
         .output()
         .expect("failed to run llvm-built network send executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\ntrue\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_network_class_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_class_demo.rn");
+    let exe_path = dir.join("llvm_network_class_demo.exe");
+
+    fs::write(
+        &source_path,
+        r#"from network import tcp_client, udp_endpoint
+
+def main() -> i32:
+    let tcp = tcp_client("127.0.0.1", 65535)
+    let udp = udp_endpoint("127.0.0.1", 9)
+    println(tcp.probe())
+    println(udp.send_line("ping"))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm network class program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built network class executable");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");

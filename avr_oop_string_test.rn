@@ -1,0 +1,13 @@
+from arduino import uart_begin
+
+class Greeter:
+    name: String
+    def greet(self) -> String:
+        return "hi " + self.name
+
+def main() -> i32:
+    uart_begin(115200)
+    let greeter = Greeter(name="Rune")
+    println(greeter.greet())
+    println(greeter.greet() + " / " + greeter.greet())
+    return 0

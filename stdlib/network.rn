@@ -25,20 +25,52 @@ def tcp_send(host: String, port: i32, data: String) -> bool:
 def udp_send(host: String, port: i32, data: String) -> bool:
     return __rune_builtin_network_udp_send(host, port, data)
 
-def tcp_send_line(host: String, port: i32, data: String) -> bool:
-    return tcp_send(host, port, data + "\n")
+def tcp_send_line(host: String, port: i32, value: dynamic) -> bool:
+    return tcp_send(host, port, str(value) + "\n")
 
-def udp_send_line(host: String, port: i32, data: String) -> bool:
-    return udp_send(host, port, data + "\n")
+def udp_send_line(host: String, port: i32, value: dynamic) -> bool:
+    return udp_send(host, port, str(value) + "\n")
 
-def tcp_send_i64(host: String, port: i32, value: i64) -> bool:
-    return tcp_send(host, port, str(value))
+class TcpClient:
+    host: String
+    port: i32
 
-def udp_send_i64(host: String, port: i32, value: i64) -> bool:
-    return udp_send(host, port, str(value))
+    def connect(self) -> bool:
+        return tcp_connect(self.host, self.port)
 
-def tcp_send_bool(host: String, port: i32, value: bool) -> bool:
-    return tcp_send(host, port, str(value))
+    def connect_timeout(self, timeout_ms: i32) -> bool:
+        return tcp_connect_timeout(self.host, self.port, timeout_ms)
 
-def udp_send_bool(host: String, port: i32, value: bool) -> bool:
-    return udp_send(host, port, str(value))
+    def probe(self) -> bool:
+        return tcp_probe(self.host, self.port)
+
+    def probe_timeout(self, timeout_ms: i32) -> bool:
+        return tcp_probe_timeout(self.host, self.port, timeout_ms)
+
+    def listen(self) -> bool:
+        return tcp_listen(self.host, self.port)
+
+    def send(self, value: dynamic) -> bool:
+        return tcp_send(self.host, self.port, str(value))
+
+    def send_line(self, value: dynamic) -> bool:
+        return tcp_send_line(self.host, self.port, value)
+
+class UdpEndpoint:
+    host: String
+    port: i32
+
+    def bind(self) -> bool:
+        return udp_bind(self.host, self.port)
+
+    def send(self, value: dynamic) -> bool:
+        return udp_send(self.host, self.port, str(value))
+
+    def send_line(self, value: dynamic) -> bool:
+        return udp_send_line(self.host, self.port, value)
+
+def tcp_client(host: String, port: i32) -> TcpClient:
+    return TcpClient(host=host, port=port)
+
+def udp_endpoint(host: String, port: i32) -> UdpEndpoint:
+    return UdpEndpoint(host=host, port=port)

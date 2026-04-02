@@ -580,7 +580,17 @@ impl<'a> Analyzer<'a> {
 
         let mut scope = Scope::default();
         for (name, ty) in &sig.params {
-            if scope.values.insert(name.clone(), ty.clone()).is_some() {
+            if scope
+                .values
+                .insert(
+                    name.clone(),
+                    LocalBinding {
+                        ty: ty.clone(),
+                        inferred: false,
+                    },
+                )
+                .is_some()
+            {
                 return Err(SemanticError {
                     message: format!("duplicate parameter `{}`", name),
                     span: function.span,
@@ -610,7 +620,17 @@ impl<'a> Analyzer<'a> {
         let mut errors = Vec::new();
 
         for (name, ty) in &sig.params {
-            if scope.values.insert(name.clone(), ty.clone()).is_some() {
+            if scope
+                .values
+                .insert(
+                    name.clone(),
+                    LocalBinding {
+                        ty: ty.clone(),
+                        inferred: false,
+                    },
+                )
+                .is_some()
+            {
                 errors.push(SemanticError {
                     message: format!("duplicate parameter `{}`", name),
                     span: function.span,
@@ -884,12 +904,18 @@ impl<'a> Analyzer<'a> {
                 self.expect_type(&value_ty, &declared, stmt.value.span, "let binding")?;
                 declared
             }
-            None => Type::Dynamic,
+            None => value_ty.clone(),
         };
 
         if scope
             .values
-            .insert(stmt.name.clone(), declared_ty)
+            .insert(
+                stmt.name.clone(),
+                LocalBinding {
+                    ty: declared_ty,
+                    inferred: stmt.ty.is_none(),
+                },
+            )
             .is_some()
         {
             return Err(SemanticError {
@@ -904,17 +930,30 @@ impl<'a> Analyzer<'a> {
     fn check_assign(
         &self,
         stmt: &AssignStmt,
-        scope: &Scope,
+        scope: &mut Scope,
         in_async: bool,
     ) -> Result<(), SemanticError> {
-        let Some(expected_ty) = scope.values.get(&stmt.name) else {
+        let Some(binding) = scope.values.get(&stmt.name).cloned() else {
             return Err(SemanticError {
                 message: format!("cannot assign to unknown variable `{}`", stmt.name),
                 span: stmt.span,
             });
         };
         let actual_ty = self.check_expr(&stmt.value, scope, in_async)?;
-        self.expect_type(&actual_ty, expected_ty, stmt.value.span, "assignment value")
+        match self.expect_type(&actual_ty, &binding.ty, stmt.value.span, "assignment value") {
+            Ok(()) => Ok(()),
+            Err(_error) if binding.inferred => {
+                scope.values.insert(
+                    stmt.name.clone(),
+                    LocalBinding {
+                        ty: Type::Dynamic,
+                        inferred: true,
+                    },
+                );
+                self.expect_type(&actual_ty, &Type::Dynamic, stmt.value.span, "assignment value")
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn check_return(
@@ -988,8 +1027,8 @@ impl<'a> Analyzer<'a> {
     ) -> Result<Type, SemanticError> {
         match &expr.kind {
             ExprKind::Identifier(name) => {
-                if let Some(ty) = scope.values.get(name) {
-                    return Ok(ty.clone());
+                if let Some(binding) = scope.values.get(name) {
+                    return Ok(binding.ty.clone());
                 }
                 if let Some(ty) = builtin_function_type(name) {
                     return Ok(ty);
@@ -2875,7 +2914,13 @@ fn builtin_function_type(name: &str) -> Option<Type> {
 
 #[derive(Debug, Clone, Default)]
 struct Scope {
-    values: HashMap<String, Type>,
+    values: HashMap<String, LocalBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalBinding {
+    ty: Type,
+    inferred: bool,
 }
 
 fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {

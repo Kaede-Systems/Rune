@@ -56,27 +56,52 @@ def write_line(text: String) -> unit:
     println(text)
     return
 
-def send(text: String) -> bool:
+def send(value: dynamic) -> bool:
+    let text: String = str(value)
     if __rune_builtin_system_is_embedded():
         __rune_builtin_arduino_uart_write(text)
         return true
     return __rune_builtin_serial_write(text)
 
-def send_line(text: String) -> bool:
+def send_line(value: dynamic) -> bool:
+    let text: String = str(value)
     if __rune_builtin_system_is_embedded():
         __rune_builtin_arduino_uart_write(text)
         __rune_builtin_arduino_uart_write_byte(10)
         return true
     return __rune_builtin_serial_write_line(text)
 
-def send_i64(value: i64) -> bool:
-    return send(str(value))
+class SerialPort:
+    port: String
+    baud: i64
 
-def send_line_i64(value: i64) -> bool:
-    return send_line(str(value))
+    def connect(self) -> bool:
+        return open(self.port, self.baud)
 
-def send_bool(value: bool) -> bool:
-    return send(str(value))
+    def is_open(self) -> bool:
+        return is_open()
 
-def send_line_bool(value: bool) -> bool:
-    return send_line(str(value))
+    def close(self) -> unit:
+        close()
+        return
+
+    def available(self) -> i64:
+        return available()
+
+    def read_byte(self) -> i64:
+        return read_byte()
+
+    def recv_line(self) -> String:
+        return recv_line()
+
+    def recv_nonempty(self) -> String:
+        return recv_nonempty()
+
+    def send(self, value: dynamic) -> bool:
+        return send(value)
+
+    def send_line(self, value: dynamic) -> bool:
+        return send_line(value)
+
+def serial_port(port: String, baud: i64) -> SerialPort:
+    return SerialPort(port=port, baud=baud)

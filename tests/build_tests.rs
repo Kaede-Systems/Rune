@@ -623,6 +623,31 @@ fn builds_arduino_uno_serial_math_quiz_example() {
 }
 
 #[test]
+fn builds_arduino_uno_with_serial_class_wrapper() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_serial_class.rn");
+    let output_path = dir.join("arduino_uno_serial_class.hex");
+    let stdlib_serial = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("serial.rn");
+    fs::copy(&stdlib_serial, dir.join("serial.rn")).expect("failed to stage serial stdlib");
+
+    fs::write(
+        &source_path,
+        "from serial import serial_port\n\n\
+         def setup() -> unit:\n    let serial = serial_port(\"COM5\", 115200)\n    if serial.connect():\n        serial.send_line(\"hello\")\n    return\n\n\
+         def loop() -> unit:\n    return\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno serial class wrapper example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read serial class hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_host_serial_connector_example() {
     let dir = temp_dir();
     let source_path = dir.join("serial_connector_arduino.rn");
@@ -922,6 +947,186 @@ fn builds_arduino_uno_with_object_returning_and_object_accepting_methods() {
         .expect("arduino uno object-returning method build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno oop combo hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_string_returning_class_method() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_string_method.hex.rn");
+    let output_path = dir.join("arduino_uno_string_method.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Greeter:\n    name: String\n    def greet(self) -> String:\n        return \"hi \" + self.name\n\n\
+         def main() -> i32:\n    let greeter = Greeter(name=\"Rune\")\n    println(greeter.greet())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno string-returning method build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno string method hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_chained_string_method_results() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_string_chain.rn");
+    let output_path = dir.join("arduino_uno_string_chain.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Greeter:\n    name: String\n    def greet(self) -> String:\n        return \"hi \" + self.name\n\n\
+         def main() -> i32:\n    let greeter = Greeter(name=\"Rune\")\n    println(greeter.greet() + \" / \" + greeter.greet())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno chained string method build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno chained string method hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_pin_pwm_and_voltage_abstractions() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_hardware_classes.rn");
+    let output_path = dir.join("arduino_uno_hardware_classes.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import AnalogPin, DigitalPin, PwmPin, default_reference_mv, led_builtin, pwm_duty_max\n\n\
+         def main() -> i32:\n    let led = DigitalPin(pin=led_builtin())\n    let pwm = PwmPin(pin=9)\n    let sensor = AnalogPin(pin=0)\n    led.output()\n    led.high()\n    led.toggle()\n    pwm.output()\n    pwm.write(pwm_duty_max() / 2)\n    println(sensor.read())\n    println(sensor.read_voltage_mv(default_reference_mv()))\n    println(pwm.max_duty())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno hardware abstraction build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno hardware abstraction hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_pin_pulse_and_analog_percent() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_pin_pulse_percent.rn");
+    let output_path = dir.join("arduino_uno_pin_pulse_percent.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import AnalogPin, DigitalPin, led_builtin\n\n\
+         def main() -> i32:\n    let led = DigitalPin(pin=led_builtin())\n    let sensor = AnalogPin(pin=0)\n    led.pulse(5, 5)\n    println(sensor.read_percent())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno pulse/percent build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno pulse/percent hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_direct_function_pin_io() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_direct_pin_io.rn");
+    let output_path = dir.join("arduino_uno_direct_pin_io.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import digital_in, digital_in_pullup, digital_out, pwm_duty_max, pwm_write\n\n\
+         def main() -> i32:\n    digital_out(7, false)\n    println(digital_in(8))\n    println(digital_in_pullup(8))\n    pwm_write(9, pwm_duty_max() / 2)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno direct function pin io build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno direct function pin io hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_direct_analog_input_functions() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_direct_analog_io.rn");
+    let output_path = dir.join("arduino_uno_direct_analog_io.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import analog_in, analog_in_percent, analog_in_voltage_mv, default_reference_mv\n\n\
+         def main() -> i32:\n    println(analog_in(0))\n    println(analog_in_percent(0))\n    println(analog_in_voltage_mv(0, default_reference_mv()))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno direct analog input build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno direct analog input hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_buzzer_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("buzzer_arduino.rn");
+    let output_path = dir.join("buzzer_arduino.hex");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("buzzer_arduino.rn"), &source_path)
+        .expect("failed to stage buzzer example");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno buzzer example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read buzzer hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_buzzer_serial_control_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("buzzer_serial_control_arduino.rn");
+    let output_path = dir.join("buzzer_serial_control_arduino.hex");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("buzzer_serial_control_arduino.rn"), &source_path)
+        .expect("failed to stage buzzer serial control example");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno buzzer serial control example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read buzzer serial control hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());

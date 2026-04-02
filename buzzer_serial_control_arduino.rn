@@ -1,0 +1,76 @@
+from arduino import delay_ms, digital_out, mode_output, pin_mode, uart_begin
+
+def buzzer_on(pos_pin: i64, neg_pin: i64) -> unit:
+    digital_out(neg_pin, false)
+    digital_out(pos_pin, true)
+    return
+
+def buzzer_off(pos_pin: i64, neg_pin: i64) -> unit:
+    digital_out(pos_pin, false)
+    digital_out(neg_pin, false)
+    return
+
+def beep(pos_pin: i64, neg_pin: i64, on_ms: i64) -> unit:
+    buzzer_on(pos_pin, neg_pin)
+    delay_ms(on_ms)
+    buzzer_off(pos_pin, neg_pin)
+    return
+
+def clamp_delay_ms(value: i64) -> i64:
+    if value < 20:
+        return 20
+    if value > 2000:
+        return 2000
+    return value
+
+uart_begin(115200)
+pin_mode(8, mode_output())
+pin_mode(7, mode_output())
+println("Rune buzzer serial control ready")
+println("POS=D8 NEG=D7")
+println("Commands: slower faster stop start set 50 set 100 set 200 set 500")
+
+let pace_ms: i64 = 200
+let running: bool = true
+
+while true:
+    print("pace_ms=")
+    println(pace_ms)
+    print("running=")
+    println(str(running))
+    print("> ")
+
+    let command: String = input()
+    if command == "faster":
+        pace_ms = clamp_delay_ms(pace_ms - 25)
+        println("ok")
+    elif command == "slower":
+        pace_ms = clamp_delay_ms(pace_ms + 25)
+        println("ok")
+    elif command == "stop":
+        running = false
+        buzzer_off(8, 7)
+        println("stopped")
+    elif command == "start":
+        running = true
+        println("started")
+    elif command == "set 50":
+        pace_ms = 50
+        println("ok")
+    elif command == "set 100":
+        pace_ms = 100
+        println("ok")
+    elif command == "set 200":
+        pace_ms = 200
+        println("ok")
+    elif command == "set 500":
+        pace_ms = 500
+        println("ok")
+    else:
+        println("unknown command")
+
+    if running:
+        beep(8, 7, 20)
+        delay_ms(pace_ms)
+    else:
+        delay_ms(50)

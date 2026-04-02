@@ -49,6 +49,47 @@ pub fn find_packaged_wasm_ld() -> Option<PathBuf> {
     find_packaged_llvm_tool("wasm-ld")
 }
 
+pub fn find_packaged_llvm_cbe() -> Option<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Some(exe_path) = std::env::current_exe().ok() {
+        if let Some(bin_dir) = exe_path.parent()
+            && let Some(prefix) = bin_dir.parent()
+        {
+            let installed_root = prefix.join("share").join("rune").join("tools").join("llvm-cbe");
+            append_llvm_cbe_roots(&mut roots, &installed_root);
+        }
+    }
+
+    if let Some(cwd) = std::env::current_dir().ok() {
+        for ancestor in cwd.ancestors() {
+            append_llvm_cbe_roots(&mut roots, &ancestor.join("tools").join("llvm-cbe"));
+        }
+    }
+
+    if let Some(exe_path) = std::env::current_exe().ok() {
+        for ancestor in exe_path.ancestors() {
+            append_llvm_cbe_roots(&mut roots, &ancestor.join("tools").join("llvm-cbe"));
+        }
+    }
+
+    for root in dedupe_paths(roots) {
+        for candidate in [
+            root.join("bin").join("llvm-cbe.exe"),
+            root.join("bin").join("llvm-cbe"),
+            root.join("build-msvc").join("tools").join("llvm-cbe").join("Release").join("llvm-cbe.exe"),
+            root.join("build").join("tools").join("llvm-cbe").join("llvm-cbe"),
+            root.join("build").join("tools").join("llvm-cbe").join("Release").join("llvm-cbe.exe"),
+        ] {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
 pub fn find_packaged_wasmtime() -> Option<PathBuf> {
     for root in bundled_wasmtime_roots() {
         if let Ok(entries) = fs::read_dir(&root) {
@@ -110,6 +151,16 @@ pub fn find_arduino_avr_core_root() -> Option<PathBuf> {
     for root in bundled_arduino_avr_roots() {
         let candidate = root.join("arduino-core");
         if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+pub fn find_arduino_avr_runtime_header() -> Option<PathBuf> {
+    for root in bundled_arduino_avr_roots() {
+        let candidate = root.join("runtime").join("rune_arduino_runtime.hpp");
+        if candidate.is_file() {
             return Some(candidate);
         }
     }
@@ -305,6 +356,30 @@ fn append_llvm_bundle_roots(roots: &mut Vec<PathBuf>, base_root: &Path, host_bun
 }
 
 fn append_arduino_avr_roots(roots: &mut Vec<PathBuf>, base_root: &Path) {
+    if !base_root.is_dir() {
+        return;
+    }
+
+    let host_dir = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Some("windows-x64"),
+        ("linux", "x86_64") => Some("linux-x64"),
+        ("linux", "aarch64") => Some("linux-arm64"),
+        ("macos", "x86_64") => Some("macos-x64"),
+        ("macos", "aarch64") => Some("macos-arm64"),
+        _ => None,
+    };
+
+    if let Some(host_dir) = host_dir {
+        let candidate = base_root.join(host_dir);
+        if candidate.is_dir() {
+            roots.push(candidate);
+        }
+    }
+
+    roots.push(base_root.to_path_buf());
+}
+
+fn append_llvm_cbe_roots(roots: &mut Vec<PathBuf>, base_root: &Path) {
     if !base_root.is_dir() {
         return;
     }

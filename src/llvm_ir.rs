@@ -833,7 +833,7 @@ impl<'a> FunctionEmitter<'a> {
             let layout = self.struct_layouts.get(&struct_name).ok_or_else(|| LlvmIrError {
                 message: format!("missing struct layout for `{struct_name}`"),
             })?;
-            let (field_index, _) = layout
+            let (field_index, (_, field_ty)) = layout
                 .iter()
                 .enumerate()
                 .find(|(_, (name, _))| name == field_name)
@@ -848,7 +848,46 @@ impl<'a> FunctionEmitter<'a> {
                 llvm_internal_type(&IrType::Struct(struct_name), self.struct_layouts)?
             ));
             if let Some(dst) = dst {
-                self.value_map.insert(dst.clone(), reg);
+                match field_ty {
+                    IrType::String => {
+                        let ptr_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {ptr_reg} = extractvalue {} {reg}, 0\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        let len_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {len_reg} = extractvalue {} {reg}, 1\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        self.value_map
+                            .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                    }
+                    IrType::Dynamic => {
+                        let tag_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {tag_reg} = extractvalue {} {reg}, 0\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        let payload_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {payload_reg} = extractvalue {} {reg}, 1\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        let extra_reg = self.next_reg();
+                        out.push_str(&format!(
+                            "  {extra_reg} = extractvalue {} {reg}, 2\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        self.value_map.insert(
+                            dst.clone(),
+                            format!("i64 {tag_reg}, i64 {payload_reg}, i64 {extra_reg}"),
+                        );
+                    }
+                    _ => {
+                        self.value_map.insert(dst.clone(), reg);
+                    }
+                }
             }
             return Ok(());
         }
@@ -871,9 +910,45 @@ impl<'a> FunctionEmitter<'a> {
                         message: format!("missing constructor field `{field_name}` for `{callee}`"),
                     })?;
                 let value = self.resolve_value(&arg.value, field_ty, out)?;
+                let field_value = match field_ty {
+                    IrType::String => {
+                        let (ptr, len) = split_string_value(&value)?;
+                        let field_agg0 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {field_agg0} = insertvalue {} poison, {ptr}, 0\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        let field_agg1 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {field_agg1} = insertvalue {} {field_agg0}, {len}, 1\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        field_agg1
+                    }
+                    IrType::Dynamic => {
+                        let (tag, payload, extra) = split_dynamic_value(&value)?;
+                        let field_agg0 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {field_agg0} = insertvalue {} poison, {tag}, 0\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        let field_agg1 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {field_agg1} = insertvalue {} {field_agg0}, {payload}, 1\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        let field_agg2 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {field_agg2} = insertvalue {} {field_agg1}, {extra}, 2\n",
+                            llvm_internal_type(field_ty, self.struct_layouts)?
+                        ));
+                        field_agg2
+                    }
+                    _ => value,
+                };
                 let reg = self.next_reg();
                 out.push_str(&format!(
-                    "  {reg} = insertvalue {aggregate_ty} {aggregate}, {} {value}, {index}\n",
+                    "  {reg} = insertvalue {aggregate_ty} {aggregate}, {} {field_value}, {index}\n",
                     llvm_internal_type(field_ty, self.struct_layouts)?
                 ));
                 aggregate = reg;

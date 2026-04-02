@@ -17,7 +17,8 @@ use crate::semantic::check_program;
 use crate::toolchain::{
     find_arduino_avr_avrdude_conf, find_arduino_avrdude, find_arduino_avr_core_root,
     find_arduino_avr_gcc, find_arduino_avr_gpp, find_arduino_avr_objcopy,
-    find_packaged_llvm_tool, find_packaged_wasm_ld,
+    find_arduino_avr_runtime_header,
+    find_packaged_llvm_cbe, find_packaged_llvm_tool, find_packaged_wasm_ld,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -332,6 +333,28 @@ pub fn emit_c_header(source_path: &Path, output_path: &Path) -> Result<(), Build
     write_c_header(&program, output_path)
 }
 
+pub fn emit_avr_precode(source_path: &Path, target: Option<&str>) -> Result<String, BuildError> {
+    let target_spec = target_spec(target.or(Some("avr-atmega328p-arduino-uno")))?;
+    if target_spec.triple != "avr-atmega328p-arduino-uno" {
+        return Err(BuildError::UnsupportedTarget(format!(
+            "`emit-avr-precode` currently supports only `avr-atmega328p-arduino-uno`, found `{}`",
+            target_spec.triple
+        )));
+    }
+
+    let mut program = load_program_from_path(source_path)
+        .map_err(|error| BuildError::ModuleLoad(error.to_string()))?;
+    check_program(&program).map_err(|error| {
+        BuildError::Codegen(CodegenError {
+            message: error.message,
+            span: error.span,
+        })
+    })?;
+    optimize_program(&mut program);
+
+    emit_arduino_uno_precode(&program)
+}
+
 pub fn build_executable_with_options(
     source_path: &Path,
     output_path: &Path,
@@ -448,6 +471,10 @@ fn build_arduino_uno_hex(
     output_path: &Path,
     options: &BuildOptions,
 ) -> Result<(), BuildError> {
+    if let Some(llvm_cbe) = find_packaged_llvm_cbe() {
+        return build_arduino_uno_hex_via_llvm_cbe(program, output_path, options, &llvm_cbe);
+    }
+
     let cpp_source = emit_arduino_uno_cpp(program).map_err(BuildError::Codegen)?;
     let gpp = find_arduino_avr_gpp().ok_or_else(|| {
         BuildError::ToolNotFound("packaged Arduino AVR g++ toolchain not found".into())
@@ -571,6 +598,404 @@ fn build_arduino_uno_hex(
     Ok(())
 }
 
+fn emit_arduino_uno_precode(program: &Program) -> Result<String, BuildError> {
+    if find_packaged_llvm_cbe().is_some() {
+        let precode = emit_arduino_uno_precode_via_llvm_cbe(program)?;
+        return Ok(format!(
+            "// --- rune_arduino_uno.ll ---\n{}\n// --- rune_arduino_uno.c ---\n{}\n// --- rune_arduino_uno_runtime.cpp ---\n{}",
+            precode.llvm_ir, precode.c_source, precode.runtime_cpp
+        ));
+    }
+
+    let cpp_source = emit_arduino_uno_cpp(program).map_err(BuildError::Codegen)?;
+    Ok(format!(
+        "// --- rune_arduino_uno.cpp ---\n{cpp_source}"
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArduinoUnoEntrypointKind {
+    Main,
+    SetupLoop,
+}
+
+fn detect_arduino_uno_entrypoint_kind(
+    program: &Program,
+) -> Result<ArduinoUnoEntrypointKind, CodegenError> {
+    let main = program.items.iter().find_map(|item| match item {
+        Item::Function(function) if function.name == "main" => Some(function),
+        _ => None,
+    });
+    let setup_fn = program.items.iter().find_map(|item| match item {
+        Item::Function(function) if function.name == "setup" => Some(function),
+        _ => None,
+    });
+    let loop_fn = program.items.iter().find_map(|item| match item {
+        Item::Function(function) if function.name == "loop" => Some(function),
+        _ => None,
+    });
+
+    if main.is_some() && (setup_fn.is_some() || loop_fn.is_some()) {
+        return Err(CodegenError {
+            message: "Arduino Uno target expects either `main()` or `setup()`/`loop()`, not both"
+                .into(),
+            span: main.expect("checked above").span,
+        });
+    }
+
+    if let Some(main) = main {
+        validate_arduino_uno_entry_fn(main, "main")?;
+        return Ok(ArduinoUnoEntrypointKind::Main);
+    }
+
+    if let Some(setup_fn) = setup_fn {
+        validate_arduino_uno_entry_fn(setup_fn, "setup")?;
+    }
+    if let Some(loop_fn) = loop_fn {
+        validate_arduino_uno_entry_fn(loop_fn, "loop")?;
+    }
+
+    if setup_fn.is_some() || loop_fn.is_some() {
+        Ok(ArduinoUnoEntrypointKind::SetupLoop)
+    } else {
+        Err(CodegenError {
+            message: "Arduino Uno target requires `main()` or at least one of `setup()`/`loop()`"
+                .into(),
+            span: crate::lexer::Span { line: 1, column: 1 },
+        })
+    }
+}
+
+fn build_arduino_uno_hex_via_llvm_cbe(
+    program: &Program,
+    output_path: &Path,
+    options: &BuildOptions,
+    _llvm_cbe: &Path,
+) -> Result<(), BuildError> {
+    let precode = emit_arduino_uno_precode_via_llvm_cbe(program)?;
+    let gcc = find_arduino_avr_gcc().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR gcc toolchain not found".into())
+    })?;
+    let gpp = find_arduino_avr_gpp().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR g++ toolchain not found".into())
+    })?;
+    let objcopy = find_arduino_avr_objcopy().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR objcopy not found".into())
+    })?;
+    let core_root = find_arduino_avr_core_root().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Arduino AVR core sources not found".into())
+    })?;
+    let runtime_header = find_arduino_avr_runtime_header().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged Rune Arduino AVR runtime header not found".into())
+    })?;
+    let temp_dir = create_temp_dir()?;
+    let llvm_ir_path = temp_dir.join("rune_arduino_uno.ll");
+    let c_path = temp_dir.join("rune_arduino_uno.c");
+    let c_object = temp_dir.join("rune_arduino_uno_cbe.o");
+    let shim_path = temp_dir.join("rune_arduino_uno_runtime.cpp");
+    let shim_header_path = temp_dir.join("rune_arduino_runtime.hpp");
+    let shim_object = temp_dir.join("rune_arduino_uno_runtime.o");
+    let elf_path = temp_dir.join("rune_arduino_uno.elf");
+    fs::write(&llvm_ir_path, precode.llvm_ir).map_err(|source| BuildError::Io {
+        context: format!("failed to write `{}`", llvm_ir_path.display()),
+        source,
+    })?;
+    fs::write(&c_path, precode.c_source).map_err(|source| BuildError::Io {
+        context: format!("failed to write `{}`", c_path.display()),
+        source,
+    })?;
+
+    fs::copy(&runtime_header, &shim_header_path).map_err(|source| BuildError::Io {
+        context: format!(
+            "failed to copy `{}` into `{}`",
+            runtime_header.display(),
+            shim_header_path.display()
+        ),
+        source,
+    })?;
+    fs::write(&shim_path, precode.runtime_cpp).map_err(|source| {
+        BuildError::Io {
+            context: format!("failed to write `{}`", shim_path.display()),
+            source,
+        }
+    })?;
+
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|source| BuildError::Io {
+            context: format!("failed to create `{}`", parent.display()),
+            source,
+        })?;
+    }
+
+    let core_dir = core_root.join("cores").join("arduino");
+    let variant_dir = core_root.join("variants").join("standard");
+    let common_args = arduino_uno_common_compile_args(&core_dir, &variant_dir);
+
+    let c_compile = Command::new(&gcc)
+        .args(&common_args)
+        .arg("-std=gnu11")
+        .arg("-c")
+        .arg(&c_path)
+        .arg("-o")
+        .arg(&c_object)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", gcc.display()),
+            source,
+        })?;
+    if !c_compile.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: gcc.display().to_string(),
+            status: c_compile.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&c_compile.stderr).into_owned(),
+        });
+    }
+
+    let shim_compile = Command::new(&gpp)
+        .args(&common_args)
+        .arg("-std=gnu++11")
+        .arg("-fno-exceptions")
+        .arg("-fno-threadsafe-statics")
+        .arg("-c")
+        .arg(&shim_path)
+        .arg("-o")
+        .arg(&shim_object)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", gpp.display()),
+            source,
+        })?;
+    if !shim_compile.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: gpp.display().to_string(),
+            status: shim_compile.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&shim_compile.stderr).into_owned(),
+        });
+    }
+
+    let mut objects = vec![c_object.clone(), shim_object.clone()];
+    objects.extend(compile_arduino_uno_core_sources(
+        &temp_dir,
+        &gcc,
+        &gpp,
+        &core_dir,
+        &variant_dir,
+    )?);
+
+    let mut link = Command::new(&gpp);
+    link.arg("-mmcu=atmega328p")
+        .arg("-Os")
+        .arg("-Wl,--gc-sections")
+        .arg("-o")
+        .arg(&elf_path);
+    for object in &objects {
+        link.arg(object);
+    }
+    let link = link.output().map_err(|source| BuildError::Io {
+        context: format!("failed to run `{}`", gpp.display()),
+        source,
+    })?;
+    if !link.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: gpp.display().to_string(),
+            status: link.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&link.stderr).into_owned(),
+        });
+    }
+
+    let hex = Command::new(&objcopy)
+        .arg("-O")
+        .arg("ihex")
+        .arg("-R")
+        .arg(".eeprom")
+        .arg(&elf_path)
+        .arg(output_path)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", objcopy.display()),
+            source,
+        })?;
+    if !hex.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: objcopy.display().to_string(),
+            status: hex.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&hex.stderr).into_owned(),
+        });
+    }
+
+    let elf_output = output_path.with_extension("elf");
+    let _ = fs::copy(&elf_path, &elf_output);
+    if options.flash_after_build {
+        flash_arduino_uno_hex(output_path, options.flash_port.as_deref())?;
+    }
+
+    let _ = fs::remove_file(llvm_ir_path);
+    let _ = fs::remove_file(c_path);
+    let _ = fs::remove_file(shim_path);
+    let _ = fs::remove_file(shim_header_path);
+    for object in objects {
+        let _ = fs::remove_file(object);
+    }
+    let _ = fs::remove_file(elf_path);
+    let _ = fs::remove_dir(temp_dir);
+    Ok(())
+}
+
+struct ArduinoUnoPrecodeArtifacts {
+    llvm_ir: String,
+    c_source: String,
+    runtime_cpp: String,
+}
+
+fn emit_arduino_uno_precode_via_llvm_cbe(
+    program: &Program,
+) -> Result<ArduinoUnoPrecodeArtifacts, BuildError> {
+    let llvm_cbe = find_packaged_llvm_cbe().ok_or_else(|| {
+        BuildError::ToolNotFound("packaged LLVM C backend tool not found".into())
+    })?;
+    let entrypoint = detect_arduino_uno_entrypoint_kind(program).map_err(BuildError::Codegen)?;
+    let llvm_ir = emit_llvm_ir(program).map_err(|error| {
+        BuildError::Codegen(CodegenError {
+            message: error.message,
+            span: crate::lexer::Span { line: 1, column: 1 },
+        })
+    })?;
+    let llvm_ir = rewrite_arduino_uno_cbe_llvm_ir(&llvm_ir, entrypoint);
+
+    let temp_dir = create_temp_dir()?;
+    let llvm_ir_path = temp_dir.join("rune_arduino_uno.ll");
+    let c_path = temp_dir.join("rune_arduino_uno.c");
+    fs::write(&llvm_ir_path, &llvm_ir).map_err(|source| BuildError::Io {
+        context: format!("failed to write `{}`", llvm_ir_path.display()),
+        source,
+    })?;
+
+    let cbe = Command::new(&llvm_cbe)
+        .arg(&llvm_ir_path)
+        .arg("-o")
+        .arg(&c_path)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", llvm_cbe.display()),
+            source,
+        })?;
+    if !cbe.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: llvm_cbe.display().to_string(),
+            status: cbe.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&cbe.stderr).into_owned(),
+        });
+    }
+
+    let c_source = fs::read_to_string(&c_path).map_err(|source| BuildError::Io {
+        context: format!("failed to read `{}`", c_path.display()),
+        source,
+    })?;
+    let c_source = rewrite_arduino_uno_cbe_source(&c_source, entrypoint);
+    let runtime_cpp = emit_arduino_uno_cbe_runtime_cpp(entrypoint);
+
+    let _ = fs::remove_file(&llvm_ir_path);
+    let _ = fs::remove_file(&c_path);
+    let _ = fs::remove_dir(temp_dir);
+
+    Ok(ArduinoUnoPrecodeArtifacts {
+        llvm_ir,
+        c_source,
+        runtime_cpp,
+    })
+}
+
+fn rewrite_arduino_uno_cbe_source(
+    c_source: &str,
+    entrypoint: ArduinoUnoEntrypointKind,
+) -> String {
+    match entrypoint {
+        ArduinoUnoEntrypointKind::Main => c_source.replace("int main(void)", "int rune_entry_main(void)"),
+        ArduinoUnoEntrypointKind::SetupLoop => c_source
+            .replace("void setup(void)", "void rune_entry_setup(void)")
+            .replace("void loop(void)", "void rune_entry_loop(void)"),
+    }
+}
+
+fn rewrite_arduino_uno_cbe_llvm_ir(
+    llvm_ir: &str,
+    entrypoint: ArduinoUnoEntrypointKind,
+) -> String {
+    let mut rename_map = HashMap::new();
+    for line in llvm_ir.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("define ") {
+            continue;
+        }
+        let Some(at_index) = trimmed.find('@') else {
+            continue;
+        };
+        let name_start = at_index + 1;
+        let name_end = trimmed[name_start..]
+            .find('(')
+            .map(|index| name_start + index)
+            .unwrap_or(trimmed.len());
+        let name = &trimmed[name_start..name_end];
+        if name.starts_with("rune_rt_") {
+            continue;
+        }
+        if matches!(
+            (entrypoint, name),
+            (ArduinoUnoEntrypointKind::Main, "main")
+                | (ArduinoUnoEntrypointKind::SetupLoop, "setup")
+                | (ArduinoUnoEntrypointKind::SetupLoop, "loop")
+        ) {
+            continue;
+        }
+        rename_map.insert(name.to_string(), format!("rune_cbe_{name}"));
+    }
+
+    rewrite_llvm_global_identifiers(llvm_ir, &rename_map)
+}
+
+fn rewrite_llvm_global_identifiers(source: &str, rename_map: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(source.len());
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'@' {
+            let start = index + 1;
+            let mut end = start;
+            while end < bytes.len() {
+                let ch = bytes[end];
+                if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if end > start {
+                let name = &source[start..end];
+                if let Some(replacement) = rename_map.get(name) {
+                    out.push('@');
+                    out.push_str(replacement);
+                    index = end;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[index] as char);
+        index += 1;
+    }
+    out
+}
+
+fn emit_arduino_uno_cbe_runtime_cpp(entrypoint: ArduinoUnoEntrypointKind) -> String {
+    let define = match entrypoint {
+        ArduinoUnoEntrypointKind::Main => "#define RUNE_ARDUINO_ENTRY_MAIN 1",
+        ArduinoUnoEntrypointKind::SetupLoop => "#define RUNE_ARDUINO_ENTRY_SETUP_LOOP 1",
+    };
+    format!("{define}\n#include \"rune_arduino_runtime.hpp\"\n")
+}
+
 fn flash_arduino_uno_hex(hex_path: &Path, port: Option<&str>) -> Result<(), BuildError> {
     let avrdude = find_arduino_avrdude().ok_or_else(|| {
         BuildError::ToolNotFound("packaged Arduino AVR avrdude not found".into())
@@ -618,6 +1043,7 @@ enum ArduinoUnoType {
     I64,
     Bool,
     String,
+    Dynamic,
     Struct(String),
 }
 
@@ -759,12 +1185,20 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
     let helper_prototypes = emit_arduino_uno_function_prototypes(&helper_functions, &helper_signatures)?;
     let helper_definitions =
         emit_arduino_uno_function_definitions(&helper_functions, &helper_signatures, &struct_signatures)?;
-    let method_definitions = emit_arduino_uno_method_definitions(program, &struct_signatures)?;
+    let method_definitions =
+        emit_arduino_uno_method_definitions(program, &helper_signatures, &struct_signatures)?;
 
     Ok(format!(
         "#include <Arduino.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\n\
 static char rune_input_buffer[96];\n\n\
 static char rune_temp_string_buffer[32];\n\n\
+static char rune_dynamic_concat_buffer[160];\n\n\
+typedef struct rune_dynamic_value {{\n\
+    int64_t tag;\n\
+    int64_t payload;\n\
+    const char* text;\n\
+}} rune_dynamic_value;\n\n\
+\n\
 static void rune_serial_write_cstr(const char* text) {{\n\
     Serial.print(text);\n\
 }}\n\n\
@@ -837,6 +1271,111 @@ static const char* rune_string_from_i64(int64_t value) {{\n\
 }}\n\n\
 static const char* rune_string_from_bool(bool value) {{\n\
     return value ? \"true\" : \"false\";\n\
+}}\n\n\
+static rune_dynamic_value rune_dynamic_from_i64(int64_t value) {{\n\
+    rune_dynamic_value out = {{1, value, nullptr}};\n\
+    return out;\n\
+}}\n\n\
+static rune_dynamic_value rune_dynamic_from_bool(bool value) {{\n\
+    rune_dynamic_value out = {{2, value ? 1 : 0, nullptr}};\n\
+    return out;\n\
+}}\n\n\
+static rune_dynamic_value rune_dynamic_from_string(const char* value) {{\n\
+    rune_dynamic_value out = {{3, 0, value == nullptr ? \"\" : value}};\n\
+    return out;\n\
+}}\n\n\
+static const char* rune_dynamic_to_string(rune_dynamic_value value) {{\n\
+    switch (value.tag) {{\n\
+        case 1:\n\
+            return rune_string_from_i64(value.payload);\n\
+        case 2:\n\
+            return rune_string_from_bool(value.payload != 0);\n\
+        case 3:\n\
+            return value.text == nullptr ? \"\" : value.text;\n\
+        default:\n\
+            return \"<dynamic>\";\n\
+    }}\n\
+}}\n\n\
+static int64_t rune_dynamic_to_i64(rune_dynamic_value value) {{\n\
+    switch (value.tag) {{\n\
+        case 1:\n\
+            return value.payload;\n\
+        case 2:\n\
+            return value.payload != 0 ? 1 : 0;\n\
+        case 3:\n\
+            return rune_parse_i64(value.text == nullptr ? \"\" : value.text);\n\
+        default:\n\
+            return 0;\n\
+    }}\n\
+}}\n\n\
+static bool rune_dynamic_truthy(rune_dynamic_value value) {{\n\
+    switch (value.tag) {{\n\
+        case 1:\n\
+            return value.payload != 0;\n\
+        case 2:\n\
+            return value.payload != 0;\n\
+        case 3:\n\
+            return value.text != nullptr && value.text[0] != '\\0';\n\
+        default:\n\
+            return false;\n\
+    }}\n\
+}}\n\n\
+static void rune_serial_write_dynamic(rune_dynamic_value value) {{\n\
+    rune_serial_write_cstr(rune_dynamic_to_string(value));\n\
+}}\n\n\
+static rune_dynamic_value rune_dynamic_binary(rune_dynamic_value left, rune_dynamic_value right, int64_t op) {{\n\
+    if (op == 0 && (left.tag == 3 || right.tag == 3)) {{\n\
+        const char* left_text = rune_dynamic_to_string(left);\n\
+        const char* right_text = rune_dynamic_to_string(right);\n\
+        rune_dynamic_concat_buffer[0] = '\\0';\n\
+        strncat(rune_dynamic_concat_buffer, left_text, sizeof(rune_dynamic_concat_buffer) - 1);\n\
+        size_t used = strlen(rune_dynamic_concat_buffer);\n\
+        if (used + 1 < sizeof(rune_dynamic_concat_buffer)) {{\n\
+            strncat(rune_dynamic_concat_buffer, right_text, sizeof(rune_dynamic_concat_buffer) - used - 1);\n\
+        }}\n\
+        return rune_dynamic_from_string(rune_dynamic_concat_buffer);\n\
+    }}\n\
+    int64_t left_number = rune_dynamic_to_i64(left);\n\
+    int64_t right_number = rune_dynamic_to_i64(right);\n\
+    switch (op) {{\n\
+        case 0:\n\
+            return rune_dynamic_from_i64(left_number + right_number);\n\
+        case 1:\n\
+            return rune_dynamic_from_i64(left_number - right_number);\n\
+        case 2:\n\
+            return rune_dynamic_from_i64(left_number * right_number);\n\
+        case 3:\n\
+            return rune_dynamic_from_i64(right_number == 0 ? 0 : (left_number / right_number));\n\
+        case 4:\n\
+            return rune_dynamic_from_i64(right_number == 0 ? 0 : (left_number % right_number));\n\
+        default:\n\
+            return rune_dynamic_from_i64(0);\n\
+    }}\n\
+}}\n\n\
+static bool rune_dynamic_compare(rune_dynamic_value left, rune_dynamic_value right, int64_t op) {{\n\
+    if (left.tag == 3 || right.tag == 3) {{\n\
+        int cmp = strcmp(rune_dynamic_to_string(left), rune_dynamic_to_string(right));\n\
+        switch (op) {{\n\
+            case 0: return cmp == 0;\n\
+            case 1: return cmp != 0;\n\
+            case 2: return cmp > 0;\n\
+            case 3: return cmp >= 0;\n\
+            case 4: return cmp < 0;\n\
+            case 5: return cmp <= 0;\n\
+            default: return false;\n\
+        }}\n\
+    }}\n\
+    int64_t left_number = rune_dynamic_to_i64(left);\n\
+    int64_t right_number = rune_dynamic_to_i64(right);\n\
+    switch (op) {{\n\
+        case 0: return left_number == right_number;\n\
+        case 1: return left_number != right_number;\n\
+        case 2: return left_number > right_number;\n\
+        case 3: return left_number >= right_number;\n\
+        case 4: return left_number < right_number;\n\
+        case 5: return left_number <= right_number;\n\
+        default: return false;\n\
+    }}\n\
 }}\n\n\
 static int64_t rune_sum_range(int64_t start, int64_t stop, int64_t step) {{\n\
     if (step == 0) {{\n\
@@ -945,7 +1484,11 @@ fn emit_arduino_uno_stmt(
             let inferred_ty = emit_arduino_uno_expr(scope, functions, structs, &stmt.value)?;
             let inferred_value_ty = inferred_ty.1.clone();
             let ty = explicit_ty.unwrap_or_else(|| inferred_value_ty.clone());
-            if ty != inferred_value_ty {
+            let value = arduino_uno_coerce_value(inferred_ty, &ty, stmt.span).map_err(|_| CodegenError {
+                message: "Arduino Uno target requires matching scalar let types".into(),
+                span: stmt.span,
+            })?;
+            if ty != inferred_value_ty && !(ty == ArduinoUnoType::Dynamic && arduino_uno_can_promote_to_dynamic(&inferred_value_ty)) {
                 return Err(CodegenError {
                     message: "Arduino Uno target requires matching scalar let types".into(),
                     span: stmt.span,
@@ -955,7 +1498,7 @@ fn emit_arduino_uno_stmt(
                 "{prefix}{} {} = {};\n",
                 arduino_uno_c_type(&ty),
                 stmt.name,
-                inferred_ty.0
+                value
             ));
             scope.insert(stmt.name.clone(), ty);
             Ok(())
@@ -971,25 +1514,28 @@ fn emit_arduino_uno_stmt(
                 });
             };
             let rendered = emit_arduino_uno_expr(scope, functions, structs, &stmt.value)?;
-            if rendered.1 != existing {
-                return Err(CodegenError {
-                    message: "Arduino Uno target requires assignment types to stay concrete".into(),
-                    span: stmt.span,
-                });
-            }
-            out.push_str(&format!("{prefix}{} = {};\n", stmt.name, rendered.0));
+            let value = arduino_uno_coerce_value(rendered, &existing, stmt.span).map_err(|_| CodegenError {
+                message: "Arduino Uno target requires assignment types to stay concrete".into(),
+                span: stmt.span,
+            })?;
+            out.push_str(&format!("{prefix}{} = {};\n", stmt.name, value));
             Ok(())
         }
         Stmt::Expr(expr_stmt) => emit_arduino_uno_stmt_expr(out, &expr_stmt.expr, scope, functions, structs, indent),
         Stmt::If(stmt) => {
             let condition = emit_arduino_uno_expr(scope, functions, structs, &stmt.condition)?;
-            if condition.1 != ArduinoUnoType::Bool {
-                return Err(CodegenError {
-                    message: "Arduino Uno target requires boolean `if` conditions".into(),
-                    span: stmt.span,
-                });
-            }
-            out.push_str(&format!("{prefix}if ({}) {{\n", condition.0));
+            let condition_ty = condition.1.clone();
+            let condition_expr = match condition_ty {
+                ArduinoUnoType::Bool => condition.0,
+                ArduinoUnoType::Dynamic => format!("rune_dynamic_truthy({})", condition.0),
+                _ => {
+                    return Err(CodegenError {
+                        message: "Arduino Uno target requires boolean `if` conditions".into(),
+                        span: stmt.span,
+                    })
+                }
+            };
+            out.push_str(&format!("{prefix}if ({}) {{\n", condition_expr));
             let mut then_scope = scope.clone();
             emit_arduino_uno_block(
                 out,
@@ -1003,13 +1549,18 @@ fn emit_arduino_uno_stmt(
             out.push_str(&format!("{prefix}}}"));
             for elif in &stmt.elif_blocks {
                 let cond = emit_arduino_uno_expr(scope, functions, structs, &elif.condition)?;
-                if cond.1 != ArduinoUnoType::Bool {
-                    return Err(CodegenError {
-                        message: "Arduino Uno target requires boolean `elif` conditions".into(),
-                        span: elif.span,
-                    });
-                }
-                out.push_str(&format!(" else if ({}) {{\n", cond.0));
+                let cond_ty = cond.1.clone();
+                let cond_expr = match cond_ty {
+                    ArduinoUnoType::Bool => cond.0,
+                    ArduinoUnoType::Dynamic => format!("rune_dynamic_truthy({})", cond.0),
+                    _ => {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires boolean `elif` conditions".into(),
+                            span: elif.span,
+                        })
+                    }
+                };
+                out.push_str(&format!(" else if ({}) {{\n", cond_expr));
                 let mut elif_scope = scope.clone();
                 emit_arduino_uno_block(
                     out,
@@ -1041,13 +1592,18 @@ fn emit_arduino_uno_stmt(
         }
         Stmt::While(stmt) => {
             let condition = emit_arduino_uno_expr(scope, functions, structs, &stmt.condition)?;
-            if condition.1 != ArduinoUnoType::Bool {
-                return Err(CodegenError {
-                    message: "Arduino Uno target requires boolean `while` conditions".into(),
-                    span: stmt.span,
-                });
-            }
-            out.push_str(&format!("{prefix}while ({}) {{\n", condition.0));
+            let condition_ty = condition.1.clone();
+            let condition_expr = match condition_ty {
+                ArduinoUnoType::Bool => condition.0,
+                ArduinoUnoType::Dynamic => format!("rune_dynamic_truthy({})", condition.0),
+                _ => {
+                    return Err(CodegenError {
+                        message: "Arduino Uno target requires boolean `while` conditions".into(),
+                        span: stmt.span,
+                    })
+                }
+            };
+            out.push_str(&format!("{prefix}while ({}) {{\n", condition_expr));
             let mut body_scope = scope.clone();
             emit_arduino_uno_block(
                 out,
@@ -1084,13 +1640,11 @@ fn emit_arduino_uno_stmt(
                     });
                 };
                 let rendered = emit_arduino_uno_expr(scope, functions, structs, value)?;
-                if rendered.1 != expected {
-                    return Err(CodegenError {
-                        message: "Arduino Uno target function return type must stay concrete".into(),
-                        span: stmt.span,
-                    });
-                }
-                out.push_str(&format!("{prefix}return {};\n", rendered.0));
+                let value_expr = arduino_uno_coerce_value(rendered, &expected, stmt.span).map_err(|_| CodegenError {
+                    message: "Arduino Uno target function return type must stay concrete".into(),
+                    span: stmt.span,
+                })?;
+                out.push_str(&format!("{prefix}return {};\n", value_expr));
                 Ok(())
             }
         },
@@ -1100,14 +1654,12 @@ fn emit_arduino_uno_stmt(
         }),
         Stmt::Panic(stmt) => {
             let rendered = emit_arduino_uno_expr(scope, functions, structs, &stmt.value)?;
-            if rendered.1 != ArduinoUnoType::String {
-                return Err(CodegenError {
-                    message: "Arduino Uno target requires string panic messages".into(),
-                    span: stmt.span,
-                });
-            }
+            let panic_expr = arduino_uno_coerce_value(rendered, &ArduinoUnoType::String, stmt.span).map_err(|_| CodegenError {
+                message: "Arduino Uno target requires string panic messages".into(),
+                span: stmt.span,
+            })?;
             out.push_str(&format!("{prefix}rune_serial_write_cstr(\"Rune panic: \");\n"));
-            out.push_str(&format!("{prefix}rune_serial_write_cstr({});\n", rendered.0));
+            out.push_str(&format!("{prefix}rune_serial_write_cstr({});\n", panic_expr));
             out.push_str(&format!("{prefix}rune_serial_newline();\n"));
             out.push_str(&format!("{prefix}for (;;) {{}}\n"));
             Ok(())
@@ -1131,10 +1683,23 @@ fn emit_arduino_uno_stmt_expr(
         });
     };
     let ExprKind::Identifier(name) = &callee.kind else {
-        return Err(CodegenError {
-            message: "Arduino Uno target supports only direct builtin-style calls in `main`".into(),
-            span: callee.span,
-        });
+        let rendered = emit_arduino_uno_expr(scope, functions, structs, expr)?;
+        match rendered.1 {
+            ArduinoUnoType::I64 | ArduinoUnoType::Bool => {
+                out.push_str(&format!("{prefix}(void)({});\n", rendered.0));
+                return Ok(());
+            }
+            ArduinoUnoType::String | ArduinoUnoType::Dynamic => {
+                out.push_str(&format!("{prefix}(void)({});\n", rendered.0));
+                return Ok(());
+            }
+            ArduinoUnoType::Struct(_) => {
+                return Err(CodegenError {
+                    message: "Arduino Uno target does not allow struct-valued call statements".into(),
+                    span: expr.span,
+                });
+            }
+        }
     };
     let dispatch_name = arduino_uno_builtin_alias(name);
     if !is_arduino_uno_builtin_dispatch_name(dispatch_name)
@@ -1464,6 +2029,9 @@ fn emit_arduino_uno_print_expr(
         }
         ArduinoUnoType::I64 => {
             out.push_str(&format!("{prefix}rune_serial_write_i64({});\n", rendered.0));
+        }
+        ArduinoUnoType::Dynamic => {
+            out.push_str(&format!("{prefix}rune_serial_write_dynamic({});\n", rendered.0));
         }
         ArduinoUnoType::Struct(_) => {
             return Err(CodegenError {
@@ -1815,13 +2383,12 @@ fn emit_arduino_uno_expr(
                         });
                     };
                     let rendered = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
-                    if rendered.1 != ArduinoUnoType::String {
-                        return Err(CodegenError {
-                            message: "Arduino Uno target requires String text for `send`".into(),
+                    let text = arduino_uno_coerce_value(rendered, &ArduinoUnoType::String, expr.span)
+                        .map_err(|_| CodegenError {
+                            message: "Arduino Uno target requires String-convertible text for `send`".into(),
                             span: expr.span,
-                        });
-                    }
-                    Ok((format!("(Serial.print({}), true)", rendered.0), ArduinoUnoType::Bool))
+                        })?;
+                    Ok((format!("(Serial.print({}), true)", text), ArduinoUnoType::Bool))
                 }
                 "send_line" => {
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
@@ -1831,13 +2398,12 @@ fn emit_arduino_uno_expr(
                         });
                     };
                     let rendered = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
-                    if rendered.1 != ArduinoUnoType::String {
-                        return Err(CodegenError {
-                            message: "Arduino Uno target requires String text for `send_line`".into(),
+                    let text = arduino_uno_coerce_value(rendered, &ArduinoUnoType::String, expr.span)
+                        .map_err(|_| CodegenError {
+                            message: "Arduino Uno target requires String-convertible text for `send_line`".into(),
                             span: expr.span,
-                        });
-                    }
-                    Ok((format!("(Serial.println({}), true)", rendered.0), ArduinoUnoType::Bool))
+                        })?;
+                    Ok((format!("(Serial.println({}), true)", text), ArduinoUnoType::Bool))
                 }
                 "str" => {
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
@@ -1855,6 +2421,10 @@ fn emit_arduino_uno_expr(
                         )),
                         ArduinoUnoType::Bool => Ok((
                             format!("rune_string_from_bool({})", rendered.0),
+                            ArduinoUnoType::String,
+                        )),
+                        ArduinoUnoType::Dynamic => Ok((
+                            format!("rune_dynamic_to_string({})", rendered.0),
                             ArduinoUnoType::String,
                         )),
                         ArduinoUnoType::Struct(_) => Err(CodegenError {
@@ -1879,6 +2449,10 @@ fn emit_arduino_uno_expr(
                         )),
                         ArduinoUnoType::String => Ok((
                             format!("rune_parse_i64({})", rendered.0),
+                            ArduinoUnoType::I64,
+                        )),
+                        ArduinoUnoType::Dynamic => Ok((
+                            format!("rune_dynamic_to_i64({})", rendered.0),
                             ArduinoUnoType::I64,
                         )),
                         ArduinoUnoType::Struct(_) => Err(CodegenError {
@@ -2122,9 +2696,20 @@ fn emit_arduino_uno_expr(
                 UnaryOp::Negate if rendered.1 == ArduinoUnoType::I64 => {
                     Ok((format!("(-{})", rendered.0), ArduinoUnoType::I64))
                 }
+                UnaryOp::Negate if rendered.1 == ArduinoUnoType::Dynamic => Ok((
+                    format!(
+                        "rune_dynamic_from_i64(-rune_dynamic_to_i64({}))",
+                        rendered.0
+                    ),
+                    ArduinoUnoType::Dynamic,
+                )),
                 UnaryOp::Not if rendered.1 == ArduinoUnoType::Bool => {
                     Ok((format!("(!{})", rendered.0), ArduinoUnoType::Bool))
                 }
+                UnaryOp::Not if rendered.1 == ArduinoUnoType::Dynamic => Ok((
+                    format!("rune_dynamic_from_bool(!rune_dynamic_truthy({}))", rendered.0),
+                    ArduinoUnoType::Dynamic,
+                )),
                 _ => Err(CodegenError {
                     message: "Arduino Uno target received an unsupported unary operation".into(),
                     span: expr.span,
@@ -2172,6 +2757,60 @@ fn emit_arduino_uno_expr(
                 {
                     Ok((
                         format!("({} {} {})", lhs.0, arduino_uno_binary_op(*op), rhs.0),
+                        ArduinoUnoType::Bool,
+                    ))
+                }
+                BinaryOp::And | BinaryOp::Or
+                    if matches!(lhs.1, ArduinoUnoType::Bool | ArduinoUnoType::Dynamic)
+                        && matches!(rhs.1, ArduinoUnoType::Bool | ArduinoUnoType::Dynamic) =>
+                {
+                    let left = arduino_uno_coerce_value(lhs, &ArduinoUnoType::Bool, expr.span)?;
+                    let right = arduino_uno_coerce_value(rhs, &ArduinoUnoType::Bool, expr.span)?;
+                    Ok((
+                        format!("({} {} {})", left, arduino_uno_binary_op(*op), right),
+                        ArduinoUnoType::Bool,
+                    ))
+                }
+                BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Modulo
+                    if arduino_uno_can_promote_to_dynamic(&lhs.1)
+                        && arduino_uno_can_promote_to_dynamic(&rhs.1)
+                        && (lhs.1 == ArduinoUnoType::Dynamic || rhs.1 == ArduinoUnoType::Dynamic) =>
+                {
+                    let left = arduino_uno_coerce_value(lhs, &ArduinoUnoType::Dynamic, expr.span)?;
+                    let right = arduino_uno_coerce_value(rhs, &ArduinoUnoType::Dynamic, expr.span)?;
+                    Ok((
+                        format!(
+                            "rune_dynamic_binary({}, {}, {})",
+                            left,
+                            right,
+                            arduino_uno_dynamic_binary_opcode(*op)?
+                        ),
+                        ArduinoUnoType::Dynamic,
+                    ))
+                }
+                BinaryOp::EqualEqual
+                | BinaryOp::NotEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+                    if arduino_uno_can_promote_to_dynamic(&lhs.1)
+                        && arduino_uno_can_promote_to_dynamic(&rhs.1)
+                        && (lhs.1 == ArduinoUnoType::Dynamic || rhs.1 == ArduinoUnoType::Dynamic) =>
+                {
+                    let left = arduino_uno_coerce_value(lhs, &ArduinoUnoType::Dynamic, expr.span)?;
+                    let right = arduino_uno_coerce_value(rhs, &ArduinoUnoType::Dynamic, expr.span)?;
+                    Ok((
+                        format!(
+                            "rune_dynamic_compare({}, {}, {})",
+                            left,
+                            right,
+                            arduino_uno_dynamic_compare_opcode(*op)?
+                        ),
                         ArduinoUnoType::Bool,
                     ))
                 }
@@ -2396,6 +3035,7 @@ fn emit_arduino_uno_function_definitions(
 
 fn emit_arduino_uno_method_definitions(
     program: &Program,
+    functions: &HashMap<String, ArduinoUnoFunctionSig>,
     structs: &HashMap<String, ArduinoUnoStructSig>,
 ) -> Result<String, CodegenError> {
     let mut out = String::new();
@@ -2441,7 +3081,7 @@ fn emit_arduino_uno_method_definitions(
                 &mut out,
                 &method.body.statements,
                 &mut scope,
-                &HashMap::new(),
+                functions,
                 structs,
                 return_kind,
                 1,
@@ -2481,15 +3121,13 @@ fn emit_arduino_uno_function_call(
             });
         };
         let rendered = emit_arduino_uno_expr(scope, functions, structs, expr)?;
-        if rendered.1 != *expected_ty {
-            return Err(CodegenError {
-                message: format!(
-                    "Arduino Uno target function `{name}` requires concrete argument type matches"
-                ),
-                span,
-            });
-        }
-        rendered_args.push(rendered.0);
+        let value = arduino_uno_coerce_value(rendered, expected_ty, span).map_err(|_| CodegenError {
+            message: format!(
+                "Arduino Uno target function `{name}` requires concrete argument type matches"
+            ),
+            span,
+        })?;
+        rendered_args.push(value);
     }
     Ok(format!("rune_fn_{}({})", name, rendered_args.join(", ")))
 }
@@ -2533,15 +3171,13 @@ fn emit_arduino_uno_method_call(
             });
         };
         let rendered = emit_arduino_uno_expr(scope, functions, structs, expr)?;
-        if rendered.1 != *expected_ty {
-            return Err(CodegenError {
-                message: format!(
-                    "Arduino Uno target method `{struct_name}.{method_name}` requires concrete argument type matches"
-                ),
-                span,
-            });
-        }
-        rendered_args.push(rendered.0);
+        let value = arduino_uno_coerce_value(rendered, expected_ty, span).map_err(|_| CodegenError {
+            message: format!(
+                "Arduino Uno target method `{struct_name}.{method_name}` requires concrete argument type matches"
+            ),
+            span,
+        })?;
+        rendered_args.push(value);
     }
     Ok(format!(
         "rune_method_{}__{}({})",
@@ -2578,13 +3214,11 @@ fn emit_arduino_uno_constructor_call(
             });
         };
         let rendered = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
-        if &rendered.1 != field_ty {
-            return Err(CodegenError {
-                message: format!("Arduino Uno target struct `{name}` field `{field_name}` requires a concrete matching type"),
-                span,
-            });
-        }
-        rendered_values.push(rendered.0);
+        let value = arduino_uno_coerce_value(rendered, field_ty, span).map_err(|_| CodegenError {
+            message: format!("Arduino Uno target struct `{name}` field `{field_name}` requires a concrete matching type"),
+            span,
+        })?;
+        rendered_values.push(value);
     }
     Ok(format!("({}){{{}}}", arduino_uno_c_type(&ArduinoUnoType::Struct(name.to_string())), rendered_values.join(", ")))
 }
@@ -2618,11 +3252,52 @@ fn c_escape(text: &str) -> String {
     escaped
 }
 
+fn arduino_uno_can_promote_to_dynamic(ty: &ArduinoUnoType) -> bool {
+    matches!(
+        ty,
+        ArduinoUnoType::I64 | ArduinoUnoType::Bool | ArduinoUnoType::String | ArduinoUnoType::Dynamic
+    )
+}
+
+fn arduino_uno_coerce_value(
+    rendered: (String, ArduinoUnoType),
+    expected: &ArduinoUnoType,
+    span: crate::lexer::Span,
+) -> Result<String, CodegenError> {
+    let (expr, actual) = rendered;
+    if &actual == expected {
+        return Ok(expr);
+    }
+    match (actual, expected) {
+        (ArduinoUnoType::I64, ArduinoUnoType::Dynamic) => {
+            Ok(format!("rune_dynamic_from_i64({expr})"))
+        }
+        (ArduinoUnoType::Bool, ArduinoUnoType::Dynamic) => {
+            Ok(format!("rune_dynamic_from_bool({expr})"))
+        }
+        (ArduinoUnoType::String, ArduinoUnoType::Dynamic) => {
+            Ok(format!("rune_dynamic_from_string({expr})"))
+        }
+        (ArduinoUnoType::Dynamic, ArduinoUnoType::String) => {
+            Ok(format!("rune_dynamic_to_string({expr})"))
+        }
+        (ArduinoUnoType::Dynamic, ArduinoUnoType::I64) => Ok(format!("rune_dynamic_to_i64({expr})")),
+        (ArduinoUnoType::Dynamic, ArduinoUnoType::Bool) => {
+            Ok(format!("rune_dynamic_truthy({expr})"))
+        }
+        _ => Err(CodegenError {
+            message: "Arduino Uno target requires concrete argument type matches".into(),
+            span,
+        }),
+    }
+}
+
 fn arduino_uno_type_from_ref(ty: &TypeRef) -> Result<ArduinoUnoType, CodegenError> {
     match ty.name.as_str() {
         "i32" | "i64" | "int" => Ok(ArduinoUnoType::I64),
         "bool" => Ok(ArduinoUnoType::Bool),
         "String" | "string" => Ok(ArduinoUnoType::String),
+        "dynamic" => Ok(ArduinoUnoType::Dynamic),
         _ => Ok(ArduinoUnoType::Struct(ty.name.clone())),
     }
 }
@@ -2641,7 +3316,37 @@ fn arduino_uno_c_type(ty: &ArduinoUnoType) -> &str {
         ArduinoUnoType::I64 => "int64_t",
         ArduinoUnoType::Bool => "bool",
         ArduinoUnoType::String => "const char*",
+        ArduinoUnoType::Dynamic => "rune_dynamic_value",
         ArduinoUnoType::Struct(name) => Box::leak(format!("rune_struct_{name}").into_boxed_str()),
+    }
+}
+
+fn arduino_uno_dynamic_binary_opcode(op: BinaryOp) -> Result<i64, CodegenError> {
+    match op {
+        BinaryOp::Add => Ok(0),
+        BinaryOp::Subtract => Ok(1),
+        BinaryOp::Multiply => Ok(2),
+        BinaryOp::Divide => Ok(3),
+        BinaryOp::Modulo => Ok(4),
+        _ => Err(CodegenError {
+            message: "Arduino Uno target received an unsupported dynamic binary operation".into(),
+            span: crate::lexer::Span { line: 1, column: 1 },
+        }),
+    }
+}
+
+fn arduino_uno_dynamic_compare_opcode(op: BinaryOp) -> Result<i64, CodegenError> {
+    match op {
+        BinaryOp::EqualEqual => Ok(0),
+        BinaryOp::NotEqual => Ok(1),
+        BinaryOp::Greater => Ok(2),
+        BinaryOp::GreaterEqual => Ok(3),
+        BinaryOp::Less => Ok(4),
+        BinaryOp::LessEqual => Ok(5),
+        _ => Err(CodegenError {
+            message: "Arduino Uno target received an unsupported dynamic comparison".into(),
+            span: crate::lexer::Span { line: 1, column: 1 },
+        }),
     }
 }
 

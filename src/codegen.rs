@@ -3193,35 +3193,37 @@ impl<'a> FunctionEmitter<'a> {
         }
 
         if let ExprKind::Call { callee, args } = &expr.kind
-            && let ExprKind::Identifier(name) = &callee.kind
-            && self.function_returns.get(name) == Some(&IrType::String)
         {
-            self.emit_call(out, callee, args, expr.span)?;
-            if self.extern_functions.contains(name) {
-                self.capture_runtime_string_result(out, ptr_reg, len_reg);
-            } else {
-                out.push_str(&format!(
-                    "    mov QWORD PTR [rbp-{}], rax\n",
-                    self.scratch_offset
-                ));
-                out.push_str(&format!(
-                    "    mov QWORD PTR [rbp-{}], rdx\n",
-                    self.scratch_offset + 8
-                ));
-                if ptr_reg != "rax" {
+            let (target_name, owned_args) = self.resolve_call_target(callee, args, expr.span)?;
+            if self.function_returns.get(&target_name) == Some(&IrType::String) {
+                self.emit_call(out, callee, args, expr.span)?;
+                if self.extern_functions.contains(&target_name) {
+                    self.capture_runtime_string_result(out, ptr_reg, len_reg);
+                } else {
                     out.push_str(&format!(
-                        "    mov {ptr_reg}, QWORD PTR [rbp-{}]\n",
+                        "    mov QWORD PTR [rbp-{}], rax\n",
                         self.scratch_offset
                     ));
-                }
-                if len_reg != "rdx" {
                     out.push_str(&format!(
-                        "    mov {len_reg}, QWORD PTR [rbp-{}]\n",
+                        "    mov QWORD PTR [rbp-{}], rdx\n",
                         self.scratch_offset + 8
                     ));
+                    if ptr_reg != "rax" {
+                        out.push_str(&format!(
+                            "    mov {ptr_reg}, QWORD PTR [rbp-{}]\n",
+                            self.scratch_offset
+                        ));
+                    }
+                    if len_reg != "rdx" {
+                        out.push_str(&format!(
+                            "    mov {len_reg}, QWORD PTR [rbp-{}]\n",
+                            self.scratch_offset + 8
+                        ));
+                    }
                 }
+                return Ok(());
             }
-            return Ok(());
+            let _ = owned_args;
         }
 
         if let ExprKind::Binary {

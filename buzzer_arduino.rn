@@ -1,0 +1,30 @@
+from arduino import delay_ms, digital_out, mode_output, pin_mode, uart_begin
+
+def buzzer_on(pos_pin: i64, neg_pin: i64) -> unit:
+    digital_out(neg_pin, false)
+    digital_out(pos_pin, true)
+    return
+
+def buzzer_off(pos_pin: i64, neg_pin: i64) -> unit:
+    digital_out(pos_pin, false)
+    digital_out(neg_pin, false)
+    return
+
+def beep(pos_pin: i64, neg_pin: i64, on_ms: i64, off_ms: i64) -> unit:
+    buzzer_on(pos_pin, neg_pin)
+    delay_ms(on_ms)
+    buzzer_off(pos_pin, neg_pin)
+    delay_ms(off_ms)
+    return
+
+def setup() -> unit:
+    uart_begin(115200)
+    pin_mode(8, mode_output())
+    pin_mode(7, mode_output())
+    println("Rune buzzer ready")
+    println("POS=D8 NEG=D7")
+    return
+
+def loop() -> unit:
+    beep(8, 7, 120, 400)
+    return

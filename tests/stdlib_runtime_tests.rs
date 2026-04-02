@@ -230,6 +230,39 @@ def main() -> i32:
 }
 
 #[test]
+fn builds_and_runs_stdlib_network_class_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("stdlib_network_class.rn");
+    let exe_path = dir.join("stdlib_network_class.exe");
+
+    fs::write(
+        &source_path,
+        r#"from network import tcp_client, udp_endpoint
+
+def main() -> i32:
+    let tcp = tcp_client("127.0.0.1", 65535)
+    let udp = udp_endpoint("127.0.0.1", 9)
+    println(tcp.probe())
+    println(udp.send_line("ping"))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("network stdlib class program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run network stdlib class program");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\ntrue\n");
+}
+
+
+#[test]
 fn builds_and_runs_stdlib_io_program() {
     let dir = temp_dir();
     let source_path = dir.join("stdlib_io.rn");

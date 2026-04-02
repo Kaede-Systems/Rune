@@ -28,6 +28,16 @@ Exports:
 - `digital_read(pin: i64) -> bool`
 - `analog_write(pin: i64, value: i64) -> unit`
 - `analog_read(pin: i64) -> i64`
+- `analog_in(channel: i64) -> i64`
+- `pwm_write(pin: i64, duty: i64) -> unit`
+- `pwm_duty_max() -> i64`
+- `digital_out(pin: i64, value: bool) -> unit`
+- `digital_in(pin: i64) -> bool`
+- `digital_in_pullup(pin: i64) -> bool`
+- `analog_read_voltage_mv(pin: i64, reference_mv: i64) -> i64`
+- `analog_in_voltage_mv(channel: i64, reference_mv: i64) -> i64`
+- `analog_read_percent(pin: i64) -> i64`
+- `analog_in_percent(channel: i64) -> i64`
 - `analog_reference(mode: i64) -> unit`
 - `pulse_in(pin: i64, state: bool, timeout_us: i64) -> i64`
 - `shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit`
@@ -49,6 +59,8 @@ Exports:
 - `analog_ref_default() -> i64`
 - `analog_ref_internal() -> i64`
 - `analog_ref_external() -> i64`
+- `default_reference_mv() -> i64`
+- `internal_reference_mv() -> i64`
 - `uart_begin(baud: i64) -> unit`
 - `uart_available() -> i64`
 - `uart_read_byte() -> i64`
@@ -64,6 +76,7 @@ Current implemented Arduino scope:
 - board constants and pin/timing helpers
 - PWM, pulse timing, tone generation, shift register output, and analog reference selection
 - Arduino-style `setup()` / `loop()` entrypoints on the Uno target
+- top-level/script-style Rune programs also work on the Uno target, so you can often just write normal top-level statements and `while true:` loops without manually defining `setup()` and `loop()`
 
 Recommended usage:
 
@@ -73,13 +86,16 @@ Recommended usage:
 Current Arduino limitations:
 
 - this module is implemented for the current Uno embedded slice, not full Rune parity
-- dynamic values and full class/OOP parity are not implemented on AVR yet
+- concrete classes/methods and scalar/string dynamic routing work on the current AVR slice
+- AVR string-heavy OOP/dynamic operations now use a bounded rotating temporary-string slot pool in the packaged runtime instead of a single shared string buffer, which makes chained method/string expressions behave correctly on Uno without heap allocation
+- full dynamic object parity and richer polymorphism are not implemented on AVR yet
 
 ## `serial`
 
 ```rune
 from serial import begin, open, is_open, close
 from serial import available, read_byte, recv_line, write, write_line, send, send_line
+from serial import SerialPort, serial_port
 ```
 
 Exports:
@@ -93,12 +109,15 @@ Exports:
 - `recv_line() -> String`
 - `write(text: String) -> unit`
 - `write_line(text: String) -> unit`
-- `send(text: String) -> bool`
-- `send_line(text: String) -> bool`
+- `send(value: dynamic) -> bool`
+- `send_line(value: dynamic) -> bool`
+- `SerialPort`
+- `serial_port(port: String, baud: i64) -> SerialPort`
 
 Current implemented serial scope:
 
 - shared serial-facing Rune surface for embedded and host code
+- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_nonempty`, `send`, and `send_line` method names
 - on Arduino Uno:
   - `begin` lowers to `uart_begin`
   - `open` behaves like `begin`
@@ -236,7 +255,7 @@ from network import tcp_connect, tcp_connect_timeout
 from network import tcp_probe, tcp_probe_timeout
 from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 from network import tcp_send_line, udp_send_line
-from network import tcp_send_i64, udp_send_i64, tcp_send_bool, udp_send_bool
+from network import TcpClient, UdpEndpoint, tcp_client, udp_endpoint
 ```
 
 Exports:
@@ -250,12 +269,12 @@ Exports:
 - `udp_bind(host: String, port: i32) -> bool`
 - `tcp_send(host: String, port: i32, data: String) -> bool`
 - `udp_send(host: String, port: i32, data: String) -> bool`
-- `tcp_send_line(host: String, port: i32, data: String) -> bool`
-- `udp_send_line(host: String, port: i32, data: String) -> bool`
-- `tcp_send_i64(host: String, port: i32, value: i64) -> bool`
-- `udp_send_i64(host: String, port: i32, value: i64) -> bool`
-- `tcp_send_bool(host: String, port: i32, value: bool) -> bool`
-- `udp_send_bool(host: String, port: i32, value: bool) -> bool`
+- `tcp_send_line(host: String, port: i32, value: dynamic) -> bool`
+- `udp_send_line(host: String, port: i32, value: dynamic) -> bool`
+- `TcpClient`
+- `UdpEndpoint`
+- `tcp_client(host: String, port: i32) -> TcpClient`
+- `udp_endpoint(host: String, port: i32) -> UdpEndpoint`
 
 Current implemented network scope:
 
@@ -263,41 +282,8 @@ Current implemented network scope:
 - timeout-aware TCP probe
 - TCP bind/listen availability checks
 - UDP bind availability checks
-- TCP/UDP send convenience wrappers for lines, integers, and booleans
-
-## `serial`
-
-```rune
-from serial import open, close, recv_line, recv_nonempty
-from serial import send, send_line
-from serial import send_i64, send_line_i64, send_bool, send_line_bool
-```
-
-Exports:
-
-- `begin(baud: i64) -> unit`
-- `open(port: String, baud: i64) -> bool`
-- `is_open() -> bool`
-- `close() -> unit`
-- `available() -> i64`
-- `read_byte() -> i64`
-- `recv_line() -> String`
-- `recv_nonempty() -> String`
-- `write(text: String) -> unit`
-- `write_line(text: String) -> unit`
-- `send(text: String) -> bool`
-- `send_line(text: String) -> bool`
-- `send_i64(value: i64) -> bool`
-- `send_line_i64(value: i64) -> bool`
-- `send_bool(value: bool) -> bool`
-- `send_line_bool(value: bool) -> bool`
-
-Current implemented serial scope:
-
-- native host serial open/close/read-line/write on Windows
-- native host serial build support on Linux/macOS through the same stdlib surface
-- Arduino/embedded serial routing through the same Rune `serial` module
-- convenience helpers for non-empty reads and scalar sending
+- TCP/UDP send convenience wrappers for dynamic values and lines
+- class-style client/endpoint wrappers using the same `connect`, `probe`, `send`, and `send_line` names
 
 Not implemented in this module yet:
 
@@ -386,3 +372,43 @@ For Arduino targets, prefer the shared Rune I/O surface where possible:
 - `input()`
 
 These lower to serial I/O on the Uno target. The `uart_*` functions remain available in `arduino` for lower-level byte-oriented serial control.
+
+High-level hardware classes:
+- `DigitalPin(pin=...)`
+  - `.output()`
+  - `.input()`
+  - `.input_pullup()`
+  - `.write(value: bool)`
+  - `.high()`
+  - `.low()`
+  - `.read() -> bool`
+  - `.toggle()`
+  - `.blink(times, on_ms, off_ms)`
+  - `.pulse(on_ms, off_ms)`
+- `PwmPin(pin=...)`
+  - `.output()`
+  - `.write(duty: i64)`
+  - `.max_duty() -> i64`
+  - `.off()`
+- `AnalogPin(pin=...)`
+  - `.read() -> i64`
+  - `.read_voltage_mv(reference_mv: i64) -> i64`
+  - `.read_percent() -> i64`
+
+Voltage note:
+- Arduino Uno does not have a true DAC, so Rune cannot set an arbitrary analog voltage directly on normal Uno pins.
+- `analog_write` / `pwm_write` / `PwmPin.write(...)` use PWM duty-cycle output, not real steady analog voltage.
+- `analog_read_voltage_mv` converts ADC readings into approximate millivolts using the supplied reference voltage.
+- `pwm_write(pin, 128)` on the Uno means about a 50% duty cycle on the normal 8-bit PWM scale.
+- Because PWM is switching quickly, the average power can behave somewhat like a lower analog level for LEDs, motors, and filtered circuits, but it is still digital switching, not a true fixed voltage output.
+
+Function-first pin usage:
+- use plain pin numbers directly, for example `digital_out(7, true)` or `pwm_write(9, 128)`
+- `digital_out`, `digital_in`, and `digital_in_pullup` provide a simpler direct style on top of `pin_mode` + `digital_*`
+- use `analog_in(0)` / `analog_in_voltage_mv(0, 5000)` when you want Uno analog channels in the simple `A0..A5` style without extra wrappers
+
+Example device-style programs in the repo:
+- [buzzer_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/buzzer_arduino.rn)
+- [buzzer_serial_control_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/buzzer_serial_control_arduino.rn)
+- [serial_math_quiz_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/serial_math_quiz_arduino.rn)
+- [ultrasonic_distance_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/ultrasonic_distance_arduino.rn)

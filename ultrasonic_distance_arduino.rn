@@ -1,0 +1,32 @@
+from arduino import delay_ms, delay_us, digital_write, pin_mode, pulse_in, uart_begin, mode_input, mode_output
+
+def read_distance_cm(trig_pin: i64, echo_pin: i64) -> i64:
+    digital_write(trig_pin, false)
+    delay_us(2)
+    digital_write(trig_pin, true)
+    delay_us(10)
+    digital_write(trig_pin, false)
+
+    let duration_us: i64 = pulse_in(echo_pin, true, 30000)
+    if duration_us <= 0:
+        return -1
+
+    return duration_us / 58
+
+def setup() -> unit:
+    uart_begin(115200)
+    pin_mode(7, mode_output())
+    pin_mode(8, mode_input())
+    println("Rune ultrasonic sensor ready")
+    println("TRIG=D7 ECHO=D8")
+    return
+
+def loop() -> unit:
+    let distance_cm: i64 = read_distance_cm(7, 8)
+    if distance_cm < 0:
+        println("no echo")
+    else:
+        print("distance_cm=")
+        println(distance_cm)
+    delay_ms(50)
+    return
