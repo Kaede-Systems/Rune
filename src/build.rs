@@ -4769,6 +4769,8 @@ use std::io::{self, Read, Write};
 #[cfg(not(target_os = "wasi"))]
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::process::Command;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use std::process::Stdio;
 use std::sync::OnceLock;
 use std::thread_local;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -4817,6 +4819,8 @@ fn rune_rt_configure_serial_port(port_name: &str, baud: i64) -> bool {
                 "DATA=8",
                 "STOP=1",
             ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
         return matches!(status, Ok(exit) if exit.success());
     }
@@ -4838,6 +4842,8 @@ fn rune_rt_configure_serial_port(port_name: &str, baud: i64) -> bool {
                 "time",
                 "1",
             ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status();
         return matches!(status, Ok(exit) if exit.success());
     }
@@ -5214,6 +5220,8 @@ pub extern "C" fn rune_rt_serial_open(port_ptr: *const u8, port_len: i64, baud: 
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     *guard = Some(port);
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    std::thread::sleep(Duration::from_millis(1200));
     true
 }
 

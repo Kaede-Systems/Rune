@@ -1,6 +1,12 @@
 from serial import close, open, recv_line, send_line
 from sys import platform
 
+def wait_line() -> String:
+    let line: String = recv_line()
+    while line == "":
+        line = recv_line()
+    return line
+
 def main() -> i32:
     let host: String = platform()
     let port: String = "/dev/ttyACM0"
@@ -13,11 +19,11 @@ def main() -> i32:
         println("failed to open " + port)
         return 1
 
-    println(recv_line())
-    println(recv_line())
+    println(wait_line())
+    println(wait_line())
 
     while true:
-        let question: String = recv_line()
+        let question: String = wait_line()
         if question != "":
             println(question)
             print("> ")
@@ -26,6 +32,6 @@ def main() -> i32:
                 println("failed to send answer")
                 close()
                 return 1
-            println(recv_line())
-            println(recv_line())
+            println(wait_line())
+            println(wait_line())
     return 0
