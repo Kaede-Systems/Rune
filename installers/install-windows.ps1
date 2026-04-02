@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 $LlvmVersion = "21.1.7"
 $WasmtimeVersion = "43.0.0"
+$InstallLockPath = Join-Path $env:TEMP "rune-install.lock"
 
 function Get-HostAssetName {
     $arch = $env:PROCESSOR_ARCHITECTURE
@@ -24,6 +25,27 @@ function Get-HostBundleName {
         return "windows-arm64"
     }
     return "windows-x64"
+}
+
+function Use-InstallLock {
+    while ($true) {
+        try {
+            $script:InstallLockHandle = [System.IO.File]::Open($InstallLockPath, "OpenOrCreate", "ReadWrite", "None")
+            break
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
+function Test-LlvmReady {
+    param([string]$Root)
+    return [bool](Get-ChildItem -LiteralPath $Root -Recurse -Filter opt.exe -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+function Test-WasmtimeReady {
+    param([string]$Root)
+    return [bool](Get-ChildItem -LiteralPath $Root -Recurse -Include wasmtime.exe,wasmtime -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
 function Download-ReleaseBundle {
@@ -105,18 +127,24 @@ function Ensure-HostTools {
     $wasmtimeDest = Join-Path $toolsRoot "wasmtime\\extract\\$bundleName"
     New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
 
-    if (-not (Test-Path -LiteralPath $llvmDest) -or -not (Get-ChildItem -LiteralPath $llvmDest -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath $llvmDest) -or -not (Test-LlvmReady -Root $llvmDest)) {
         $tempDir = Join-Path $env:TEMP ("rune-tools-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
         $llvmInstaller = Join-Path $tempDir "llvm-installer.exe"
         $llvmUrl = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LlvmVersion/LLVM-$LlvmVersion-win64.exe"
         Write-Host "Downloading LLVM toolchain from $llvmUrl"
         Invoke-WebRequest -Uri $llvmUrl -OutFile $llvmInstaller
-        New-Item -ItemType Directory -Path $llvmDest -Force | Out-Null
-        Start-Process -FilePath $llvmInstaller -ArgumentList "/S", "/D=$llvmDest" -Wait
+        $llvmStage = Join-Path $tempDir "llvm-stage"
+        New-Item -ItemType Directory -Path $llvmStage -Force | Out-Null
+        Start-Process -FilePath $llvmInstaller -ArgumentList "/S", "/D=$llvmStage" -Wait
+        if (-not (Test-LlvmReady -Root $llvmStage)) {
+            throw "Downloaded LLVM bundle is missing opt.exe"
+        }
+        Remove-Item -LiteralPath $llvmDest -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $llvmStage -Destination $llvmDest
     }
 
-    if (-not (Test-Path -LiteralPath $wasmtimeDest) -or -not (Get-ChildItem -LiteralPath $wasmtimeDest -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath $wasmtimeDest) -or -not (Test-WasmtimeReady -Root $wasmtimeDest)) {
         $tempDir = Join-Path $env:TEMP ("rune-tools-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
         $wasmtimeZip = Join-Path $tempDir "wasmtime.zip"
@@ -127,10 +155,15 @@ function Ensure-HostTools {
         Expand-Archive -Path $wasmtimeZip -DestinationPath $extractRoot -Force
         $children = Get-ChildItem -LiteralPath $extractRoot
         $source = if ($children.Count -eq 1 -and $children[0].PSIsContainer) { $children[0].FullName } else { $extractRoot }
-        New-Item -ItemType Directory -Path $wasmtimeDest -Force | Out-Null
-        Copy-Item -LiteralPath $source -Destination $wasmtimeDest -Recurse -Force
+        if (-not (Test-WasmtimeReady -Root $source)) {
+            throw "Downloaded Wasmtime bundle is missing wasmtime.exe"
+        }
+        Remove-Item -LiteralPath $wasmtimeDest -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $source -Destination $wasmtimeDest
     }
 }
+
+Use-InstallLock
 
 $bundleRoot = $null
 if ($BinaryPath) {
@@ -170,3 +203,6 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'share\\rune')) {
     Write-Host "Installed Rune shared assets to $(Join-Path $InstallRoot 'share\\rune')"
 }
 Write-Host "Added $binDir to $scope PATH"
+if ($script:InstallLockHandle) {
+    $script:InstallLockHandle.Dispose()
+}

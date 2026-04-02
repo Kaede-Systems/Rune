@@ -26,6 +26,7 @@ VERSION="latest"
 SOURCE_BINARY=""
 LLVM_VERSION="21.1.7"
 WASMTIME_VERSION="43.0.0"
+INSTALL_LOCK_DIR="${TMPDIR:-/tmp}/rune-install.lock"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -66,6 +67,13 @@ require_cmd() {
         printf 'missing required command: %s\n' "$1" >&2
         exit 1
     fi
+}
+
+with_install_lock() {
+    while ! mkdir "$INSTALL_LOCK_DIR" 2>/dev/null; do
+        sleep 1
+    done
+    trap 'rmdir "$INSTALL_LOCK_DIR" >/dev/null 2>&1 || true' EXIT INT TERM
 }
 
 detect_asset_name() {
@@ -211,22 +219,50 @@ ensure_host_tools() {
 
     temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/rune-tools.XXXXXX")
 
-    if [ ! -d "$llvm_dest" ] || [ -z "$(find "$llvm_dest" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+    llvm_ready=0
+    if [ -d "$llvm_dest" ] && find "$llvm_dest" -path '*/bin/opt' -type f | grep . >/dev/null 2>&1; then
+        llvm_ready=1
+    fi
+
+    if [ "$llvm_ready" -ne 1 ]; then
         llvm_archive="${temp_dir}/llvm.tar.xz"
         printf 'Downloading LLVM toolchain for %s\n' "$host_bundle"
         curl -fL "$llvm_url" -o "$llvm_archive"
-        mkdir -p "$llvm_dest"
-        tar -xf "$llvm_archive" -C "$llvm_dest"
+        llvm_stage="${temp_dir}/llvm-stage"
+        mkdir -p "$llvm_stage"
+        tar -xf "$llvm_archive" -C "$llvm_stage"
+        if ! find "$llvm_stage" -path '*/bin/opt' -type f | grep . >/dev/null 2>&1; then
+            printf 'downloaded LLVM bundle is missing opt\n' >&2
+            exit 1
+        fi
+        rm -rf "$llvm_dest"
+        mkdir -p "$(dirname "$llvm_dest")"
+        mv "$llvm_stage" "$llvm_dest"
     fi
 
-    if [ ! -d "$wasmtime_dest" ] || [ -z "$(find "$wasmtime_dest" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+    wasmtime_ready=0
+    if [ -d "$wasmtime_dest" ] && find "$wasmtime_dest" \( -name wasmtime -o -name wasmtime.exe \) -type f | grep . >/dev/null 2>&1; then
+        wasmtime_ready=1
+    fi
+
+    if [ "$wasmtime_ready" -ne 1 ]; then
         wasmtime_archive="${temp_dir}/wasmtime.tar.xz"
         printf 'Downloading Wasmtime for %s\n' "$host_bundle"
         curl -fL "$wasmtime_url" -o "$wasmtime_archive"
-        mkdir -p "$wasmtime_dest"
-        tar -xf "$wasmtime_archive" -C "$wasmtime_dest"
+        wasmtime_stage="${temp_dir}/wasmtime-stage"
+        mkdir -p "$wasmtime_stage"
+        tar -xf "$wasmtime_archive" -C "$wasmtime_stage"
+        if ! find "$wasmtime_stage" \( -name wasmtime -o -name wasmtime.exe \) -type f | grep . >/dev/null 2>&1; then
+            printf 'downloaded Wasmtime bundle is missing the wasmtime binary\n' >&2
+            exit 1
+        fi
+        rm -rf "$wasmtime_dest"
+        mkdir -p "$(dirname "$wasmtime_dest")"
+        mv "$wasmtime_stage" "$wasmtime_dest"
     fi
 }
+
+with_install_lock
 
 if [ -n "$SOURCE_BINARY" ]; then
     if [ ! -f "$SOURCE_BINARY" ]; then
