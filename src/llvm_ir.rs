@@ -2840,11 +2840,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_uart_begin"
         | "__rune_builtin_arduino_uart_write_byte"
         | "__rune_builtin_arduino_uart_write" => Some(IrType::Unit),
-        "__rune_builtin_system_pid"
-        | "__rune_builtin_system_cpu_count"
-        | "__rune_builtin_env_get_i32"
-        | "__rune_builtin_env_arg_count"
-        | "__rune_builtin_arduino_mode_input"
+        "__rune_builtin_arduino_mode_input"
         | "__rune_builtin_arduino_mode_output"
         | "__rune_builtin_arduino_mode_input_pullup"
         | "__rune_builtin_arduino_led_builtin"
@@ -2857,6 +2853,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_analog_ref_external"
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
+        "__rune_builtin_system_pid"
+        | "__rune_builtin_system_cpu_count"
+        | "__rune_builtin_env_get_i32"
+        | "__rune_builtin_env_arg_count" => Some(IrType::I32),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"

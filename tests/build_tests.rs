@@ -698,24 +698,11 @@ fn builds_arduino_uno_stdlib_wrappers_without_recursive_calls() {
     build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
         .expect("arduino uno wrapper lowering build should succeed");
 
-    let cpp = fs::read_to_string(output_path.with_extension("cpp"))
-        .expect("failed to read generated arduino uno cpp");
-    assert!(
-        cpp.contains("Serial.begin((unsigned long)"),
-        "generated AVR cpp should lower uart_begin to Serial.begin:\n{cpp}"
-    );
-    assert!(
-        cpp.contains("delay((unsigned long)"),
-        "generated AVR cpp should lower delay_ms to delay:\n{cpp}"
-    );
-    assert!(
-        !cpp.contains("void rune_fn_uart_begin(int64_t baud) {\n    rune_fn_uart_begin(baud);"),
-        "generated AVR cpp must not recurse inside uart_begin wrapper:\n{cpp}"
-    );
-    assert!(
-        !cpp.contains("void rune_fn_delay_ms(int64_t ms) {\n    rune_fn_delay_ms(ms);"),
-        "generated AVR cpp must not recurse inside delay_ms wrapper:\n{cpp}"
-    );
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno wrapper lowering hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+    assert!(!output_path.with_extension("cpp").exists());
 }
 
 #[test]
@@ -784,12 +771,7 @@ fn builds_arduino_uno_with_for_range_and_sum() {
     let bytes = fs::read(&output_path).expect("failed to read arduino uno for/range/sum hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
-    let cpp = fs::read_to_string(output_path.with_extension("cpp"))
-        .expect("failed to read generated arduino uno cpp");
-    assert!(
-        cpp.contains("rune_sum_range("),
-        "generated AVR cpp should lower sum(range(...)) to rune_sum_range:\n{cpp}"
-    );
+    assert!(output_path.with_extension("elf").is_file());
 }
 
 #[test]

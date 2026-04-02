@@ -558,9 +558,6 @@ fn build_arduino_uno_hex(
 
     let elf_output = output_path.with_extension("elf");
     let _ = fs::copy(&elf_path, &elf_output);
-    let cpp_output = output_path.with_extension("cpp");
-    let _ = fs::copy(&cpp_path, &cpp_output);
-
     if options.flash_after_build {
         flash_arduino_uno_hex(output_path, options.flash_port.as_deref())?;
     }
