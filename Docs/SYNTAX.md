@@ -375,6 +375,8 @@ Arduino Uno target notes:
 
 - `main()` is supported
 - Arduino-style `setup()` and `loop()` entrypoints are also supported on the Uno target
+- `print`, `println`, and `input()` stay the preferred high-level serial I/O surface on Uno
+- `uart_*` helpers remain available for lower-level byte-by-byte serial control
 - serial calculator style programs now build and flash through the packaged AVR path
 
 `json`

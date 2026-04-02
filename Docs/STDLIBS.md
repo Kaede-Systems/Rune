@@ -42,11 +42,16 @@ Exports:
 Current implemented Arduino scope:
 
 - packaged Uno-target stdlib resolution through `from arduino import ...`
-- serial text output with `print`, `println`, and `uart_write`
-- serial line input with `read_line()`
+- serial text output with normal Rune `print` and `println`
+- serial line input with normal Rune `input()` and `read_line()`
 - byte-oriented UART access with `uart_available`, `uart_read_byte`, and `uart_write_byte`
 - board constants and pin/timing helpers
 - Arduino-style `setup()` / `loop()` entrypoints on the Uno target
+
+Recommended usage:
+
+- use `print`, `println`, and `input()` when you want the same high-level syntax as desktop Rune
+- use `uart_*` only when you specifically need byte-level serial control on the board
 
 Current Arduino limitations:
 

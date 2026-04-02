@@ -228,7 +228,8 @@ The current Arduino Uno slice now supports:
 - `main()` firmware entry
 - or Arduino-style `setup()` / `loop()` entrypoints
 - packaged `arduino` stdlib resolution from `stdlib/arduino.rn`
-- serial I/O through `print`, `println`, `read_line`, and UART helpers
+- serial I/O through the normal Rune surface: `print`, `println`, and `input`
+- lower-level serial control through `uart_*` helpers when byte-oriented hardware control is needed
 - pin/timing helpers like `pin_mode`, `digital_write`, `analog_write`, `delay_ms`, `millis`, and board constants
 - real `.hex` generation and flashing with packaged AVR tools
 
@@ -236,17 +237,14 @@ Example:
 
 ```rune
 from arduino import (
-    uart_begin,
-    uart_write,
     led_builtin,
     mode_output,
     pin_mode,
 )
 
 def setup() -> unit:
-    uart_begin(115200)
     pin_mode(led_builtin(), mode_output())
-    uart_write("Rune on Uno!\r\n")
+    println("Rune on Uno!")
 
 def loop() -> unit:
     return
