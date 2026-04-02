@@ -1481,6 +1481,27 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::I32)
                 }
+                "__rune_builtin_system_platform"
+                | "__rune_builtin_system_arch"
+                | "__rune_builtin_system_target"
+                | "__rune_builtin_system_board" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: format!("`{name}` takes no arguments"),
+                            span,
+                        });
+                    }
+                    Ok(Type::String)
+                }
+                "__rune_builtin_system_is_embedded" | "__rune_builtin_system_is_wasm" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: format!("`{name}` takes no arguments"),
+                            span,
+                        });
+                    }
+                    Ok(Type::Bool)
+                }
                 "__rune_builtin_system_exit" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
@@ -2705,6 +2726,12 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_time_sleep_ms" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_pid" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_cpu_count" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_system_platform" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_system_arch" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_system_target" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_system_board" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_system_is_embedded" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_system_is_wasm" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_exit" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_env_exists" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_env_get_i32" => Some(Type::Unknown("builtin".to_string())),

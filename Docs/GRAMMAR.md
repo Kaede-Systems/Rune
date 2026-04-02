@@ -120,6 +120,6 @@ primary         ::= ident | integer | string | "true" | "false" | "(" expr ")"
 - Current struct limitations:
   - struct values must be stored in explicitly typed locals like `let point: Point = ...`
   - struct parameters are supported for user functions in native codegen
-  - struct return values are not yet supported in native codegen
+  - struct and class return values are supported in native, LLVM, and AVR executable builds
   - `impl`, inheritance, traits/ABC, and dynamic dispatch are not implemented yet
 - `raise` and `panic` both exist; `panic` is natively executable, and `raise` has a native runtime path for direct constructor/message forms.

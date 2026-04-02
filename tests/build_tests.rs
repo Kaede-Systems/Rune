@@ -775,6 +775,26 @@ fn builds_arduino_uno_with_for_range_and_sum() {
 }
 
 #[test]
+fn builds_arduino_uno_with_sys_platform_detection() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_sys_demo.rn");
+    let output_path = dir.join("arduino_uno_sys_demo.hex");
+
+    fs::write(
+        &source_path,
+        "from sys import platform, arch, target, board, is_embedded, is_wasm\nfrom arduino import delay_ms\n\n\
+         def setup() -> unit:\n    println(platform())\n    println(arch())\n    println(target())\n    println(board())\n    println(str(is_embedded()))\n    println(str(is_wasm()))\n    return\n\n\
+         def loop() -> unit:\n    delay_ms(1000)\n    return\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("arduino uno sys program should build");
+
+    assert!(output_path.is_file(), "expected HEX output to exist");
+}
+
+#[test]
 fn builds_arduino_uno_with_class_field_access() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_class_fields.rn");

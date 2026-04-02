@@ -350,12 +350,17 @@ impl<'a> Generator<'a> {
                 },
             });
         }
-        let return_ty = self
-            .function_locals
-            .get(&registered_name)
-            .and_then(|locals| locals.get("__return"))
-            .cloned()
-            .unwrap_or_else(|| type_ref_to_ir_type(function.return_type.as_ref()));
+        let return_ty = function
+            .return_type
+            .as_ref()
+            .map(|ty| type_ref_to_ir_type(Some(ty)))
+            .unwrap_or_else(|| {
+                self.function_locals
+                    .get(&registered_name)
+                    .and_then(|locals| locals.get("__return"))
+                    .cloned()
+                    .unwrap_or(IrType::Dynamic)
+            });
         if registered_name == "main" && return_ty == IrType::Dynamic {
             return Err(CodegenFailure {
                 function_name: registered_name.clone(),
@@ -1112,6 +1117,38 @@ impl<'a> FunctionEmitter<'a> {
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
                     return self.emit_logical_expr(out, left, op, right);
                 }
+                if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual)
+                    && self.infer_expr_type(left) == Some(IrType::String)
+                    && self.infer_expr_type(right) == Some(IrType::String)
+                {
+                    self.emit_string_arg(out, left, "rcx", "rdx", "left string operand")?;
+                    out.push_str(&format!(
+                        "    mov QWORD PTR [rbp-{}], rcx\n",
+                        self.scratch_offset
+                    ));
+                    out.push_str(&format!(
+                        "    mov QWORD PTR [rbp-{}], rdx\n",
+                        self.scratch_offset + 8
+                    ));
+                    self.emit_string_arg(out, right, "r8", "r9", "right string operand")?;
+                    out.push_str(&format!(
+                        "    mov rcx, QWORD PTR [rbp-{}]\n",
+                        self.scratch_offset
+                    ));
+                    out.push_str(&format!(
+                        "    mov rdx, QWORD PTR [rbp-{}]\n",
+                        self.scratch_offset + 8
+                    ));
+                    out.push_str("    call rune_rt_string_compare\n");
+                    out.push_str("    cmp eax, 0\n");
+                    match op {
+                        BinaryOp::EqualEqual => out.push_str("    sete al\n"),
+                        BinaryOp::NotEqual => out.push_str("    setne al\n"),
+                        _ => unreachable!(),
+                    }
+                    out.push_str("    movzx rax, al\n");
+                    return Ok(());
+                }
                 if matches!(
                     op,
                     BinaryOp::Add
@@ -1449,6 +1486,50 @@ impl<'a> FunctionEmitter<'a> {
                 });
             }
             out.push_str("    call rune_rt_system_cpu_count\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_system_platform"
+                | "__rune_builtin_system_arch"
+                | "__rune_builtin_system_target"
+                | "__rune_builtin_system_board"
+        ) {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{name}` takes no arguments"),
+                    span,
+                });
+            }
+            let runtime = match name.as_str() {
+                "__rune_builtin_system_platform" => "rune_rt_system_platform",
+                "__rune_builtin_system_arch" => "rune_rt_system_arch",
+                "__rune_builtin_system_target" => "rune_rt_system_target",
+                "__rune_builtin_system_board" => "rune_rt_system_board",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_system_is_embedded" | "__rune_builtin_system_is_wasm"
+        ) {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{name}` takes no arguments"),
+                    span,
+                });
+            }
+            let runtime = if name == "__rune_builtin_system_is_embedded" {
+                "rune_rt_system_is_embedded"
+            } else {
+                "rune_rt_system_is_wasm"
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            out.push_str("    movzx rax, al\n");
             return Ok(());
         }
 
@@ -2900,16 +2981,19 @@ impl<'a> FunctionEmitter<'a> {
             };
             match self.infer_expr_type(value_expr) {
                 Some(IrType::Bool) => {
-                    self.emit_into_reg(out, "ecx", value_expr)?;
+                    self.emit_expr(out, value_expr)?;
+                    out.push_str("    mov ecx, eax\n");
                     out.push_str("    call rune_rt_string_from_bool\n");
                 }
                 Some(IrType::I32) => {
-                    self.emit_into_reg(out, "ecx", value_expr)?;
+                    self.emit_expr(out, value_expr)?;
+                    out.push_str("    mov ecx, eax\n");
                     out.push_str("    movsxd rcx, ecx\n");
                     out.push_str("    call rune_rt_string_from_i64\n");
                 }
                 Some(IrType::I64) => {
-                    self.emit_into_reg(out, "rcx", value_expr)?;
+                    self.emit_expr(out, value_expr)?;
+                    out.push_str("    mov rcx, rax\n");
                     out.push_str("    call rune_rt_string_from_i64\n");
                 }
                 Some(IrType::String) => {
@@ -2990,6 +3074,34 @@ impl<'a> FunctionEmitter<'a> {
                 "__rune_builtin_json_stringify" => "rune_rt_json_stringify",
                 "__rune_builtin_json_kind" => "rune_rt_json_kind",
                 "__rune_builtin_json_to_string" => "rune_rt_json_to_string",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            self.capture_runtime_string_result(out, ptr_reg, len_reg);
+            return Ok(());
+        }
+
+        if let ExprKind::Call { callee, args } = &expr.kind
+            && let ExprKind::Identifier(name) = &callee.kind
+            && matches!(
+                name.as_str(),
+                "__rune_builtin_system_platform"
+                    | "__rune_builtin_system_arch"
+                    | "__rune_builtin_system_target"
+                    | "__rune_builtin_system_board"
+            )
+        {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 0 positional arguments in the native backend"),
+                    span: expr.span,
+                });
+            }
+            let runtime = match name.as_str() {
+                "__rune_builtin_system_platform" => "rune_rt_system_platform",
+                "__rune_builtin_system_arch" => "rune_rt_system_arch",
+                "__rune_builtin_system_target" => "rune_rt_system_target",
+                "__rune_builtin_system_board" => "rune_rt_system_board",
                 _ => unreachable!(),
             };
             out.push_str(&format!("    call {runtime}\n"));
@@ -4192,9 +4304,15 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_json_stringify"
         | "__rune_builtin_json_kind"
         | "__rune_builtin_json_to_string" => Some(IrType::String),
+        "__rune_builtin_system_platform"
+        | "__rune_builtin_system_arch"
+        | "__rune_builtin_system_target"
+        | "__rune_builtin_system_board" => Some(IrType::String),
         "__rune_builtin_json_is_null"
         | "__rune_builtin_json_to_bool"
-        | "__rune_builtin_arduino_digital_read" => Some(IrType::Bool),
+        | "__rune_builtin_arduino_digital_read"
+        | "__rune_builtin_system_is_embedded"
+        | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"

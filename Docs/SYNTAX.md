@@ -84,6 +84,8 @@ Current C FFI import scope:
 - native build paths only
 - currently supported outbound ABI types: `bool`, `i32`, `i64`, `String`, `unit`
 - explicit linker inputs via `rune build --link-lib`, `--link-search`, or `--link-arg`
+- line comments use `#`
+- block comments use `/* ... */`
 - automatic C source compilation for executable builds via `rune build --link-c-source file.c`
 - Rune shared and static library builds now also emit a matching C header next to the library artifact
 - C consumer flow is verified on Windows against the generated header and Rune static libraries
@@ -145,7 +147,7 @@ Current implemented struct rules:
 
 Current struct limitations:
 
-- class return values are not yet supported in native codegen
+- class return values are supported in native, LLVM, and AVR executable builds
 - `impl`, inheritance, traits, and ABCs are not implemented yet
 
 ## Operators

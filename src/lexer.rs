@@ -93,8 +93,93 @@ impl fmt::Display for LexError {
 impl std::error::Error for LexError {}
 
 pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
-    let mut lexer = Lexer::new(source);
+    let stripped = strip_block_comments(source)?;
+    let mut lexer = Lexer::new(&stripped);
     lexer.lex_all()
+}
+
+fn strip_block_comments(source: &str) -> Result<String, LexError> {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut line = 1usize;
+    let mut column = 1usize;
+    let mut comment_start = None;
+    let mut in_string = false;
+    let mut escaping = false;
+
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+
+        if let Some((start_line, start_column)) = comment_start {
+            if ch == '*' && next == Some('/') {
+                chars.next();
+                column += 2;
+                comment_start = None;
+                continue;
+            }
+            if ch == '\n' {
+                out.push('\n');
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+            let _ = (start_line, start_column);
+            continue;
+        }
+
+        if in_string {
+            out.push(ch);
+            if escaping {
+                escaping = false;
+            } else if ch == '\\' {
+                escaping = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            if ch == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            column += 1;
+            continue;
+        }
+
+        if ch == '/' && next == Some('*') {
+            chars.next();
+            comment_start = Some((line, column));
+            column += 2;
+            continue;
+        }
+
+        out.push(ch);
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+
+    if let Some((start_line, start_column)) = comment_start {
+        return Err(LexError {
+            message: "unterminated block comment".to_string(),
+            span: Span {
+                line: start_line,
+                column: start_column,
+            },
+        });
+    }
+
+    Ok(out)
 }
 
 struct Lexer<'a> {

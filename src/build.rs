@@ -1164,6 +1164,24 @@ fn emit_arduino_uno_stmt_expr(
             };
             emit_arduino_uno_print_expr(out, value, true, scope, functions, structs, indent)
         }
+        "exit" => {
+            let [CallArg::Positional(code_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`exit` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let code = emit_arduino_uno_expr(scope, functions, structs, code_expr)?;
+            if code.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer exit code for `exit`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!("{prefix}(void)({});\n", code.0));
+            out.push_str(&format!("{prefix}for (;;) {{}}\n"));
+            Ok(())
+        }
         "pin_mode" => {
             let [CallArg::Positional(pin_expr), CallArg::Positional(mode_expr)] = args.as_slice() else {
                 return Err(CodegenError {
@@ -1719,6 +1737,24 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("((int64_t)micros())".into(), ArduinoUnoType::I64))
                 }
+                "pid" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`pid` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)1)".into(), ArduinoUnoType::I64))
+                }
+                "cpu_count" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`cpu_count` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)1)".into(), ArduinoUnoType::I64))
+                }
                 "input" | "read_line" => {
                     if !args.is_empty() {
                         return Err(CodegenError {
@@ -1922,8 +1958,65 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("((int64_t)rune_analog_ref_external())".into(), ArduinoUnoType::I64))
                 }
+                "platform" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`platform` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("\"embedded\"".into(), ArduinoUnoType::String))
+                }
+                "arch" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`arch` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("\"avr\"".into(), ArduinoUnoType::String))
+                }
+                "target" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`target` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((
+                        "\"avr-atmega328p-arduino-uno\"".into(),
+                        ArduinoUnoType::String,
+                    ))
+                }
+                "board" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`board` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("\"arduino-uno\"".into(), ArduinoUnoType::String))
+                }
+                "is_embedded" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`is_embedded` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("true".into(), ArduinoUnoType::Bool))
+                }
+                "is_wasm" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`is_wasm` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("false".into(), ArduinoUnoType::Bool))
+                }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `millis`, `micros`, `input`, `read_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, and `analog_ref_external` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `millis`, `micros`, `input`, `read_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -2529,6 +2622,15 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_arduino_uart_write_byte" => "uart_write_byte",
         "__rune_builtin_arduino_uart_write" => "uart_write",
         "__rune_builtin_sum_range" => "sum_range",
+        "__rune_builtin_system_pid" => "pid",
+        "__rune_builtin_system_cpu_count" => "cpu_count",
+        "__rune_builtin_system_exit" => "exit",
+        "__rune_builtin_system_platform" => "platform",
+        "__rune_builtin_system_arch" => "arch",
+        "__rune_builtin_system_target" => "target",
+        "__rune_builtin_system_board" => "board",
+        "__rune_builtin_system_is_embedded" => "is_embedded",
+        "__rune_builtin_system_is_wasm" => "is_wasm",
         _ => name,
     }
 }
@@ -2573,6 +2675,15 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "analog_ref_default"
             | "analog_ref_internal"
             | "analog_ref_external"
+            | "pid"
+            | "cpu_count"
+            | "exit"
+            | "platform"
+            | "arch"
+            | "target"
+            | "board"
+            | "is_embedded"
+            | "is_wasm"
     )
 }
 
@@ -3376,6 +3487,24 @@ function createHost(options = {{}}) {{
       rune_rt_system_pid() {{
         return isNode ? (process.pid | 0) : 0;
       }},
+      rune_rt_system_platform() {{
+        return allocString("wasm");
+      }},
+      rune_rt_system_arch() {{
+        return allocString("wasm32");
+      }},
+      rune_rt_system_target() {{
+        return allocString("wasm32-unknown-unknown");
+      }},
+      rune_rt_system_board() {{
+        return allocString("wasm");
+      }},
+      rune_rt_system_is_embedded() {{
+        return false;
+      }},
+      rune_rt_system_is_wasm() {{
+        return true;
+      }},
       rune_rt_system_cpu_count() {{
         if (isNode && os) {{
           if (typeof os.availableParallelism === "function") {{
@@ -3814,6 +3943,84 @@ char* rune_rt_string_from_i64(int64_t value) {
 }
 char* rune_rt_string_from_bool(_Bool value) {
     return rune_rt_store_copied_string(value ? "true" : "false");
+}
+char* rune_rt_system_platform(void) {
+#if defined(_WIN32)
+    return rune_rt_store_copied_string("windows");
+#elif defined(__APPLE__)
+    return rune_rt_store_copied_string("macos");
+#elif defined(__wasi__)
+    return rune_rt_store_copied_string("wasi");
+#elif defined(__linux__)
+    return rune_rt_store_copied_string("linux");
+#elif defined(__AVR__)
+    return rune_rt_store_copied_string("embedded");
+#else
+    return rune_rt_store_copied_string("unknown");
+#endif
+}
+char* rune_rt_system_arch(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+    return rune_rt_store_copied_string("x86_64");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return rune_rt_store_copied_string("aarch64");
+#elif defined(__wasm32__)
+    return rune_rt_store_copied_string("wasm32");
+#elif defined(__AVR__)
+    return rune_rt_store_copied_string("avr");
+#elif defined(__riscv) && (__riscv_xlen == 32)
+    return rune_rt_store_copied_string("riscv32");
+#elif defined(__arm__) || defined(_M_ARM)
+    return rune_rt_store_copied_string("arm");
+#else
+    return rune_rt_store_copied_string("unknown");
+#endif
+}
+char* rune_rt_system_target(void) {
+#if defined(__AVR_ATmega328P__)
+    return rune_rt_store_copied_string("avr-atmega328p-arduino-uno");
+#elif defined(__wasi__)
+    return rune_rt_store_copied_string("wasm32-wasip1");
+#elif defined(__wasm32__)
+    return rune_rt_store_copied_string("wasm32-unknown-unknown");
+#elif defined(_WIN32) && (defined(__aarch64__) || defined(_M_ARM64))
+    return rune_rt_store_copied_string("aarch64-pc-windows-gnu");
+#elif defined(_WIN32)
+    return rune_rt_store_copied_string("x86_64-pc-windows-gnu");
+#elif defined(__APPLE__) && defined(__aarch64__)
+    return rune_rt_store_copied_string("aarch64-apple-darwin");
+#elif defined(__APPLE__)
+    return rune_rt_store_copied_string("x86_64-apple-darwin");
+#elif defined(__linux__) && defined(__aarch64__)
+    return rune_rt_store_copied_string("aarch64-unknown-linux-gnu");
+#elif defined(__linux__) && defined(__x86_64__)
+    return rune_rt_store_copied_string("x86_64-unknown-linux-gnu");
+#else
+    return rune_rt_store_copied_string("unknown");
+#endif
+}
+char* rune_rt_system_board(void) {
+#if defined(__AVR_ATmega328P__)
+    return rune_rt_store_copied_string("arduino-uno");
+#elif defined(__wasi__) || defined(__wasm32__)
+    return rune_rt_store_copied_string("wasm");
+#else
+    return rune_rt_store_copied_string("host");
+#endif
+}
+_Bool rune_rt_system_is_embedded(void) {
+#if defined(__AVR__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+_Bool rune_rt_system_is_wasm(void) {
+#if defined(__wasm32__)
+    return 1;
+#else
+    return 0;
+#endif
 }
 int64_t rune_rt_string_to_i64(const char* ptr, int64_t len) {
     char* text = (char*)malloc((size_t)len + 1);
@@ -4473,6 +4680,74 @@ fn rune_rt_store_string(value: String) -> *const u8 {
     })
 }
 
+fn rune_rt_host_platform_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "wasi") {
+        "wasi"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_arch = "avr") {
+        "embedded"
+    } else {
+        "unknown"
+    }
+}
+
+fn rune_rt_host_arch_name() -> &'static str {
+    if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else if cfg!(target_arch = "wasm32") {
+        "wasm32"
+    } else if cfg!(target_arch = "avr") {
+        "avr"
+    } else if cfg!(target_arch = "riscv32") {
+        "riscv32"
+    } else if cfg!(target_arch = "arm") {
+        "arm"
+    } else {
+        "unknown"
+    }
+}
+
+fn rune_rt_host_target_name() -> &'static str {
+    if cfg!(all(target_arch = "avr")) {
+        "avr-atmega328p-arduino-uno"
+    } else if cfg!(target_os = "wasi") {
+        "wasm32-wasip1"
+    } else if cfg!(all(target_arch = "wasm32")) {
+        "wasm32-unknown-unknown"
+    } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
+        "aarch64-pc-windows-gnu"
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "x86_64-pc-windows-gnu"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        "aarch64-unknown-linux-gnu"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "x86_64-unknown-linux-gnu"
+    } else {
+        "unknown"
+    }
+}
+
+fn rune_rt_host_board_name() -> &'static str {
+    if cfg!(target_arch = "avr") {
+        "arduino-uno"
+    } else if cfg!(target_arch = "wasm32") {
+        "wasm"
+    } else {
+        "host"
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_print_i64(value: i64) {
     print!("{value}");
@@ -4545,6 +4820,36 @@ pub extern "C" fn rune_rt_input_line() -> *const u8 {
         line.pop();
     }
     rune_rt_store_string(line)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_system_platform() -> *const u8 {
+    rune_rt_store_string(rune_rt_host_platform_name().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_system_arch() -> *const u8 {
+    rune_rt_store_string(rune_rt_host_arch_name().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_system_target() -> *const u8 {
+    rune_rt_store_string(rune_rt_host_target_name().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_system_board() -> *const u8 {
+    rune_rt_store_string(rune_rt_host_board_name().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_system_is_embedded() -> bool {
+    cfg!(target_arch = "avr")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_system_is_wasm() -> bool {
+    cfg!(target_arch = "wasm32")
 }
 
 #[unsafe(no_mangle)]

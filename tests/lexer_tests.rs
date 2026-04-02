@@ -88,3 +88,20 @@ fn skips_comments() {
     assert!(tokens.contains(&TokenKind::Def));
     assert!(tokens.contains(&TokenKind::Return));
 }
+
+#[test]
+fn skips_block_comments() {
+    let tokens = kinds(
+        "/* file block\ncomment */\ndef main() -> i32:\n    let value = 1 /* inline */ + 2\n    return value\n",
+    );
+    assert!(tokens.contains(&TokenKind::Def));
+    assert!(tokens.contains(&TokenKind::Return));
+    assert!(tokens.contains(&TokenKind::Plus));
+}
+
+#[test]
+fn rejects_unterminated_block_comment() {
+    let error = lex("def main() -> i32:\n    /* never ends\n    return 0\n")
+        .expect_err("unterminated block comments must fail");
+    assert!(error.message.contains("unterminated block comment"));
+}

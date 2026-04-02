@@ -1285,6 +1285,43 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_system_platform"
+            | "__rune_builtin_system_arch"
+            | "__rune_builtin_system_target"
+            | "__rune_builtin_system_board" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                let runtime = match callee {
+                    "__rune_builtin_system_platform" => "rune_rt_system_platform",
+                    "__rune_builtin_system_arch" => "rune_rt_system_arch",
+                    "__rune_builtin_system_target" => "rune_rt_system_target",
+                    "__rune_builtin_system_board" => "rune_rt_system_board",
+                    _ => unreachable!(),
+                };
+                self.declared_runtime
+                    .insert(format!("declare ptr @{runtime}()\n"));
+                out.push_str(&format!("  {reg} = call ptr @{runtime}()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_system_is_embedded" | "__rune_builtin_system_is_wasm" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                let runtime = if callee == "__rune_builtin_system_is_embedded" {
+                    "rune_rt_system_is_embedded"
+                } else {
+                    "rune_rt_system_is_wasm"
+                };
+                self.declared_runtime
+                    .insert(format!("declare i1 @{runtime}()\n"));
+                out.push_str(&format!("  {reg} = call i1 @{runtime}()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_system_exit" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let code = self.resolve_value(&args[0].value, &IrType::I32, out)?;
@@ -2808,10 +2845,16 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_json_parse" => Some(IrType::Json),
         "__rune_builtin_json_stringify"
         | "__rune_builtin_json_kind"
-        | "__rune_builtin_json_to_string" => Some(IrType::String),
+        | "__rune_builtin_json_to_string"
+        | "__rune_builtin_system_platform"
+        | "__rune_builtin_system_arch"
+        | "__rune_builtin_system_target"
+        | "__rune_builtin_system_board" => Some(IrType::String),
         "__rune_builtin_json_is_null"
         | "__rune_builtin_json_to_bool"
-        | "__rune_builtin_arduino_digital_read" => Some(IrType::Bool),
+        | "__rune_builtin_arduino_digital_read"
+        | "__rune_builtin_system_is_embedded"
+        | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"
@@ -2887,9 +2930,7 @@ fn type_ref_to_ir(ty: &TypeRef) -> Result<IrType, LlvmIrError> {
         "unit" => Ok(IrType::Unit),
         "dynamic" => Ok(IrType::Dynamic),
         "String" | "str" => Ok(IrType::String),
-        other => Err(LlvmIrError {
-            message: format!("type `{other}` is not yet supported by the current LLVM IR backend"),
-        }),
+        other => Ok(IrType::Struct(other.to_string())),
     }
 }
 

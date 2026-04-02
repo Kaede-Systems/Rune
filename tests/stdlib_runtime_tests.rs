@@ -104,6 +104,33 @@ def main() -> i32:
 }
 
 #[test]
+fn builds_and_runs_stdlib_sys_platform_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("stdlib_sys_platform.rn");
+    let exe_path = dir.join("stdlib_sys_platform.exe");
+
+    fs::write(
+        &source_path,
+        "from sys import platform, arch, target, board, is_embedded, is_wasm\n\n\
+         def main() -> i32:\n    println(platform())\n    println(arch())\n    println(target())\n    println(board())\n    println(str(is_embedded()))\n    println(str(is_wasm()))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("sys program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert!(stdout.contains("windows\n") || stdout.contains("linux\n") || stdout.contains("macos\n") || stdout.contains("wasi\n"));
+    assert!(stdout.contains("x86_64\n") || stdout.contains("aarch64\n"));
+    assert!(stdout.contains("host\n"));
+    assert!(stdout.contains("false\n"));
+}
+
+#[test]
 fn builds_and_runs_stdlib_terminal_and_audio_program() {
     let dir = temp_dir();
     let source_path = dir.join("stdlib_terminal_audio.rn");

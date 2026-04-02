@@ -313,6 +313,31 @@ fn builds_and_runs_class_method_program() {
 }
 
 #[test]
+fn builds_and_runs_class_return_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_return_demo.rn");
+    let exe_path = dir.join("class_return_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Point:\n    x: i32\n    y: i32\n\n\
+         def make_point() -> Point:\n    return Point(x=20, y=22)\n\n\
+         def main() -> i32:\n    let point: Point = make_point()\n    println(point.x)\n    println(point.y)\n    println(point.x + point.y)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("class return program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "20\n22\n42\n");
+}
+
+#[test]
 fn builds_and_runs_fs_terminal_and_audio_program() {
     let dir = temp_dir();
     let source_path = dir.join("fs_terminal_audio_demo.rn");

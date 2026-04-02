@@ -150,13 +150,21 @@ Exports:
 ## `system`
 
 ```rune
-from system import pid, cpu_count, exit, quit, exit_success, exit_failure
+from system import pid, cpu_count, platform, arch, target, board, is_embedded, is_wasm, exit, quit, exit_success, exit_failure
+
+from sys import platform, arch, target, board, is_embedded, is_wasm
 ```
 
 Exports:
 
 - `pid() -> i32`
 - `cpu_count() -> i32`
+- `platform() -> String`
+- `arch() -> String`
+- `target() -> String`
+- `board() -> String`
+- `is_embedded() -> bool`
+- `is_wasm() -> bool`
 - `exit(code: i32) -> unit`
 - `quit(code: i32) -> unit`
 - `exit_success() -> unit`
