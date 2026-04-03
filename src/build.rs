@@ -5122,6 +5122,12 @@ function createHost(options = {{}}) {{
       rune_rt_network_tcp_reply_once(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
         throw new Error("Rune network server builtins are not supported for wasm32-unknown-unknown");
       }},
+      rune_rt_network_last_error_code() {{
+        return 0;
+      }},
+      rune_rt_network_last_error_message() {{
+        return allocString("");
+      }},
       rune_rt_network_tcp_request(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
         throw new Error("Rune network request builtins are not supported for wasm32-unknown-unknown");
       }},
@@ -6254,7 +6260,7 @@ use std::process::Command;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::thread_local;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -6270,6 +6276,19 @@ thread_local! {
 static RUNE_ARDUINO_START: OnceLock<Instant> = OnceLock::new();
 static RUNE_ARDUINO_RANDOM_STATE: AtomicU64 = AtomicU64::new(0);
 static RUNE_HOST_SERIAL: OnceLock<std::sync::Mutex<Option<std::fs::File>>> = OnceLock::new();
+static RUNE_NETWORK_ERROR: OnceLock<Mutex<(i32, String)>> = OnceLock::new();
+
+const RUNE_NETWORK_OK: i32 = 0;
+const RUNE_NETWORK_ERR_INVALID_ARGUMENT: i32 = 1;
+const RUNE_NETWORK_ERR_UNSUPPORTED_TARGET: i32 = 2;
+const RUNE_NETWORK_ERR_ADDRESS_RESOLUTION: i32 = 3;
+const RUNE_NETWORK_ERR_BIND: i32 = 4;
+const RUNE_NETWORK_ERR_CONNECT: i32 = 5;
+const RUNE_NETWORK_ERR_ACCEPT_TIMEOUT: i32 = 6;
+const RUNE_NETWORK_ERR_ACCEPT: i32 = 7;
+const RUNE_NETWORK_ERR_READ: i32 = 8;
+const RUNE_NETWORK_ERR_WRITE: i32 = 9;
+const RUNE_NETWORK_ERR_SOCKET_OPTION: i32 = 10;
 
 fn rune_rt_store_string(value: String) -> *const u8 {
     let len = value.len();
@@ -6287,6 +6306,26 @@ fn rune_rt_store_string(value: String) -> *const u8 {
 
 fn rune_rt_serial_handle() -> &'static std::sync::Mutex<Option<std::fs::File>> {
     RUNE_HOST_SERIAL.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn rune_rt_network_error_state() -> &'static Mutex<(i32, String)> {
+    RUNE_NETWORK_ERROR.get_or_init(|| Mutex::new((RUNE_NETWORK_OK, String::new())))
+}
+
+fn rune_rt_network_clear_error() {
+    let mut state = rune_rt_network_error_state()
+        .lock()
+        .expect("network error mutex poisoned");
+    state.0 = RUNE_NETWORK_OK;
+    state.1.clear();
+}
+
+fn rune_rt_network_set_error(code: i32, message: impl Into<String>) {
+    let mut state = rune_rt_network_error_state()
+        .lock()
+        .expect("network error mutex poisoned");
+    state.0 = code;
+    state.1 = message.into();
 }
 
 fn rune_rt_configure_serial_port(port_name: &str, baud: i64) -> bool {
@@ -8020,15 +8059,41 @@ pub extern "C" fn rune_rt_env_arg(index: i32) -> *const u8 {
     rune_rt_store_string(value)
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_last_error_code() -> i32 {
+    rune_rt_network_error_state()
+        .lock()
+        .expect("network error mutex poisoned")
+        .0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_last_error_message() -> *const u8 {
+    let message = rune_rt_network_error_state()
+        .lock()
+        .expect("network error mutex poisoned")
+        .1
+        .clone();
+    rune_rt_store_string(message)
+}
+
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_connect(_ptr: *const u8, _len: i64, _port: i32) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     false
 }
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_listen(_ptr: *const u8, _len: i64, _port: i32) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     false
 }
 
@@ -8041,6 +8106,10 @@ pub extern "C" fn rune_rt_network_tcp_send(
     _data_ptr: *const u8,
     _data_len: i64,
 ) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     false
 }
 
@@ -8052,6 +8121,10 @@ pub extern "C" fn rune_rt_network_tcp_recv(
     _port: i32,
     _max_bytes: i32,
 ) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8064,6 +8137,10 @@ pub extern "C" fn rune_rt_network_tcp_recv_timeout(
     _max_bytes: i32,
     _timeout_ms: i32,
 ) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8076,6 +8153,10 @@ pub extern "C" fn rune_rt_network_tcp_accept_once(
     _max_bytes: i32,
     _timeout_ms: i32,
 ) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8090,6 +8171,10 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
     _max_bytes: i32,
     _timeout_ms: i32,
 ) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8104,12 +8189,20 @@ pub extern "C" fn rune_rt_network_tcp_request(
     _max_bytes: i32,
     _timeout_ms: i32,
 ) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     rune_rt_store_string(String::new())
 }
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_connect_timeout(_ptr: *const u8, _len: i64, _port: i32, _timeout_ms: i32) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     false
 }
 
@@ -8123,11 +8216,27 @@ pub extern "C" fn rune_rt_network_tcp_connect(ptr: *const u8, len: i64, port: i3
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_listen(ptr: *const u8, len: i64, port: i32) -> bool {
     if port < 0 || port > u16::MAX as i32 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP port `{port}`"),
+        );
         return false;
     }
     let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let host = std::str::from_utf8(host).expect("TCP listen host must be valid UTF-8");
-    TcpListener::bind((host, port as u16)).is_ok()
+    match TcpListener::bind((host, port as u16)) {
+        Ok(_) => {
+            rune_rt_network_clear_error();
+            true
+        }
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to listen on {host}:{port}: {error}"),
+            );
+            false
+        }
+    }
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -8140,6 +8249,10 @@ pub extern "C" fn rune_rt_network_tcp_send(
     data_len: i64,
 ) -> bool {
     if port < 0 || port > u16::MAX as i32 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP port `{port}`"),
+        );
         return false;
     }
     let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
@@ -8147,8 +8260,26 @@ pub extern "C" fn rune_rt_network_tcp_send(
     let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
     let data = std::str::from_utf8(data).expect("TCP send data must be valid UTF-8");
     match TcpStream::connect((host, port as u16)) {
-        Ok(mut stream) => std::io::Write::write_all(&mut stream, data.as_bytes()).is_ok(),
-        Err(_) => false,
+        Ok(mut stream) => match std::io::Write::write_all(&mut stream, data.as_bytes()) {
+            Ok(_) => {
+                rune_rt_network_clear_error();
+                true
+            }
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_WRITE,
+                    format!("failed to send TCP payload to {host}:{port}: {error}"),
+                );
+                false
+            }
+        },
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_CONNECT,
+                format!("failed to connect to {host}:{port}: {error}"),
+            );
+            false
+        }
     }
 }
 
@@ -8173,6 +8304,10 @@ pub extern "C" fn rune_rt_network_tcp_recv_timeout(
     timeout_ms: i32,
 ) -> *const u8 {
     if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_recv_timeout requires non-negative port, max_bytes, and timeout_ms",
+        );
         return rune_rt_store_string(String::new());
     }
     let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
@@ -8180,22 +8315,48 @@ pub extern "C" fn rune_rt_network_tcp_recv_timeout(
     let address = format!("{host}:{}", port as u16);
     let resolved = match address.to_socket_addrs() {
         Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
-        Err(_) => return rune_rt_store_string(String::new()),
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_ADDRESS_RESOLUTION,
+                format!("failed to resolve {address}: {error}"),
+            );
+            return rune_rt_store_string(String::new());
+        }
     };
     for addr in resolved {
-        if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)) {
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+        if let Ok(mut stream) =
+            TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64))
+        {
+            if let Err(error) = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+            {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_SOCKET_OPTION,
+                    format!("failed to set TCP read timeout for {address}: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
             let mut buffer = vec![0u8; max_bytes as usize];
             match std::io::Read::read(&mut stream, &mut buffer) {
                 Ok(read) => {
                     buffer.truncate(read);
                     let text = String::from_utf8_lossy(&buffer).to_string();
+                    rune_rt_network_clear_error();
                     return rune_rt_store_string(text);
                 }
-                Err(_) => return rune_rt_store_string(String::new()),
+                Err(error) => {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_READ,
+                        format!("failed to read TCP payload from {address}: {error}"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
             }
         }
     }
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_CONNECT,
+        format!("failed to connect to {address} within {timeout_ms}ms"),
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8209,15 +8370,29 @@ pub extern "C" fn rune_rt_network_tcp_accept_once(
     timeout_ms: i32,
 ) -> *const u8 {
     if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_accept_once requires non-negative port, max_bytes, and timeout_ms",
+        );
         return rune_rt_store_string(String::new());
     }
     let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let host = std::str::from_utf8(host).expect("TCP accept host must be valid UTF-8");
     let listener = match TcpListener::bind((host, port as u16)) {
         Ok(listener) => listener,
-        Err(_) => return rune_rt_store_string(String::new()),
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to bind TCP listener on {host}:{port}: {error}"),
+            );
+            return rune_rt_store_string(String::new());
+        }
     };
     if listener.set_nonblocking(true).is_err() {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_SOCKET_OPTION,
+            format!("failed to set TCP listener on {host}:{port} nonblocking"),
+        );
         return rune_rt_store_string(String::new());
     }
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
@@ -8229,18 +8404,35 @@ pub extern "C" fn rune_rt_network_tcp_accept_once(
                 return match std::io::Read::read(&mut stream, &mut buffer) {
                     Ok(read) => {
                         buffer.truncate(read);
+                        rune_rt_network_clear_error();
                         rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
                     }
-                    Err(_) => rune_rt_store_string(String::new()),
+                    Err(error) => {
+                        rune_rt_network_set_error(
+                            RUNE_NETWORK_ERR_READ,
+                            format!("failed to read accepted TCP payload on {host}:{port}: {error}"),
+                        );
+                        rune_rt_store_string(String::new())
+                    }
                 };
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if std::time::Instant::now() >= deadline {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_ACCEPT_TIMEOUT,
+                        format!("timed out waiting for TCP client on {host}:{port}"),
+                    );
                     return rune_rt_store_string(String::new());
                 }
                 std::thread::sleep(Duration::from_millis(5));
             }
-            Err(_) => return rune_rt_store_string(String::new()),
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_ACCEPT,
+                    format!("failed to accept TCP client on {host}:{port}: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
         }
     }
 }
@@ -8257,6 +8449,10 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
     timeout_ms: i32,
 ) -> *const u8 {
     if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_reply_once requires non-negative port, max_bytes, and timeout_ms",
+        );
         return rune_rt_store_string(String::new());
     }
     let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
@@ -8265,9 +8461,19 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
     let data = std::str::from_utf8(data).expect("TCP reply data must be valid UTF-8");
     let listener = match TcpListener::bind((host, port as u16)) {
         Ok(listener) => listener,
-        Err(_) => return rune_rt_store_string(String::new()),
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to bind TCP reply listener on {host}:{port}: {error}"),
+            );
+            return rune_rt_store_string(String::new());
+        }
     };
     if listener.set_nonblocking(true).is_err() {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_SOCKET_OPTION,
+            format!("failed to set TCP reply listener on {host}:{port} nonblocking"),
+        );
         return rune_rt_store_string(String::new());
     }
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
@@ -8281,20 +8487,41 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
                         buffer.truncate(read);
                         String::from_utf8_lossy(&buffer).to_string()
                     }
-                    Err(_) => return rune_rt_store_string(String::new()),
+                    Err(error) => {
+                        rune_rt_network_set_error(
+                            RUNE_NETWORK_ERR_READ,
+                            format!("failed to read TCP request on {host}:{port}: {error}"),
+                        );
+                        return rune_rt_store_string(String::new());
+                    }
                 };
-                if std::io::Write::write_all(&mut stream, data.as_bytes()).is_err() {
+                if let Err(error) = std::io::Write::write_all(&mut stream, data.as_bytes()) {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_WRITE,
+                        format!("failed to write TCP reply on {host}:{port}: {error}"),
+                    );
                     return rune_rt_store_string(String::new());
                 }
+                rune_rt_network_clear_error();
                 return rune_rt_store_string(request);
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if std::time::Instant::now() >= deadline {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_ACCEPT_TIMEOUT,
+                        format!("timed out waiting for TCP client on {host}:{port}"),
+                    );
                     return rune_rt_store_string(String::new());
                 }
                 std::thread::sleep(Duration::from_millis(5));
             }
-            Err(_) => return rune_rt_store_string(String::new()),
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_ACCEPT,
+                    format!("failed to accept TCP client on {host}:{port}: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
         }
     }
 }
@@ -8311,6 +8538,10 @@ pub extern "C" fn rune_rt_network_tcp_request(
     timeout_ms: i32,
 ) -> *const u8 {
     if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_request requires non-negative port, max_bytes, and timeout_ms",
+        );
         return rune_rt_store_string(String::new());
     }
     let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
@@ -8320,12 +8551,31 @@ pub extern "C" fn rune_rt_network_tcp_request(
     let address = format!("{host}:{}", port as u16);
     let resolved = match address.to_socket_addrs() {
         Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
-        Err(_) => return rune_rt_store_string(String::new()),
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_ADDRESS_RESOLUTION,
+                format!("failed to resolve {address}: {error}"),
+            );
+            return rune_rt_store_string(String::new());
+        }
     };
     for addr in resolved {
-        if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)) {
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
-            if std::io::Write::write_all(&mut stream, data.as_bytes()).is_err() {
+        if let Ok(mut stream) =
+            TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64))
+        {
+            if let Err(error) = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+            {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_SOCKET_OPTION,
+                    format!("failed to set TCP read timeout for {address}: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
+            if let Err(error) = std::io::Write::write_all(&mut stream, data.as_bytes()) {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_WRITE,
+                    format!("failed to write TCP request to {address}: {error}"),
+                );
                 return rune_rt_store_string(String::new());
             }
             let _ = std::net::Shutdown::Write;
@@ -8335,12 +8585,23 @@ pub extern "C" fn rune_rt_network_tcp_request(
                 Ok(read) => {
                     buffer.truncate(read);
                     let text = String::from_utf8_lossy(&buffer).to_string();
+                    rune_rt_network_clear_error();
                     return rune_rt_store_string(text);
                 }
-                Err(_) => return rune_rt_store_string(String::new()),
+                Err(error) => {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_READ,
+                        format!("failed to read TCP response from {address}: {error}"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
             }
         }
     }
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_CONNECT,
+        format!("failed to connect to {address} within {timeout_ms}ms"),
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8348,9 +8609,17 @@ pub extern "C" fn rune_rt_network_tcp_request(
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_connect_timeout(ptr: *const u8, len: i64, port: i32, timeout_ms: i32) -> bool {
     if port < 0 || port > u16::MAX as i32 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP port `{port}`"),
+        );
         return false;
     }
     if timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP timeout `{timeout_ms}`"),
+        );
         return false;
     }
     let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
@@ -8358,16 +8627,35 @@ pub extern "C" fn rune_rt_network_tcp_connect_timeout(ptr: *const u8, len: i64, 
     let address = format!("{host}:{}", port as u16);
     let resolved = match address.to_socket_addrs() {
         Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
-        Err(_) => return false,
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_ADDRESS_RESOLUTION,
+                format!("failed to resolve {address}: {error}"),
+            );
+            return false;
+        }
     };
-    resolved.into_iter().any(|addr| {
+    if resolved.into_iter().any(|addr| {
         TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)).is_ok()
-    })
+    }) {
+        rune_rt_network_clear_error();
+        true
+    } else {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_CONNECT,
+            format!("failed to connect to {address} within {timeout_ms}ms"),
+        );
+        false
+    }
 }
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_udp_bind(_ptr: *const u8, _len: i64, _port: i32) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     false
 }
 
@@ -8375,11 +8663,27 @@ pub extern "C" fn rune_rt_network_udp_bind(_ptr: *const u8, _len: i64, _port: i3
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_udp_bind(ptr: *const u8, len: i64, port: i32) -> bool {
     if port < 0 || port > u16::MAX as i32 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid UDP port `{port}`"),
+        );
         return false;
     }
     let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let host = std::str::from_utf8(host).expect("UDP bind host must be valid UTF-8");
-    UdpSocket::bind((host, port as u16)).is_ok()
+    match UdpSocket::bind((host, port as u16)) {
+        Ok(_) => {
+            rune_rt_network_clear_error();
+            true
+        }
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to bind UDP socket on {host}:{port}: {error}"),
+            );
+            false
+        }
+    }
 }
 
 #[cfg(target_os = "wasi")]
@@ -8391,6 +8695,10 @@ pub extern "C" fn rune_rt_network_udp_send(
     _data_ptr: *const u8,
     _data_len: i64,
 ) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     false
 }
 
@@ -8403,6 +8711,10 @@ pub extern "C" fn rune_rt_network_udp_recv(
     _max_bytes: i32,
     _timeout_ms: i32,
 ) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
     rune_rt_store_string(String::new())
 }
 
@@ -8416,6 +8728,10 @@ pub extern "C" fn rune_rt_network_udp_send(
     data_len: i64,
 ) -> bool {
     if port < 0 || port > u16::MAX as i32 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid UDP port `{port}`"),
+        );
         return false;
     }
     let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
@@ -8423,8 +8739,26 @@ pub extern "C" fn rune_rt_network_udp_send(
     let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
     let data = std::str::from_utf8(data).expect("UDP send data must be valid UTF-8");
     match UdpSocket::bind(("0.0.0.0", 0)) {
-        Ok(socket) => socket.send_to(data.as_bytes(), (host, port as u16)).is_ok(),
-        Err(_) => false,
+        Ok(socket) => match socket.send_to(data.as_bytes(), (host, port as u16)) {
+            Ok(_) => {
+                rune_rt_network_clear_error();
+                true
+            }
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_WRITE,
+                    format!("failed to send UDP payload to {host}:{port}: {error}"),
+                );
+                false
+            }
+        },
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to allocate UDP socket: {error}"),
+            );
+            false
+        }
     }
 }
 
@@ -8438,23 +8772,46 @@ pub extern "C" fn rune_rt_network_udp_recv(
     timeout_ms: i32,
 ) -> *const u8 {
     if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "udp_recv requires non-negative port, max_bytes, and timeout_ms",
+        );
         return rune_rt_store_string(String::new());
     }
     let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let host = std::str::from_utf8(host).expect("UDP recv host must be valid UTF-8");
     match UdpSocket::bind((host, port as u16)) {
         Ok(socket) => {
-            let _ = socket.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+            if let Err(error) = socket.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64))) {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_SOCKET_OPTION,
+                    format!("failed to set UDP read timeout for {host}:{port}: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
             let mut buffer = vec![0u8; max_bytes as usize];
             match socket.recv_from(&mut buffer) {
                 Ok((read, _)) => {
                     buffer.truncate(read);
+                    rune_rt_network_clear_error();
                     rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
                 }
-                Err(_) => rune_rt_store_string(String::new()),
+                Err(error) => {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_READ,
+                        format!("failed to receive UDP payload on {host}:{port}: {error}"),
+                    );
+                    rune_rt_store_string(String::new())
+                }
             }
         }
-        Err(_) => rune_rt_store_string(String::new()),
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to bind UDP socket on {host}:{port}: {error}"),
+            );
+            rune_rt_store_string(String::new())
+        }
     }
 }
 

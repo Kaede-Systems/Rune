@@ -2042,6 +2042,28 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
                     Ok(Type::String)
                 }
+                "__rune_builtin_network_last_error_code" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_network_last_error_code` expects 0 arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::I32)
+                }
+                "__rune_builtin_network_last_error_message" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_network_last_error_message` expects 0 arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::String)
+                }
                 "__rune_builtin_network_tcp_reply_once" => {
                     if args.len() != 5 {
                         return Err(SemanticError {
@@ -3297,6 +3319,10 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_network_tcp_recv_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_accept_once" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_reply_once" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_last_error_code" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_last_error_message" => {
+            Some(Type::Unknown("builtin".to_string()))
+        }
         "__rune_builtin_network_tcp_request" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_bind" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_send" => Some(Type::Unknown("builtin".to_string())),

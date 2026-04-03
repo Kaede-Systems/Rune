@@ -254,6 +254,22 @@ Do not leave it in a mixed state where the repository presentation implies a nat
 
 If promotion is not complete, keep the module in its honest current form until the full built-in version is ready.
 
+## Runtime Language Policy
+
+Core runtime and stdlib behavior must not depend on ad hoc secondary language hosts when the feature is claimed as part of Rune's real implementation.
+
+Rules:
+
+- do not implement core stdlib modules such as `network`, `fs`, `terminal`, `env`, `sys`, `time`, `gpio`, or `serial` by delegating their real behavior to Node.js
+- do not use JavaScript or Node-based fallback hosts to claim platform support for a feature that is supposed to be implemented natively in Rune's compiler/runtime
+- when a platform feature is implemented, it must be implemented through Rust/runtime/compiler code or through honest target-native libraries and toolchains
+- if a target cannot support a feature honestly yet, keep it out of the claimed scope instead of routing it through a convenient foreign host
+
+The intended outcome is:
+
+- Rune stdlib/runtime support stays native and honest
+- target claims are based on real implementation, not host-language substitution
+
 ## Feature Admission Policy
 
 A feature may enter active implementation only when:

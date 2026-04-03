@@ -963,8 +963,10 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_recv_timeout"
         | "__rune_builtin_network_tcp_accept_once"
         | "__rune_builtin_network_tcp_reply_once"
+        | "__rune_builtin_network_last_error_message"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv" => Some(IrType::String),
+        "__rune_builtin_network_last_error_code" => Some(IrType::I32),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"

@@ -891,3 +891,48 @@ def main() -> i32:
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "hello server\nping\n\nyo\n\n");
 }
+
+#[test]
+fn llvm_backend_builds_and_runs_network_error_state_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_error_state_demo.rn");
+    let exe_path = dir.join("llvm_network_error_state_demo.exe");
+    let open_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve open TCP port");
+    let open_port = open_probe.local_addr().expect("open probe addr").port() as i32;
+    let closed_probe =
+        TcpListener::bind("127.0.0.1:0").expect("failed to reserve closed TCP port");
+    let closed_port = closed_probe
+        .local_addr()
+        .expect("closed probe addr")
+        .port() as i32;
+    drop(closed_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import connect_timeout, last_error, last_error_code
+
+def main() -> i32:
+    println(connect_timeout("127.0.0.1", {0}, 25))
+    println(last_error_code())
+    println(last_error() != "")
+    println(connect_timeout("127.0.0.1", {1}, 100))
+    println(last_error_code())
+    return 0
+"#,
+            closed_port, open_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm network error-state program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm network error-state program");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\n5\ntrue\ntrue\n0\n");
+}

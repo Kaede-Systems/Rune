@@ -1929,6 +1929,31 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_network_last_error_code" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_last_error_code` expects 0 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_network_last_error_code\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_last_error_message" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_last_error_message` expects 0 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_network_last_error_message\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_network_udp_bind" {
             let [
                 CallArg::Positional(host_expr),
@@ -3533,6 +3558,7 @@ impl<'a> FunctionEmitter<'a> {
                     | "__rune_builtin_env_get_string"
                     | "__rune_builtin_network_tcp_recv"
                     | "__rune_builtin_network_tcp_recv_timeout"
+                    | "__rune_builtin_network_last_error_message"
                     | "__rune_builtin_network_tcp_request"
                     | "__rune_builtin_network_udp_recv"
                     | "__rune_builtin_fs_read_string"
@@ -3581,6 +3607,16 @@ impl<'a> FunctionEmitter<'a> {
                     "default environment value",
                 )?;
                 out.push_str("    call rune_rt_env_get_string\n");
+            } else if name == "__rune_builtin_network_last_error_message" {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_last_error_message` expects 0 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                }
+                out.push_str("    call rune_rt_network_last_error_message\n");
             } else if name == "__rune_builtin_network_tcp_recv" {
                 let [
                     CallArg::Positional(host_expr),
@@ -3699,6 +3735,26 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str("    mov DWORD PTR [rsp+48], r10d\n");
                 out.push_str("    call rune_rt_network_tcp_reply_once\n");
                 out.push_str("    add rsp, 64\n");
+            } else if name == "__rune_builtin_network_last_error_code" {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_last_error_code` expects 0 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                }
+                out.push_str("    call rune_rt_network_last_error_code\n");
+            } else if name == "__rune_builtin_network_last_error_message" {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_last_error_message` expects 0 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                }
+                out.push_str("    call rune_rt_network_last_error_message\n");
             } else if name == "__rune_builtin_network_udp_recv" {
                 let [
                     CallArg::Positional(host_expr),
@@ -5087,9 +5143,11 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_recv_timeout"
         | "__rune_builtin_network_tcp_accept_once"
         | "__rune_builtin_network_tcp_reply_once"
+        | "__rune_builtin_network_last_error_message"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv"
         | "__rune_builtin_fs_read_string" => Some(IrType::String),
+        "__rune_builtin_network_last_error_code" => Some(IrType::I32),
         _ => None,
     }
 }

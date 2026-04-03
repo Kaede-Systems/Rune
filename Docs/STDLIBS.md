@@ -401,6 +401,7 @@ from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 from network import tcp_send_line, udp_send_line, tcp_recv, tcp_recv_timeout, udp_recv
 from network import tcp_request, request, request_line, recv, recv_timeout, recv_udp
 from network import tcp_accept_once, accept_once, tcp_reply_once, reply_once, reply_once_line
+from network import last_error_code, last_error
 from network import connect, connect_timeout, probe, probe_timeout
 from network import listen, bind, send, send_line, send_udp, send_line_udp
 from network import TcpClient, TcpServer, UdpEndpoint, tcp_client, tcp_server, udp_endpoint
@@ -430,6 +431,8 @@ Exports:
 - `tcp_reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 - `reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 - `reply_once_line(host: String, port: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
+- `last_error_code() -> i32`
+- `last_error() -> String`
 - `connect(host: String, port: i32) -> bool`
 - `connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
 - `probe(host: String, port: i32) -> bool`
@@ -460,17 +463,34 @@ Current implemented network scope:
 - TCP one-shot server accept helpers returning the received payload as `String`
 - TCP one-shot reply helpers that return the received request body as `String`
 - UDP receive helpers returning `String`
+- last network error inspection through `last_error_code()` and `last_error()`
 - class-style client/endpoint wrappers using the same `connect`, `probe`, `send`, and `send_line` names
 - class-style client/endpoint wrappers using the same `connect`, `bind`, `probe`, `send`, `send_line`, `recv`, `recv_timeout`, `request`, `request_line`, `send_text`, and `send_line_text` names
 - `TcpServer` exposes `listen`, `bind`, `accept_once`, `reply_once`, `reply_once_line`, and `reply_once_text`
 - class-style client/endpoint wrappers also expose `send_text` and `send_line_text` for callers that prefer explicit text payloads
 - the current receive/request slice is verified on native and LLVM executable paths
 - the current one-shot server accept/reply slice is also verified on native and LLVM executable paths
+- the current error-state slice is verified on native and LLVM executable paths
 - Uno-class Arduino targets do not claim direct `network` support without a real backing network stack
+
+Current network error codes:
+
+- `0`: no error
+- `1`: invalid argument
+- `2`: unsupported target
+- `3`: address resolution failed
+- `4`: bind/listen failed
+- `5`: connect failed
+- `6`: accept timed out
+- `7`: accept failed
+- `8`: read failed
+- `9`: write failed
+- `10`: socket option setup failed
 
 Not implemented in this module yet:
 
 - persistent TCP server socket lifecycle and multi-client accept loops
+- close/shutdown-style explicit socket lifecycle control
 - HTTP
 - WebSocket
 

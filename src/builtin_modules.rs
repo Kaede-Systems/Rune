@@ -1756,6 +1756,24 @@ fn network_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "last_error_code",
+                vec![],
+                "i32",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_last_error_code",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "last_error",
+                vec![],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_last_error_message",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
                 "request_line",
                 vec![
                     param("host", "String"),
