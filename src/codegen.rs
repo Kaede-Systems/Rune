@@ -1944,6 +1944,27 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_network_tcp_client_open" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_client_open` expects 3 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP client host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_into_reg(out, "r9d", timeout_expr)?;
+            out.push_str("    call rune_rt_network_tcp_client_open\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_network_tcp_server_accept" {
             let [
                 CallArg::Positional(handle_expr),
@@ -2002,6 +2023,56 @@ impl<'a> FunctionEmitter<'a> {
             };
             self.emit_into_reg(out, "ecx", handle_expr)?;
             out.push_str("    call rune_rt_network_tcp_server_close\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_client_send" {
+            let [CallArg::Positional(handle_expr), CallArg::Positional(data_expr)] = args else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_client_send` expects 2 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", handle_expr)?;
+            self.emit_string_arg(out, data_expr, "rdx", "r8", "TCP client send data")?;
+            out.push_str("    call rune_rt_network_tcp_client_send\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_client_recv" {
+            let [
+                CallArg::Positional(handle_expr),
+                CallArg::Positional(max_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_client_recv` expects 3 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", handle_expr)?;
+            self.emit_into_reg(out, "edx", max_expr)?;
+            self.emit_into_reg(out, "r8d", timeout_expr)?;
+            out.push_str("    call rune_rt_network_tcp_client_recv\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_client_close" {
+            let [CallArg::Positional(handle_expr)] = args else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_client_close` expects 1 positional argument"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", handle_expr)?;
+            out.push_str("    call rune_rt_network_tcp_client_close\n");
             return Ok(());
         }
 
@@ -3839,6 +3910,24 @@ impl<'a> FunctionEmitter<'a> {
                 self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP server host")?;
                 self.emit_into_reg(out, "r8d", port_expr)?;
                 out.push_str("    call rune_rt_network_tcp_server_open\n");
+            } else if name == "__rune_builtin_network_tcp_client_open" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_client_open` expects 3 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP client host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_into_reg(out, "r9d", timeout_expr)?;
+                out.push_str("    call rune_rt_network_tcp_client_open\n");
             } else if name == "__rune_builtin_network_tcp_server_accept" {
                 let [
                     CallArg::Positional(handle_expr),
@@ -3891,6 +3980,49 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 self.emit_into_reg(out, "ecx", handle_expr)?;
                 out.push_str("    call rune_rt_network_tcp_server_close\n");
+            } else if name == "__rune_builtin_network_tcp_client_send" {
+                let [CallArg::Positional(handle_expr), CallArg::Positional(data_expr)] =
+                    args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_client_send` expects 2 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_into_reg(out, "ecx", handle_expr)?;
+                self.emit_string_arg(out, data_expr, "rdx", "r8", "TCP client send data")?;
+                out.push_str("    call rune_rt_network_tcp_client_send\n");
+            } else if name == "__rune_builtin_network_tcp_client_recv" {
+                let [
+                    CallArg::Positional(handle_expr),
+                    CallArg::Positional(max_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_client_recv` expects 3 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_into_reg(out, "ecx", handle_expr)?;
+                self.emit_into_reg(out, "edx", max_expr)?;
+                self.emit_into_reg(out, "r8d", timeout_expr)?;
+                out.push_str("    call rune_rt_network_tcp_client_recv\n");
+            } else if name == "__rune_builtin_network_tcp_client_close" {
+                let [CallArg::Positional(handle_expr)] = args.as_slice() else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_client_close` expects 1 positional argument in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_into_reg(out, "ecx", handle_expr)?;
+                out.push_str("    call rune_rt_network_tcp_client_close\n");
             } else if name == "__rune_builtin_network_last_error_code" {
                 if !args.is_empty() {
                     return Err(CodegenError {
@@ -5294,6 +5426,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_send"
         | "__rune_builtin_network_tcp_connect_timeout"
         | "__rune_builtin_network_tcp_server_close"
+        | "__rune_builtin_network_tcp_client_send"
+        | "__rune_builtin_network_tcp_client_close"
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"
@@ -5312,13 +5446,15 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_accept_once"
         | "__rune_builtin_network_tcp_reply_once"
         | "__rune_builtin_network_tcp_server_accept"
+        | "__rune_builtin_network_tcp_client_recv"
         | "__rune_builtin_network_tcp_server_reply"
         | "__rune_builtin_network_last_error_message"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv"
         | "__rune_builtin_fs_read_string" => Some(IrType::String),
         "__rune_builtin_network_last_error_code" => Some(IrType::I32),
-        "__rune_builtin_network_tcp_server_open" => Some(IrType::I32),
+        "__rune_builtin_network_tcp_server_open"
+        | "__rune_builtin_network_tcp_client_open" => Some(IrType::I32),
         _ => None,
     }
 }

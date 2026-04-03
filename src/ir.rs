@@ -964,19 +964,23 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_accept_once"
         | "__rune_builtin_network_tcp_reply_once"
         | "__rune_builtin_network_tcp_server_accept"
+        | "__rune_builtin_network_tcp_client_recv"
         | "__rune_builtin_network_tcp_server_reply"
         | "__rune_builtin_network_last_error_message"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv" => Some(IrType::String),
         "__rune_builtin_network_last_error_code" => Some(IrType::I32),
-        "__rune_builtin_network_tcp_server_open" => Some(IrType::I32),
+        "__rune_builtin_network_tcp_server_open"
+        | "__rune_builtin_network_tcp_client_open" => Some(IrType::I32),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"
         | "__rune_builtin_network_tcp_listen"
         | "__rune_builtin_network_tcp_send"
         | "__rune_builtin_network_tcp_connect_timeout"
+        | "__rune_builtin_network_tcp_client_send"
         | "__rune_builtin_network_tcp_server_close"
+        | "__rune_builtin_network_tcp_client_close"
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"

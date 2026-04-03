@@ -1038,3 +1038,84 @@ def main() -> i32:
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "alpha\nbeta\n\ntrue\n");
 }
+
+#[test]
+fn llvm_backend_builds_and_runs_network_persistent_client_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_persistent_client_demo.rn");
+    let exe_path = dir.join("llvm_network_persistent_client_demo.exe");
+    let server_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve server port");
+    let server_port = server_probe.local_addr().expect("server probe addr").port() as i32;
+    drop(server_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import tcp_client_close, tcp_client_open, tcp_client_recv, tcp_client_send_line
+
+def main() -> i32:
+    let handle: i32 = tcp_client_open("127.0.0.1", {0}, 1000)
+    println(tcp_client_send_line(handle, "ping"))
+    println(tcp_client_recv(handle, 64, 1000))
+    println(tcp_client_close(handle))
+    return 0
+"#,
+            server_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm persistent network client program should build");
+
+    let _server = spawn_tcp_request_server_on_port(server_port as u16, b"pong\n");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm persistent network client program");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\npong\n\ntrue\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_network_persistent_client_class_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_persistent_client_class_demo.rn");
+    let exe_path = dir.join("llvm_network_persistent_client_class_demo.exe");
+    let server_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve server port");
+    let server_port = server_probe.local_addr().expect("server probe addr").port() as i32;
+    drop(server_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import tcp_client
+
+def main() -> i32:
+    let client = tcp_client("127.0.0.1", {0})
+    let handle: i32 = client.open_handle(1000)
+    println(client.send_line_handle(handle, "ping"))
+    println(client.recv_handle(handle, 64, 1000))
+    println(client.close_handle(handle))
+    return 0
+"#,
+            server_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm persistent network client class program should build");
+
+    let _server = spawn_tcp_request_server_on_port(server_port as u16, b"pong\n");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm persistent network client class program");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\npong\n\ntrue\n");
+}

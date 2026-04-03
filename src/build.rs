@@ -5125,6 +5125,9 @@ function createHost(options = {{}}) {{
       rune_rt_network_tcp_server_open(ptr, len, port) {{
         throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
       }},
+      rune_rt_network_tcp_client_open(ptr, len, port, timeoutMs) {{
+        throw new Error("Rune persistent network client builtins are not supported for wasm32-unknown-unknown");
+      }},
       rune_rt_network_tcp_server_accept(handle, maxBytes, timeoutMs) {{
         throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
       }},
@@ -5133,6 +5136,15 @@ function createHost(options = {{}}) {{
       }},
       rune_rt_network_tcp_server_close(handle) {{
         throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_client_send(handle, dataPtr, dataLen) {{
+        throw new Error("Rune persistent network client builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_client_recv(handle, maxBytes, timeoutMs) {{
+        throw new Error("Rune persistent network client builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_client_close(handle) {{
+        throw new Error("Rune persistent network client builtins are not supported for wasm32-unknown-unknown");
       }},
       rune_rt_network_last_error_code() {{
         return 0;
@@ -6297,6 +6309,10 @@ static RUNE_NETWORK_ERROR: OnceLock<Mutex<(i32, String)>> = OnceLock::new();
 static RUNE_NETWORK_SERVER_HANDLES: OnceLock<Mutex<HashMap<i32, TcpListener>>> = OnceLock::new();
 #[cfg(not(target_os = "wasi"))]
 static RUNE_NETWORK_SERVER_NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+#[cfg(not(target_os = "wasi"))]
+static RUNE_NETWORK_CLIENT_HANDLES: OnceLock<Mutex<HashMap<i32, TcpStream>>> = OnceLock::new();
+#[cfg(not(target_os = "wasi"))]
+static RUNE_NETWORK_CLIENT_NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 const RUNE_NETWORK_OK: i32 = 0;
 const RUNE_NETWORK_ERR_INVALID_ARGUMENT: i32 = 1;
@@ -6335,6 +6351,11 @@ fn rune_rt_network_error_state() -> &'static Mutex<(i32, String)> {
 #[cfg(not(target_os = "wasi"))]
 fn rune_rt_network_server_handles() -> &'static Mutex<HashMap<i32, TcpListener>> {
     RUNE_NETWORK_SERVER_HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn rune_rt_network_client_handles() -> &'static Mutex<HashMap<i32, TcpStream>> {
+    RUNE_NETWORK_CLIENT_HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn rune_rt_network_clear_error_state() {
@@ -8220,6 +8241,21 @@ pub extern "C" fn rune_rt_network_tcp_server_open(_ptr: *const u8, _len: i64, _p
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_open(
+    _ptr: *const u8,
+    _len: i64,
+    _port: i32,
+    _timeout_ms: i32,
+) -> i32 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    0
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_server_accept(
     _handle: i32,
     _max_bytes: i32,
@@ -8251,6 +8287,44 @@ pub extern "C" fn rune_rt_network_tcp_server_reply(
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_server_close(_handle: i32) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    false
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_send(
+    _handle: i32,
+    _data_ptr: *const u8,
+    _data_len: i64,
+) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    false
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_recv(
+    _handle: i32,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_close(_handle: i32) -> bool {
     rune_rt_network_set_error(
         RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
         "network is not supported on this target",
@@ -8646,6 +8720,55 @@ pub extern "C" fn rune_rt_network_tcp_server_open(ptr: *const u8, len: i64, port
 
 #[cfg(not(target_os = "wasi"))]
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_open(
+    ptr: *const u8,
+    len: i64,
+    port: i32,
+    timeout_ms: i32,
+) -> i32 {
+    if port < 0 || port > u16::MAX as i32 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_client_open requires a valid port and non-negative timeout_ms",
+        );
+        return 0;
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP client host must be valid UTF-8");
+    let address = format!("{host}:{}", port as u16);
+    let resolved = match address.to_socket_addrs() {
+        Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_ADDRESS_RESOLUTION,
+                format!("failed to resolve {address}: {error}"),
+            );
+            return 0;
+        }
+    };
+    for addr in resolved {
+        match TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)) {
+            Ok(stream) => {
+                let handle = RUNE_NETWORK_CLIENT_NEXT_HANDLE.fetch_add(1, Ordering::Relaxed) as i32;
+                rune_rt_network_client_handles()
+                    .lock()
+                    .expect("network client handle mutex poisoned")
+                    .insert(handle, stream);
+                rune_rt_network_clear_error_state();
+                return handle;
+            }
+            Err(_) => continue,
+        }
+    }
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_CONNECT,
+        format!("failed to connect to {address} within {timeout_ms}ms"),
+    );
+    0
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_server_accept(
     handle: i32,
     max_bytes: i32,
@@ -8850,6 +8973,122 @@ pub extern "C" fn rune_rt_network_tcp_server_close(handle: i32) -> bool {
         rune_rt_network_set_error(
             RUNE_NETWORK_ERR_INVALID_ARGUMENT,
             format!("unknown TCP server handle `{handle}`"),
+        );
+        false
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_send(
+    handle: i32,
+    data_ptr: *const u8,
+    data_len: i64,
+) -> bool {
+    if handle <= 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP client handle `{handle}`"),
+        );
+        return false;
+    }
+    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
+    let data = std::str::from_utf8(data).expect("TCP client send data must be valid UTF-8");
+    let mut handles = rune_rt_network_client_handles()
+        .lock()
+        .expect("network client handle mutex poisoned");
+    let Some(stream) = handles.get_mut(&handle) else {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("unknown TCP client handle `{handle}`"),
+        );
+        return false;
+    };
+    match std::io::Write::write_all(stream, data.as_bytes()) {
+        Ok(_) => {
+            rune_rt_network_clear_error_state();
+            true
+        }
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_WRITE,
+                format!("failed to write to TCP client handle `{handle}`: {error}"),
+            );
+            false
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_recv(
+    handle: i32,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if handle <= 0 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_client_recv requires a positive handle and non-negative max_bytes/timeout_ms",
+        );
+        return rune_rt_store_string(String::new());
+    }
+    let mut handles = rune_rt_network_client_handles()
+        .lock()
+        .expect("network client handle mutex poisoned");
+    let Some(stream) = handles.get_mut(&handle) else {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("unknown TCP client handle `{handle}`"),
+        );
+        return rune_rt_store_string(String::new());
+    };
+    if let Err(error) = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64))) {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_SOCKET_OPTION,
+            format!("failed to set TCP read timeout for client handle `{handle}`: {error}"),
+        );
+        return rune_rt_store_string(String::new());
+    }
+    let mut buffer = vec![0u8; max_bytes as usize];
+    match std::io::Read::read(stream, &mut buffer) {
+        Ok(read) => {
+            buffer.truncate(read);
+            rune_rt_network_clear_error_state();
+            rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
+        }
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_READ,
+                format!("failed to read from TCP client handle `{handle}`: {error}"),
+            );
+            rune_rt_store_string(String::new())
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_client_close(handle: i32) -> bool {
+    if handle <= 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP client handle `{handle}`"),
+        );
+        return false;
+    }
+    let removed = rune_rt_network_client_handles()
+        .lock()
+        .expect("network client handle mutex poisoned")
+        .remove(&handle)
+        .is_some();
+    if removed {
+        rune_rt_network_clear_error_state();
+        true
+    } else {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("unknown TCP client handle `{handle}`"),
         );
         false
     }

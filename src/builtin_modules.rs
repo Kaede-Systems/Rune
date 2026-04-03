@@ -1136,6 +1136,75 @@ fn network_program() -> Program {
                 ],
             ))],
         ),
+        function(
+            "open_handle",
+            vec![param("self", "dynamic"), param("timeout_ms", "i32")],
+            "i32",
+            vec![return_stmt(call_name(
+                "tcp_client_open",
+                vec![
+                    pos(field(ident("self"), "host")),
+                    pos(field(ident("self"), "port")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "send_handle",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("value", "dynamic"),
+            ],
+            "bool",
+            vec![return_stmt(call_name(
+                "tcp_client_send",
+                vec![
+                    pos(ident("handle")),
+                    pos(call_name("str", vec![pos(ident("value"))])),
+                ],
+            ))],
+        ),
+        function(
+            "send_line_handle",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("value", "dynamic"),
+            ],
+            "bool",
+            vec![return_stmt(call_name(
+                "tcp_client_send_line",
+                vec![pos(ident("handle")), pos(ident("value"))],
+            ))],
+        ),
+        function(
+            "recv_handle",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_client_recv",
+                vec![
+                    pos(ident("handle")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "close_handle",
+            vec![param("self", "dynamic"), param("handle", "i32")],
+            "bool",
+            vec![return_stmt(call_name(
+                "tcp_client_close",
+                vec![pos(ident("handle"))],
+            ))],
+        ),
     ];
 
     let tcp_server_methods = vec![
@@ -1754,6 +1823,23 @@ fn network_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "tcp_client_open",
+                vec![
+                    param("host", "String"),
+                    param("port", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "i32",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_client_open",
+                    vec![
+                        pos(ident("host")),
+                        pos(ident("port")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
                 "tcp_server_accept",
                 vec![
                     param("handle", "i32"),
@@ -1790,6 +1876,48 @@ fn network_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "tcp_client_send",
+                vec![param("handle", "i32"), param("data", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_client_send",
+                    vec![pos(ident("handle")), pos(ident("data"))],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_client_send_line",
+                vec![param("handle", "i32"), param("value", "dynamic")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "tcp_client_send",
+                    vec![
+                        pos(ident("handle")),
+                        pos(binary(
+                            call_name("str", vec![pos(ident("value"))]),
+                            BinaryOp::Add,
+                            string_lit("\n"),
+                        )),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_client_recv",
+                vec![
+                    param("handle", "i32"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_client_recv",
+                    vec![
+                        pos(ident("handle")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
                 "tcp_server_reply_line",
                 vec![
                     param("handle", "i32"),
@@ -1810,6 +1938,15 @@ fn network_program() -> Program {
                         pos(ident("max_bytes")),
                         pos(ident("timeout_ms")),
                     ],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_client_close",
+                vec![param("handle", "i32")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_client_close",
+                    vec![pos(ident("handle"))],
                 ))],
             )),
             Item::Function(function(
