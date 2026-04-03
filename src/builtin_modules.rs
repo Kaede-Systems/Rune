@@ -382,6 +382,149 @@ fn time_program() -> Program {
     }
 }
 
+fn sys_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "pid",
+                vec![],
+                "i32",
+                vec![return_stmt(call_name("__rune_builtin_system_pid", vec![]))],
+            )),
+            Item::Function(function(
+                "cpu_count",
+                vec![],
+                "i32",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_system_cpu_count",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "platform",
+                vec![],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_system_platform",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "arch",
+                vec![],
+                "String",
+                vec![return_stmt(call_name("__rune_builtin_system_arch", vec![]))],
+            )),
+            Item::Function(function(
+                "target",
+                vec![],
+                "String",
+                vec![return_stmt(call_name("__rune_builtin_system_target", vec![]))],
+            )),
+            Item::Function(function(
+                "board",
+                vec![],
+                "String",
+                vec![return_stmt(call_name("__rune_builtin_system_board", vec![]))],
+            )),
+            Item::Function(function(
+                "is_embedded",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_system_is_embedded",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "is_wasm",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name("__rune_builtin_system_is_wasm", vec![]))],
+            )),
+            Item::Function(function(
+                "is_host",
+                vec![],
+                "bool",
+                vec![return_stmt(Expr {
+                    kind: ExprKind::Unary {
+                        op: crate::parser::UnaryOp::Not,
+                        expr: Box::new(binary(
+                            call_name("is_embedded", vec![]),
+                            BinaryOp::Or,
+                            call_name("is_wasm", vec![]),
+                        )),
+                    },
+                    span: s(),
+                })],
+            )),
+            Item::Function(function(
+                "is_desktop",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name("is_host", vec![]))],
+            )),
+            Item::Function(function(
+                "is_windows",
+                vec![],
+                "bool",
+                vec![return_stmt(binary(
+                    call_name("platform", vec![]),
+                    BinaryOp::EqualEqual,
+                    string_lit("windows"),
+                ))],
+            )),
+            Item::Function(function(
+                "is_linux",
+                vec![],
+                "bool",
+                vec![return_stmt(binary(
+                    call_name("platform", vec![]),
+                    BinaryOp::EqualEqual,
+                    string_lit("linux"),
+                ))],
+            )),
+            Item::Function(function(
+                "is_macos",
+                vec![],
+                "bool",
+                vec![return_stmt(binary(
+                    call_name("platform", vec![]),
+                    BinaryOp::EqualEqual,
+                    string_lit("macos"),
+                ))],
+            )),
+            Item::Function(function(
+                "exit",
+                vec![param("code", "i32")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_system_exit",
+                    vec![pos(ident("code"))],
+                ))],
+            )),
+            Item::Function(function(
+                "quit",
+                vec![param("code", "i32")],
+                "unit",
+                vec![expr_stmt(call_name("exit", vec![pos(ident("code"))]))],
+            )),
+            Item::Function(function(
+                "exit_success",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("exit", vec![pos(int_lit(0))]))],
+            )),
+            Item::Function(function(
+                "exit_failure",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("exit", vec![pos(int_lit(1))]))],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -2604,6 +2747,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "time" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/time"),
             body: BuiltinModuleBody::Program(time_program()),
+        }),
+        [name] if name == "sys" || name == "system" => Some(BuiltinModule {
+            virtual_path: PathBuf::from(format!("<builtin>/{name}")),
+            body: BuiltinModuleBody::Program(sys_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),
