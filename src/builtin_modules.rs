@@ -905,6 +905,133 @@ fn fs_program() -> Program {
     }
 }
 
+fn json_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "parse",
+                vec![param("text", "String")],
+                "Json",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_parse",
+                    vec![pos(ident("text"))],
+                ))],
+            )),
+            Item::Function(function(
+                "stringify",
+                vec![param("value", "Json")],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_stringify",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "as_string",
+                vec![param("value", "Json")],
+                "String",
+                vec![return_stmt(call_name("to_string", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "kind",
+                vec![param("value", "Json")],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_kind",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "value_kind",
+                vec![param("value", "Json")],
+                "String",
+                vec![return_stmt(call_name("kind", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "is_null",
+                vec![param("value", "Json")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_is_null",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "len",
+                vec![param("value", "Json")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_len",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "get",
+                vec![param("value", "Json"), param("key", "String")],
+                "Json",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_get",
+                    vec![pos(ident("value")), pos(ident("key"))],
+                ))],
+            )),
+            Item::Function(function(
+                "index",
+                vec![param("value", "Json"), param("at", "i64")],
+                "Json",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_index",
+                    vec![pos(ident("value")), pos(ident("at"))],
+                ))],
+            )),
+            Item::Function(function(
+                "to_string",
+                vec![param("value", "Json")],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_to_string",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "as_text",
+                vec![param("value", "Json")],
+                "String",
+                vec![return_stmt(call_name("to_string", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "to_i64",
+                vec![param("value", "Json")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_to_i64",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "as_i64",
+                vec![param("value", "Json")],
+                "i64",
+                vec![return_stmt(call_name("to_i64", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "to_bool",
+                vec![param("value", "Json")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_json_to_bool",
+                    vec![pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "as_bool",
+                vec![param("value", "Json")],
+                "bool",
+                vec![return_stmt(call_name("to_bool", vec![pos(ident("value"))]))],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -3143,6 +3270,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "fs" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/fs"),
             body: BuiltinModuleBody::Program(fs_program()),
+        }),
+        [name] if name == "json" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/json"),
+            body: BuiltinModuleBody::Program(json_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),
