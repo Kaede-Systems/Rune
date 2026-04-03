@@ -47,6 +47,7 @@ tools/wasmtime/
 tools/py_wasmtime/
 tools/llvm-xpack-win64/
 tools/arduino-avr/
+tools/llvm-project-avr/
 tools/*.zip
 
 # Generated headers from local experiments

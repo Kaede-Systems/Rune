@@ -1,0 +1,6 @@
+from network import tcp_server_open
+
+def main() -> i32:
+    let handle: i32 = tcp_server_open("127.0.0.1", 12345)
+    println(handle)
+    return 0

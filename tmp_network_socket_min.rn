@@ -1,0 +1,5 @@
+from network import open_server
+
+def main() -> i32:
+    let socket = open_server("127.0.0.1", 12345)
+    return 0
