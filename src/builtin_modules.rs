@@ -274,6 +274,114 @@ fn env_program() -> Program {
     }
 }
 
+fn time_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "unix_now",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_time_now_unix", vec![]))],
+            )),
+            Item::Function(function(
+                "monotonic_ms",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_time_monotonic_ms",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "monotonic_us",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_time_monotonic_us",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep_ms",
+                vec![param("ms", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_time_sleep_ms",
+                    vec![pos(ident("ms"))],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep_us",
+                vec![param("us", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_time_sleep_us",
+                    vec![pos(ident("us"))],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep",
+                vec![param("seconds", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "sleep_ms",
+                    vec![pos(binary(ident("seconds"), BinaryOp::Multiply, int_lit(1000)))],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep_until",
+                vec![param("deadline_ms", "i64")],
+                "unit",
+                vec![
+                    Stmt::Let(crate::parser::LetStmt {
+                        name: "now".to_string(),
+                        ty: Some(ty("i64")),
+                        value: call_name("monotonic_ms", vec![]),
+                        span: s(),
+                    }),
+                    if_stmt(
+                        binary(ident("deadline_ms"), BinaryOp::Greater, ident("now")),
+                        vec![expr_stmt(call_name(
+                            "sleep_ms",
+                            vec![pos(binary(
+                                ident("deadline_ms"),
+                                BinaryOp::Subtract,
+                                ident("now"),
+                            ))],
+                        ))],
+                        None,
+                    ),
+                ],
+            )),
+            Item::Function(function(
+                "sleep_until_us",
+                vec![param("deadline_us", "i64")],
+                "unit",
+                vec![
+                    Stmt::Let(crate::parser::LetStmt {
+                        name: "now".to_string(),
+                        ty: Some(ty("i64")),
+                        value: call_name("monotonic_us", vec![]),
+                        span: s(),
+                    }),
+                    if_stmt(
+                        binary(ident("deadline_us"), BinaryOp::Greater, ident("now")),
+                        vec![expr_stmt(call_name(
+                            "sleep_us",
+                            vec![pos(binary(
+                                ident("deadline_us"),
+                                BinaryOp::Subtract,
+                                ident("now"),
+                            ))],
+                        ))],
+                        None,
+                    ),
+                ],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -2492,6 +2600,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "env" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/env"),
             body: BuiltinModuleBody::Program(env_program()),
+        }),
+        [name] if name == "time" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/time"),
+            body: BuiltinModuleBody::Program(time_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),
