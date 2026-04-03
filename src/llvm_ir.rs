@@ -2433,6 +2433,99 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_gpio_pin_mode" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let mode = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_gpio_pin_mode(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_gpio_pin_mode(i64 {pin}, i64 {mode})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_gpio_digital_write" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let value = self.resolve_value(&args[1].value, &IrType::Bool, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_gpio_digital_write(i64, i1)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_gpio_digital_write(i64 {pin}, i1 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_gpio_digital_read" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_gpio_digital_read(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_gpio_digital_read(i64 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_gpio_pwm_write" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let value = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_gpio_pwm_write(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_gpio_pwm_write(i64 {pin}, i64 {value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_gpio_analog_read" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_gpio_analog_read(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_gpio_analog_read(i64 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_gpio_mode_input"
+            | "__rune_builtin_gpio_mode_output"
+            | "__rune_builtin_gpio_mode_input_pullup"
+            | "__rune_builtin_gpio_pwm_duty_max"
+            | "__rune_builtin_gpio_analog_max" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                let runtime = match callee {
+                    "__rune_builtin_gpio_mode_input" => "rune_rt_gpio_mode_input",
+                    "__rune_builtin_gpio_mode_output" => "rune_rt_gpio_mode_output",
+                    "__rune_builtin_gpio_mode_input_pullup" => "rune_rt_gpio_mode_input_pullup",
+                    "__rune_builtin_gpio_pwm_duty_max" => "rune_rt_gpio_pwm_duty_max",
+                    "__rune_builtin_gpio_analog_max" => "rune_rt_gpio_analog_max",
+                    _ => unreachable!(),
+                };
+                self.declared_runtime
+                    .insert(format!("declare i64 @{runtime}()\n"));
+                out.push_str(&format!("  {reg} = call i64 @{runtime}()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_arduino_digital_write" => {
                 self.expect_plain_arity(callee, args, 2)?;
                 let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
@@ -3917,6 +4010,11 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "panic" => Some(IrType::Unit),
         "str" | "repr" => Some(IrType::String),
         "int" => Some(IrType::I64),
+        "__rune_builtin_gpio_mode_input"
+        | "__rune_builtin_gpio_mode_output"
+        | "__rune_builtin_gpio_mode_input_pullup"
+        | "__rune_builtin_gpio_pwm_duty_max"
+        | "__rune_builtin_gpio_analog_max" => Some(IrType::I64),
         "__rune_builtin_json_parse" => Some(IrType::Json),
         "__rune_builtin_json_stringify"
         | "__rune_builtin_env_arg"
@@ -3939,12 +4037,14 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_system_board" => Some(IrType::String),
         "__rune_builtin_json_is_null"
         | "__rune_builtin_json_to_bool"
+        | "__rune_builtin_gpio_digital_read"
         | "__rune_builtin_arduino_servo_attach"
         | "__rune_builtin_arduino_digital_read"
         | "__rune_builtin_system_is_embedded"
         | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
+        | "__rune_builtin_gpio_analog_read"
         | "__rune_builtin_arduino_analog_read"
         | "__rune_builtin_arduino_pulse_in"
         | "__rune_builtin_arduino_shift_in"
@@ -3958,6 +4058,9 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_time_monotonic_ms"
         | "__rune_builtin_time_monotonic_us" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
+        | "__rune_builtin_gpio_pin_mode"
+        | "__rune_builtin_gpio_digital_write"
+        | "__rune_builtin_gpio_pwm_write"
         | "__rune_builtin_time_sleep_us"
         | "__rune_builtin_system_exit"
         | "__rune_builtin_terminal_clear"

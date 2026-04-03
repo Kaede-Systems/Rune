@@ -2643,6 +2643,110 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&json_ty, &Type::Json, json_expr.span, "Json value")?;
                     Ok(Type::Bool)
                 }
+                "__rune_builtin_gpio_pin_mode" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_pin_mode` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(mode_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_pin_mode` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "GPIO pin")?;
+                    let mode_ty = self.check_expr(mode_expr, scope, in_async)?;
+                    self.expect_integer_type(&mode_ty, mode_expr.span, "GPIO pin mode")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_gpio_digital_write" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_digital_write` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_digital_write` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "GPIO pin")?;
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_type(&value_ty, &Type::Bool, value_expr.span, "GPIO digital value")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_gpio_digital_read" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_digital_read` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_digital_read` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "GPIO pin")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_gpio_pwm_write" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_pwm_write` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_pwm_write` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "GPIO PWM pin")?;
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_integer_type(&value_ty, value_expr.span, "GPIO PWM duty")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_gpio_analog_read" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_analog_read` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_gpio_analog_read` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "GPIO analog pin")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_gpio_mode_input"
+                | "__rune_builtin_gpio_mode_output"
+                | "__rune_builtin_gpio_mode_input_pullup"
+                | "__rune_builtin_gpio_pwm_duty_max"
+                | "__rune_builtin_gpio_analog_max" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: format!("`{name}` takes no arguments"),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
                 "__rune_builtin_arduino_pin_mode" => {
                     if args.len() != 2 {
                         return Err(SemanticError {
@@ -3530,6 +3634,16 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_time_monotonic_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_sleep_ms" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_sleep_us" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_pin_mode" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_digital_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_digital_read" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_pwm_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_analog_read" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_mode_input" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_mode_output" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_mode_input_pullup" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_pwm_duty_max" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_gpio_analog_max" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_pid" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_cpu_count" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_platform" => Some(Type::Unknown("builtin".to_string())),

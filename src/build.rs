@@ -3119,6 +3119,24 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("((int64_t)rune_mode_input_pullup())".into(), ArduinoUnoType::I64))
                 }
+                "gpio_pwm_duty_max" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`gpio_pwm_duty_max` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)255)".into(), ArduinoUnoType::I64))
+                }
+                "gpio_analog_max" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`gpio_analog_max` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)1023)".into(), ArduinoUnoType::I64))
+                }
                 "led_builtin" => {
                     if !args.is_empty() {
                         return Err(CodegenError {
@@ -4352,6 +4370,17 @@ fn arduino_uno_binary_op(op: BinaryOp) -> &'static str {
 
 fn arduino_uno_builtin_alias(name: &str) -> &str {
     match name {
+        "__rune_builtin_gpio_pin_mode" => "pin_mode",
+        "__rune_builtin_gpio_digital_write" => "digital_write",
+        "__rune_builtin_gpio_digital_read" => "digital_read",
+        "__rune_builtin_gpio_pwm_write" => "analog_write",
+        "__rune_builtin_gpio_analog_read" => "analog_read",
+        "__rune_builtin_gpio_mode_input" => "mode_input",
+        "__rune_builtin_gpio_mode_output" => "mode_output",
+        "__rune_builtin_gpio_mode_input_pullup" => "mode_input_pullup",
+        "__rune_builtin_gpio_pwm_duty_max" => "gpio_pwm_duty_max",
+        "__rune_builtin_gpio_analog_max" => "gpio_analog_max",
+        "__rune_builtin_time_sleep_ms" => "delay_ms",
         "__rune_builtin_arduino_pin_mode" => "pin_mode",
         "__rune_builtin_arduino_digital_write" => "digital_write",
         "__rune_builtin_arduino_digital_read" => "digital_read",
@@ -4461,6 +4490,8 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "mode_input"
             | "mode_output"
             | "mode_input_pullup"
+            | "gpio_pwm_duty_max"
+            | "gpio_analog_max"
             | "led_builtin"
             | "high"
             | "low"
@@ -6988,6 +7019,21 @@ pub extern "C" fn rune_rt_arduino_digital_read(pin: i64) -> bool {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_pin_mode(pin: i64, mode: i64) {
+    rune_rt_arduino_pin_mode(pin, mode)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_digital_write(pin: i64, value: bool) {
+    rune_rt_arduino_digital_write(pin, value)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_digital_read(pin: i64) -> bool {
+    rune_rt_arduino_digital_read(pin)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_analog_write(pin: i64, value: i64) {
     if let Ok(index) = usize::try_from(pin) {
         RUNE_ARDUINO_ANALOG_PINS.with(|pins| {
@@ -7007,6 +7053,16 @@ pub extern "C" fn rune_rt_arduino_analog_read(pin: i64) -> i64 {
             RUNE_ARDUINO_ANALOG_PINS.with(|pins| pins.borrow().get(index).copied())
         })
         .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_pwm_write(pin: i64, value: i64) {
+    rune_rt_arduino_analog_write(pin, value)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_analog_read(pin: i64) -> i64 {
+    rune_rt_arduino_analog_read(pin)
 }
 
 #[unsafe(no_mangle)]
@@ -7141,10 +7197,25 @@ pub extern "C" fn rune_rt_arduino_read_line() -> *const u8 {
 pub extern "C" fn rune_rt_arduino_mode_input() -> i64 { 0 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_mode_input() -> i64 { 0 }
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_mode_output() -> i64 { 1 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_mode_output() -> i64 { 1 }
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_mode_input_pullup() -> i64 { 2 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_mode_input_pullup() -> i64 { 2 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_pwm_duty_max() -> i64 { 255 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_gpio_analog_max() -> i64 { 1023 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_led_builtin() -> i64 { 13 }

@@ -946,7 +946,15 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
+        "__rune_builtin_gpio_mode_input"
+        | "__rune_builtin_gpio_mode_output"
+        | "__rune_builtin_gpio_mode_input_pullup"
+        | "__rune_builtin_gpio_pwm_duty_max"
+        | "__rune_builtin_gpio_analog_max" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
+        | "__rune_builtin_gpio_pin_mode"
+        | "__rune_builtin_gpio_digital_write"
+        | "__rune_builtin_gpio_pwm_write"
         | "__rune_builtin_system_exit"
         | "__rune_builtin_terminal_clear"
         | "__rune_builtin_terminal_move_to"
@@ -959,6 +967,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_env_arg_count" => Some(IrType::I32),
         "__rune_builtin_env_arg"
         | "__rune_builtin_env_get_string"
+        | "__rune_builtin_gpio_analog_read"
         | "__rune_builtin_network_tcp_recv"
         | "__rune_builtin_network_tcp_recv_timeout"
         | "__rune_builtin_network_tcp_accept_once"
@@ -974,6 +983,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_client_open" => Some(IrType::I32),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
+        | "__rune_builtin_gpio_digital_read"
         | "__rune_builtin_network_tcp_connect"
         | "__rune_builtin_network_tcp_listen"
         | "__rune_builtin_network_tcp_send"

@@ -1668,14 +1668,36 @@ fn builds_arduino_uno_with_gpio_stdlib_surface() {
 }
 
 #[test]
+fn builds_arduino_uno_with_builtin_gpio_without_staged_stdlib_files() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_builtin_gpio_only.rn");
+    let output_path = dir.join("arduino_uno_builtin_gpio_only.hex");
+
+    fs::write(
+        &source_path,
+        "from gpio import gpio_pin\n\n\
+         def main() -> i32:\n    let led = gpio_pin(13)\n    led.output()\n    led.high()\n    println(led.read())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno built-in gpio program should build without staged stdlib files");
+
+    let bytes = fs::read(&output_path).expect("failed to read built-in gpio hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_with_gpio_alias_factories() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_gpio_aliases.rn");
     let output_path = dir.join("arduino_uno_gpio_aliases.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("stdlib")
-        .join("gpio.rn");
-    fs::copy(&stdlib_source, dir.join("gpio.rn")).expect("failed to stage gpio stdlib");
 
     fs::write(
         &source_path,
@@ -1689,7 +1711,7 @@ fn builds_arduino_uno_with_gpio_alias_factories() {
         &output_path,
         Some("avr-atmega328p-arduino-uno"),
     )
-    .expect("arduino uno gpio alias build should succeed");
+    .expect("arduino uno built-in gpio alias build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read gpio alias hex");
     assert!(!bytes.is_empty());

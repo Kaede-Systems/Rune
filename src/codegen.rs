@@ -2426,6 +2426,104 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_gpio_pin_mode" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(mode_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_gpio_pin_mode` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "rdx", mode_expr)?;
+            out.push_str("    call rune_rt_gpio_pin_mode\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_gpio_digital_write" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_gpio_digital_write` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "edx", value_expr)?;
+            out.push_str("    call rune_rt_gpio_digital_write\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_gpio_digital_read" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_gpio_digital_read` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            out.push_str("    call rune_rt_gpio_digital_read\n");
+            out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_gpio_pwm_write" {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_gpio_pwm_write` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "rdx", value_expr)?;
+            out.push_str("    call rune_rt_gpio_pwm_write\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_gpio_analog_read" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_gpio_analog_read` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            out.push_str("    call rune_rt_gpio_analog_read\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_gpio_mode_input"
+                | "__rune_builtin_gpio_mode_output"
+                | "__rune_builtin_gpio_mode_input_pullup"
+                | "__rune_builtin_gpio_pwm_duty_max"
+                | "__rune_builtin_gpio_analog_max"
+        ) {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{name}` takes no arguments"),
+                    span,
+                });
+            }
+            let runtime = match name.as_str() {
+                "__rune_builtin_gpio_mode_input" => "rune_rt_gpio_mode_input",
+                "__rune_builtin_gpio_mode_output" => "rune_rt_gpio_mode_output",
+                "__rune_builtin_gpio_mode_input_pullup" => "rune_rt_gpio_mode_input_pullup",
+                "__rune_builtin_gpio_pwm_duty_max" => "rune_rt_gpio_pwm_duty_max",
+                "__rune_builtin_gpio_analog_max" => "rune_rt_gpio_analog_max",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            return Ok(());
+        }
+
         if name == "__rune_builtin_arduino_digital_write" {
             let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
                 return Err(CodegenError {
@@ -5402,11 +5500,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_system_board" => Some(IrType::String),
         "__rune_builtin_json_is_null"
         | "__rune_builtin_json_to_bool"
+        | "__rune_builtin_gpio_digital_read"
         | "__rune_builtin_arduino_digital_read"
         | "__rune_builtin_system_is_embedded"
         | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
         "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64"
+        | "__rune_builtin_gpio_analog_read"
         | "__rune_builtin_arduino_analog_read"
         | "__rune_builtin_arduino_pulse_in"
         | "__rune_builtin_arduino_shift_in"
@@ -5420,6 +5520,9 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_time_monotonic_ms"
         | "__rune_builtin_time_monotonic_us" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
+        | "__rune_builtin_gpio_pin_mode"
+        | "__rune_builtin_gpio_digital_write"
+        | "__rune_builtin_gpio_pwm_write"
         | "__rune_builtin_time_sleep_us"
         | "__rune_builtin_system_exit"
         | "__rune_builtin_terminal_clear"
@@ -5450,6 +5553,11 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"
         | "__rune_builtin_env_arg_count"
+        | "__rune_builtin_gpio_mode_input"
+        | "__rune_builtin_gpio_mode_output"
+        | "__rune_builtin_gpio_mode_input_pullup"
+        | "__rune_builtin_gpio_pwm_duty_max"
+        | "__rune_builtin_gpio_analog_max"
         | "__rune_builtin_arduino_mode_input"
         | "__rune_builtin_arduino_mode_output"
         | "__rune_builtin_arduino_mode_input_pullup"

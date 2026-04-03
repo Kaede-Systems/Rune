@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::lexer::Span;
 use crate::parser::{
-    BinaryOp, Block, CallArg, ElifBlock, Expr, ExprKind, Function, IfStmt, ImportDecl, Item,
-    Param, Program, ReturnStmt, Stmt, StructDecl, StructField, TypeRef,
+    BinaryOp, Block, CallArg, ElifBlock, Expr, ExprKind, Function, IfStmt, Item, Param, Program,
+    ReturnStmt, Stmt, StructDecl, StructField, TypeRef,
 };
 
 pub enum BuiltinModuleBody {
@@ -131,15 +131,6 @@ fn return_unit_stmt() -> Stmt {
 
 fn expr_stmt(expr: Expr) -> Stmt {
     Stmt::Expr(crate::parser::ExprStmt { expr })
-}
-
-fn import_item(module: &[&str], names: &[&str]) -> Item {
-    Item::Import(ImportDecl {
-        level: 0,
-        module: module.iter().map(|segment| (*segment).to_string()).collect(),
-        names: Some(names.iter().map(|name| (*name).to_string()).collect()),
-        span: s(),
-    })
 }
 
 fn if_stmt(condition: Expr, then_block: Vec<Stmt>, else_block: Option<Vec<Stmt>>) -> Stmt {
@@ -658,10 +649,10 @@ fn gpio_program() -> Program {
             vec![param("self", "dynamic")],
             "unit",
             vec![expr_stmt(call_name(
-                "pin_mode",
+                "__rune_builtin_gpio_pin_mode",
                 vec![
                     pos(field(ident("self"), "pin")),
-                    pos(call_name("mode_output", vec![])),
+                    pos(call_name("__rune_builtin_gpio_mode_output", vec![])),
                 ],
             ))],
         ),
@@ -670,10 +661,10 @@ fn gpio_program() -> Program {
             vec![param("self", "dynamic")],
             "unit",
             vec![expr_stmt(call_name(
-                "pin_mode",
+                "__rune_builtin_gpio_pin_mode",
                 vec![
                     pos(field(ident("self"), "pin")),
-                    pos(call_name("mode_input", vec![])),
+                    pos(call_name("__rune_builtin_gpio_mode_input", vec![])),
                 ],
             ))],
         ),
@@ -682,10 +673,10 @@ fn gpio_program() -> Program {
             vec![param("self", "dynamic")],
             "unit",
             vec![expr_stmt(call_name(
-                "pin_mode",
+                "__rune_builtin_gpio_pin_mode",
                 vec![
                     pos(field(ident("self"), "pin")),
-                    pos(call_name("mode_input_pullup", vec![])),
+                    pos(call_name("__rune_builtin_gpio_mode_input_pullup", vec![])),
                 ],
             ))],
         ),
@@ -693,44 +684,87 @@ fn gpio_program() -> Program {
             "write",
             vec![param("self", "dynamic"), param("value", "bool")],
             "unit",
-            vec![expr_stmt(call_name(
-                "digital_out",
-                vec![pos(field(ident("self"), "pin")), pos(ident("value"))],
-            ))],
+            vec![
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_pin_mode",
+                    vec![
+                        pos(field(ident("self"), "pin")),
+                        pos(call_name("__rune_builtin_gpio_mode_output", vec![])),
+                    ],
+                )),
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_digital_write",
+                    vec![pos(field(ident("self"), "pin")), pos(ident("value"))],
+                )),
+            ],
         ),
         function(
             "high",
             vec![param("self", "dynamic")],
             "unit",
-            vec![expr_stmt(call_name(
-                "digital_out",
-                vec![pos(field(ident("self"), "pin")), pos(bool_lit(true))],
-            ))],
+            vec![
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_pin_mode",
+                    vec![
+                        pos(field(ident("self"), "pin")),
+                        pos(call_name("__rune_builtin_gpio_mode_output", vec![])),
+                    ],
+                )),
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_digital_write",
+                    vec![pos(field(ident("self"), "pin")), pos(bool_lit(true))],
+                )),
+            ],
         ),
         function(
             "low",
             vec![param("self", "dynamic")],
             "unit",
-            vec![expr_stmt(call_name(
-                "digital_out",
-                vec![pos(field(ident("self"), "pin")), pos(bool_lit(false))],
-            ))],
+            vec![
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_pin_mode",
+                    vec![
+                        pos(field(ident("self"), "pin")),
+                        pos(call_name("__rune_builtin_gpio_mode_output", vec![])),
+                    ],
+                )),
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_digital_write",
+                    vec![pos(field(ident("self"), "pin")), pos(bool_lit(false))],
+                )),
+            ],
         ),
         function(
             "toggle",
             vec![param("self", "dynamic")],
             "unit",
-            vec![expr_stmt(call_name(
-                "digital_toggle",
-                vec![pos(field(ident("self"), "pin"))],
-            ))],
+            vec![Stmt::If(IfStmt {
+                condition: call_name(
+                    "__rune_builtin_gpio_digital_read",
+                    vec![pos(field(ident("self"), "pin"))],
+                ),
+                then_block: Block {
+                    statements: vec![expr_stmt(call_name(
+                        "__rune_builtin_gpio_digital_write",
+                        vec![pos(field(ident("self"), "pin")), pos(bool_lit(false))],
+                    ))],
+                },
+                elif_blocks: vec![],
+                else_block: Some(Block {
+                    statements: vec![expr_stmt(call_name(
+                        "__rune_builtin_gpio_digital_write",
+                        vec![pos(field(ident("self"), "pin")), pos(bool_lit(true))],
+                    ))],
+                }),
+                span: s(),
+            })],
         ),
         function(
             "read",
             vec![param("self", "dynamic")],
             "bool",
             vec![return_stmt(call_name(
-                "digital_in",
+                "__rune_builtin_gpio_digital_read",
                 vec![pos(field(ident("self"), "pin"))],
             ))],
         ),
@@ -738,10 +772,19 @@ fn gpio_program() -> Program {
             "read_pullup",
             vec![param("self", "dynamic")],
             "bool",
-            vec![return_stmt(call_name(
-                "digital_in_pullup",
-                vec![pos(field(ident("self"), "pin"))],
-            ))],
+            vec![
+                expr_stmt(call_name(
+                    "__rune_builtin_gpio_pin_mode",
+                    vec![
+                        pos(field(ident("self"), "pin")),
+                        pos(call_name("__rune_builtin_gpio_mode_input_pullup", vec![])),
+                    ],
+                )),
+                return_stmt(call_name(
+                    "__rune_builtin_gpio_digital_read",
+                    vec![pos(field(ident("self"), "pin"))],
+                )),
+            ],
         ),
         function(
             "blink",
@@ -764,9 +807,9 @@ fn gpio_program() -> Program {
                     body: Block {
                         statements: vec![
                             expr_stmt(call_expr(field(ident("self"), "high"), vec![])),
-                            expr_stmt(call_name("delay_ms", vec![pos(ident("on_ms"))])),
+                            expr_stmt(call_name("__rune_builtin_time_sleep_ms", vec![pos(ident("on_ms"))])),
                             expr_stmt(call_expr(field(ident("self"), "low"), vec![])),
-                            expr_stmt(call_name("delay_ms", vec![pos(ident("off_ms"))])),
+                            expr_stmt(call_name("__rune_builtin_time_sleep_ms", vec![pos(ident("off_ms"))])),
                             Stmt::Assign(crate::parser::AssignStmt {
                                 name: "count".to_string(),
                                 value: binary(ident("count"), BinaryOp::Add, int_lit(1)),
@@ -786,10 +829,10 @@ fn gpio_program() -> Program {
             vec![param("self", "dynamic")],
             "unit",
             vec![expr_stmt(call_name(
-                "pin_mode",
+                "__rune_builtin_gpio_pin_mode",
                 vec![
                     pos(field(ident("self"), "pin")),
-                    pos(call_name("mode_output", vec![])),
+                    pos(call_name("__rune_builtin_gpio_mode_output", vec![])),
                 ],
             ))],
         ),
@@ -798,7 +841,7 @@ fn gpio_program() -> Program {
             vec![param("self", "dynamic"), param("duty", "i64")],
             "unit",
             vec![expr_stmt(call_name(
-                "pwm_write",
+                "__rune_builtin_gpio_pwm_write",
                 vec![pos(field(ident("self"), "pin")), pos(ident("duty"))],
             ))],
         ),
@@ -806,14 +849,14 @@ fn gpio_program() -> Program {
             "max_duty",
             vec![param("self", "dynamic")],
             "i64",
-            vec![return_stmt(call_name("pwm_duty_max", vec![]))],
+            vec![return_stmt(call_name("__rune_builtin_gpio_pwm_duty_max", vec![]))],
         ),
         function(
             "off",
             vec![param("self", "dynamic")],
             "unit",
             vec![expr_stmt(call_name(
-                "pwm_write",
+                "__rune_builtin_gpio_pwm_write",
                 vec![pos(field(ident("self"), "pin")), pos(int_lit(0))],
             ))],
         ),
@@ -825,7 +868,7 @@ fn gpio_program() -> Program {
             vec![param("self", "dynamic")],
             "i64",
             vec![return_stmt(call_name(
-                "analog_read",
+                "__rune_builtin_gpio_analog_read",
                 vec![pos(field(ident("self"), "pin"))],
             ))],
         ),
@@ -833,43 +876,40 @@ fn gpio_program() -> Program {
             "read_percent",
             vec![param("self", "dynamic")],
             "i64",
-            vec![return_stmt(call_name(
-                "analog_read_percent",
-                vec![pos(field(ident("self"), "pin"))],
+            vec![return_stmt(binary(
+                binary(
+                    call_name(
+                        "__rune_builtin_gpio_analog_read",
+                        vec![pos(field(ident("self"), "pin"))],
+                    ),
+                    BinaryOp::Multiply,
+                    int_lit(100),
+                ),
+                BinaryOp::Divide,
+                call_name("__rune_builtin_gpio_analog_max", vec![]),
             ))],
         ),
         function(
             "read_voltage_mv",
             vec![param("self", "dynamic"), param("reference_mv", "i64")],
             "i64",
-            vec![return_stmt(call_name(
-                "analog_read_voltage_mv",
-                vec![pos(field(ident("self"), "pin")), pos(ident("reference_mv"))],
+            vec![return_stmt(binary(
+                binary(
+                    call_name(
+                        "__rune_builtin_gpio_analog_read",
+                        vec![pos(field(ident("self"), "pin"))],
+                    ),
+                    BinaryOp::Multiply,
+                    ident("reference_mv"),
+                ),
+                BinaryOp::Divide,
+                call_name("__rune_builtin_gpio_analog_max", vec![]),
             ))],
         ),
     ];
 
     Program {
         items: vec![
-            import_item(
-                &["arduino"],
-                &[
-                    "analog_read",
-                    "analog_read_percent",
-                    "analog_read_voltage_mv",
-                    "delay_ms",
-                    "digital_in",
-                    "digital_in_pullup",
-                    "digital_out",
-                    "digital_toggle",
-                    "mode_input",
-                    "mode_input_pullup",
-                    "mode_output",
-                    "pin_mode",
-                    "pwm_duty_max",
-                    "pwm_write",
-                ],
-            ),
             Item::Struct(StructDecl {
                 name: "GpioPin".to_string(),
                 fields: vec![StructField {

@@ -621,6 +621,56 @@ def main() -> i32:
 }
 
 #[test]
+fn builds_and_runs_builtin_gpio_digital_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("builtin_gpio_digital_demo.rn");
+    let exe_path = dir.join("builtin_gpio_digital_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from gpio import gpio_pin\n\n\
+def main() -> i32:\n    let pin = gpio_pin(13)\n    pin.output()\n    pin.high()\n    println(pin.read())\n    pin.low()\n    println(pin.read())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("builtin gpio digital program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run builtin gpio digital executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\nfalse\n");
+}
+
+#[test]
+fn builds_and_runs_builtin_gpio_pwm_analog_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("builtin_gpio_pwm_analog_demo.rn");
+    let exe_path = dir.join("builtin_gpio_pwm_analog_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from gpio import analog_pin, pwm_pin\n\n\
+def main() -> i32:\n    let pwm = pwm_pin(9)\n    let sensor = analog_pin(9)\n    pwm.output()\n    pwm.write(64)\n    println(sensor.read())\n    println(sensor.read_percent())\n    println(pwm.max_duty())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("builtin gpio pwm/analog program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run builtin gpio pwm/analog executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "64\n6\n255\n");
+}
+
+#[test]
 fn builds_and_runs_stdlib_network_persistent_server_program() {
     let dir = temp_dir();
     let source_path = dir.join("stdlib_network_persistent_server.rn");
