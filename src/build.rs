@@ -5558,6 +5558,12 @@ function createHost(options = {{}}) {{
         }}
         return fs.existsSync(readString(ptr, len));
       }},
+      rune_rt_fs_current_dir() {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        return allocString(process.cwd());
+      }},
       rune_rt_fs_read_string(ptr, len) {{
         if (!isNode || !fs) {{
           throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
@@ -5570,6 +5576,64 @@ function createHost(options = {{}}) {{
         }}
         fs.writeFileSync(readString(pathPtr, pathLen), readString(contentPtr, contentLen), "utf8");
         return true;
+      }},
+      rune_rt_fs_append_string(pathPtr, pathLen, contentPtr, contentLen) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        fs.appendFileSync(readString(pathPtr, pathLen), readString(contentPtr, contentLen), "utf8");
+        return true;
+      }},
+      rune_rt_fs_set_current_dir(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          process.chdir(readString(ptr, len));
+          return true;
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_is_file(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          return fs.statSync(readString(ptr, len)).isFile();
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_is_dir(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          return fs.statSync(readString(ptr, len)).isDirectory();
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_canonicalize(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          return allocString(fs.realpathSync(readString(ptr, len)));
+        }} catch {{
+          return allocString("");
+        }}
+      }},
+      rune_rt_fs_file_size(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          return BigInt(fs.statSync(readString(ptr, len)).size);
+        }} catch {{
+          return 0n;
+        }}
       }},
       rune_rt_terminal_clear() {{
         if (!isNode) {{
@@ -5842,9 +5906,15 @@ fn portable_runtime_source() -> &'static str {
 #include <stdint.h>
 #include <inttypes.h>
 #include <string.h>
+#include <sys/stat.h>
 #ifdef _WIN32
+#include <direct.h>
 #include <fcntl.h>
 #include <io.h>
+#include <malloc.h>
+#else
+#include <limits.h>
+#include <unistd.h>
 #endif
 
 static void rune_rt_init_io(void) {
@@ -6286,13 +6356,23 @@ bool rune_rt_fs_exists(const char* ptr, int64_t len) {
     }
     memcpy(path, ptr, (size_t)len);
     path[len] = '\0';
-    FILE* file = fopen(path, "rb");
+    struct stat info;
+    int ok = stat(path, &info) == 0;
     free(path);
-    if (!file) {
-        return false;
+    return ok;
+}
+char* rune_rt_fs_current_dir(void) {
+#ifdef _WIN32
+    char* cwd = _getcwd(NULL, 0);
+#else
+    char* cwd = getcwd(NULL, 0);
+#endif
+    if (!cwd) {
+        return rune_rt_store_copied_string("");
     }
-    fclose(file);
-    return true;
+    char* out = rune_rt_store_copied_string(cwd);
+    free(cwd);
+    return out;
 }
 char* rune_rt_fs_read_string(const char* ptr, int64_t len) {
     char* path = (char*)malloc((size_t)len + 1);
@@ -6347,6 +6427,96 @@ bool rune_rt_fs_write_string(const char* path_ptr, int64_t path_len, const char*
     size_t wrote = fwrite(content_ptr, 1, (size_t)content_len, file);
     fclose(file);
     return wrote == (size_t)content_len;
+}
+bool rune_rt_fs_append_string(const char* path_ptr, int64_t path_len, const char* content_ptr, int64_t content_len) {
+    char* path = (char*)malloc((size_t)path_len + 1);
+    if (!path) {
+        return false;
+    }
+    memcpy(path, path_ptr, (size_t)path_len);
+    path[path_len] = '\0';
+    FILE* file = fopen(path, "ab");
+    free(path);
+    if (!file) {
+        return false;
+    }
+    size_t wrote = fwrite(content_ptr, 1, (size_t)content_len, file);
+    fclose(file);
+    return wrote == (size_t)content_len;
+}
+bool rune_rt_fs_set_current_dir(const char* ptr, int64_t len) {
+    char* path = (char*)malloc((size_t)len + 1);
+    if (!path) {
+        return false;
+    }
+    memcpy(path, ptr, (size_t)len);
+    path[len] = '\0';
+#ifdef _WIN32
+    int ok = _chdir(path) == 0;
+#else
+    int ok = chdir(path) == 0;
+#endif
+    free(path);
+    return ok;
+}
+bool rune_rt_fs_is_file(const char* ptr, int64_t len) {
+    char* path = (char*)malloc((size_t)len + 1);
+    if (!path) {
+        return false;
+    }
+    memcpy(path, ptr, (size_t)len);
+    path[len] = '\0';
+    struct stat info;
+    int ok = stat(path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFREG;
+    free(path);
+    return ok;
+}
+bool rune_rt_fs_is_dir(const char* ptr, int64_t len) {
+    char* path = (char*)malloc((size_t)len + 1);
+    if (!path) {
+        return false;
+    }
+    memcpy(path, ptr, (size_t)len);
+    path[len] = '\0';
+    struct stat info;
+    int ok = stat(path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR;
+    free(path);
+    return ok;
+}
+char* rune_rt_fs_canonicalize(const char* ptr, int64_t len) {
+    char* path = (char*)malloc((size_t)len + 1);
+    if (!path) {
+        return rune_rt_store_copied_string("");
+    }
+    memcpy(path, ptr, (size_t)len);
+    path[len] = '\0';
+#ifdef _WIN32
+    char* resolved = _fullpath(NULL, path, 0);
+#else
+    char* resolved = realpath(path, NULL);
+#endif
+    free(path);
+    if (!resolved) {
+        return rune_rt_store_copied_string("");
+    }
+    char* out = rune_rt_store_copied_string(resolved);
+    free(resolved);
+    return out;
+}
+int64_t rune_rt_fs_file_size(const char* ptr, int64_t len) {
+    char* path = (char*)malloc((size_t)len + 1);
+    if (!path) {
+        return 0;
+    }
+    memcpy(path, ptr, (size_t)len);
+    path[len] = '\0';
+    struct stat info;
+    int ok = stat(path, &info) == 0;
+    free(path);
+    if (!ok) {
+        return 0;
+    }
+    return (int64_t)info.st_size;
 }
 void rune_rt_terminal_clear(void) {
     rune_rt_init_io();
@@ -9813,6 +9983,14 @@ pub extern "C" fn rune_rt_fs_exists(ptr: *const u8, len: i64) -> bool {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_current_dir() -> *const u8 {
+    match env::current_dir() {
+        Ok(path) => rune_rt_store_string(path.display().to_string()),
+        Err(_) => rune_rt_store_string(String::new()),
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_fs_read_string(ptr: *const u8, len: i64) -> *const u8 {
     let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
@@ -9836,6 +10014,32 @@ pub extern "C" fn rune_rt_fs_write_string(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_append_string(
+    path_ptr: *const u8,
+    path_len: i64,
+    content_ptr: *const u8,
+    content_len: i64,
+) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(path_ptr, path_len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    let content = unsafe { std::slice::from_raw_parts(content_ptr, content_len as usize) };
+    let content = std::str::from_utf8(content).expect("filesystem content must be valid UTF-8");
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, content.as_bytes()))
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_set_current_dir(ptr: *const u8, len: i64) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    env::set_current_dir(path).is_ok()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_fs_remove(ptr: *const u8, len: i64) -> bool {
     let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
@@ -9844,6 +10048,39 @@ pub extern "C" fn rune_rt_fs_remove(ptr: *const u8, len: i64) -> bool {
         Ok(_) => fs::remove_file(path).is_ok(),
         Err(_) => false,
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_is_file(ptr: *const u8, len: i64) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    fs::metadata(path).map(|meta| meta.is_file()).unwrap_or(false)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_is_dir(ptr: *const u8, len: i64) -> bool {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    fs::metadata(path).map(|meta| meta.is_dir()).unwrap_or(false)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_canonicalize(ptr: *const u8, len: i64) -> *const u8 {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    match fs::canonicalize(path) {
+        Ok(path) => rune_rt_store_string(path.display().to_string()),
+        Err(_) => rune_rt_store_string(String::new()),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fs_file_size(ptr: *const u8, len: i64) -> i64 {
+    let path = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let path = std::str::from_utf8(path).expect("filesystem path must be valid UTF-8");
+    fs::metadata(path)
+        .map(|meta| meta.len() as i64)
+        .unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]

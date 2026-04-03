@@ -2332,17 +2332,29 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
                     Ok(Type::String)
                 }
-                "__rune_builtin_fs_exists" => {
+                "__rune_builtin_fs_current_dir" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_fs_current_dir` takes no arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::String)
+                }
+                "__rune_builtin_fs_exists"
+                | "__rune_builtin_fs_set_current_dir"
+                | "__rune_builtin_fs_is_file"
+                | "__rune_builtin_fs_is_dir" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
-                            message: "`__rune_builtin_fs_exists` expects 1 argument".to_string(),
+                            message: format!("`{name}` expects 1 argument"),
                             span,
                         });
                     }
                     let [CallArg::Positional(path_expr)] = args else {
                         return Err(SemanticError {
-                            message: "`__rune_builtin_fs_exists` does not accept keyword arguments"
-                                .to_string(),
+                            message: format!("`{name}` does not accept keyword arguments"),
                             span,
                         });
                     };
@@ -2350,19 +2362,16 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&path_ty, &Type::String, path_expr.span, "filesystem path")?;
                     Ok(Type::Bool)
                 }
-                "__rune_builtin_fs_read_string" => {
+                "__rune_builtin_fs_read_string" | "__rune_builtin_fs_canonicalize" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
-                            message: "`__rune_builtin_fs_read_string` expects 1 argument"
-                                .to_string(),
+                            message: format!("`{name}` expects 1 argument"),
                             span,
                         });
                     }
                     let [CallArg::Positional(path_expr)] = args else {
                         return Err(SemanticError {
-                            message:
-                                "`__rune_builtin_fs_read_string` does not accept keyword arguments"
-                                    .to_string(),
+                            message: format!("`{name}` does not accept keyword arguments"),
                             span,
                         });
                     };
@@ -2370,11 +2379,30 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&path_ty, &Type::String, path_expr.span, "filesystem path")?;
                     Ok(Type::String)
                 }
-                "__rune_builtin_fs_write_string" => {
+                "__rune_builtin_fs_file_size" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_fs_file_size` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(path_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_fs_file_size` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let path_ty = self.check_expr(path_expr, scope, in_async)?;
+                    self.expect_type(&path_ty, &Type::String, path_expr.span, "filesystem path")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_fs_write_string" | "__rune_builtin_fs_append_string" => {
                     if args.len() != 2 {
                         return Err(SemanticError {
-                            message: "`__rune_builtin_fs_write_string` expects 2 arguments"
-                                .to_string(),
+                            message: format!("`{name}` expects 2 arguments"),
                             span,
                         });
                     }
@@ -2384,9 +2412,7 @@ impl<'a> Analyzer<'a> {
                     ] = args
                     else {
                         return Err(SemanticError {
-                            message:
-                                "`__rune_builtin_fs_write_string` does not accept keyword arguments"
-                                    .to_string(),
+                            message: format!("`{name}` does not accept keyword arguments"),
                             span,
                         });
                     };
@@ -3691,13 +3717,20 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_network_udp_send" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_recv" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_exists" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_current_dir" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_set_current_dir" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_read_string" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_write_string" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_append_string" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_remove" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_rename" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_copy" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_create_dir" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_create_dir_all" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_is_file" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_is_dir" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_canonicalize" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_fs_file_size" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_json_parse" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_json_stringify" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_json_kind" => Some(Type::Unknown("builtin".to_string())),

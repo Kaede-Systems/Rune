@@ -2171,6 +2171,22 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_fs_current_dir" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_fs_current_dir()\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!("  {ptr_reg} = call ptr @rune_rt_fs_current_dir()\n"));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             "__rune_builtin_fs_read_string" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -2193,18 +2209,42 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
-            "__rune_builtin_fs_write_string" => {
+            "__rune_builtin_fs_canonicalize" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_fs_canonicalize(ptr, i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_fs_canonicalize({ptr}, {len})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_fs_write_string" | "__rune_builtin_fs_append_string" => {
                 self.expect_plain_arity(callee, args, 2)?;
                 let path_rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
                 let (path_ptr, path_len) = split_string_value(&path_rendered)?;
                 let content_rendered = self.resolve_value(&args[1].value, &IrType::String, out)?;
                 let (content_ptr, content_len) = split_string_value(&content_rendered)?;
                 let reg = self.next_reg();
-                self.declared_runtime.insert(
-                    "declare i1 @rune_rt_fs_write_string(ptr, i64, ptr, i64)\n".into(),
-                );
+                let runtime = match callee {
+                    "__rune_builtin_fs_write_string" => "rune_rt_fs_write_string",
+                    "__rune_builtin_fs_append_string" => "rune_rt_fs_append_string",
+                    _ => unreachable!(),
+                };
+                self.declared_runtime
+                    .insert(format!("declare i1 @{runtime}(ptr, i64, ptr, i64)\n"));
                 out.push_str(&format!(
-                    "  {reg} = call i1 @rune_rt_fs_write_string({path_ptr}, {path_len}, {content_ptr}, {content_len})\n"
+                    "  {reg} = call i1 @{runtime}({path_ptr}, {path_len}, {content_ptr}, {content_len})\n"
                 ));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
@@ -2212,16 +2252,22 @@ impl<'a> FunctionEmitter<'a> {
                 return Ok(());
             }
             "__rune_builtin_fs_remove"
+            | "__rune_builtin_fs_set_current_dir"
             | "__rune_builtin_fs_create_dir"
-            | "__rune_builtin_fs_create_dir_all" => {
+            | "__rune_builtin_fs_create_dir_all"
+            | "__rune_builtin_fs_is_file"
+            | "__rune_builtin_fs_is_dir" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
                 let (ptr, len) = split_string_value(&rendered)?;
                 let reg = self.next_reg();
                 let runtime = match callee {
                     "__rune_builtin_fs_remove" => "rune_rt_fs_remove",
+                    "__rune_builtin_fs_set_current_dir" => "rune_rt_fs_set_current_dir",
                     "__rune_builtin_fs_create_dir" => "rune_rt_fs_create_dir",
                     "__rune_builtin_fs_create_dir_all" => "rune_rt_fs_create_dir_all",
+                    "__rune_builtin_fs_is_file" => "rune_rt_fs_is_file",
+                    "__rune_builtin_fs_is_dir" => "rune_rt_fs_is_dir",
                     _ => unreachable!(),
                 };
                 self.declared_runtime
@@ -2248,6 +2294,21 @@ impl<'a> FunctionEmitter<'a> {
                     .insert(format!("declare i1 @{runtime}(ptr, i64, ptr, i64)\n"));
                 out.push_str(&format!(
                     "  {reg} = call i1 @{runtime}({from_ptr}, {from_len}, {to_ptr}, {to_len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_fs_file_size" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_fs_file_size(ptr, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_fs_file_size({ptr}, {len})\n"
                 ));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
@@ -4124,14 +4185,21 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"
         | "__rune_builtin_fs_exists"
+        | "__rune_builtin_fs_set_current_dir"
         | "__rune_builtin_fs_write_string"
+        | "__rune_builtin_fs_append_string"
         | "__rune_builtin_fs_remove"
         | "__rune_builtin_fs_rename"
         | "__rune_builtin_fs_copy"
         | "__rune_builtin_fs_create_dir"
         | "__rune_builtin_fs_create_dir_all"
+        | "__rune_builtin_fs_is_file"
+        | "__rune_builtin_fs_is_dir"
         | "__rune_builtin_audio_bell" => Some(IrType::Bool),
-        "__rune_builtin_fs_read_string" => Some(IrType::String),
+        "__rune_builtin_fs_current_dir"
+        | "__rune_builtin_fs_read_string"
+        | "__rune_builtin_fs_canonicalize" => Some(IrType::String),
+        "__rune_builtin_fs_file_size" => Some(IrType::I64),
         _ => None,
     }
 }

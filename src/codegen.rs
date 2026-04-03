@@ -2198,6 +2198,17 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_fs_current_dir" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_fs_current_dir` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_fs_current_dir\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_fs_read_string" {
             let [CallArg::Positional(path_expr)] = args else {
                 return Err(CodegenError {
@@ -2211,21 +2222,28 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
-        if name == "__rune_builtin_fs_write_string" {
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_fs_write_string" | "__rune_builtin_fs_append_string"
+        ) {
             let [
                 CallArg::Positional(path_expr),
                 CallArg::Positional(content_expr),
             ] = args
             else {
                 return Err(CodegenError {
-                    message: "`__rune_builtin_fs_write_string` expects 2 positional arguments"
-                        .to_string(),
+                    message: format!("`{name}` expects 2 positional arguments"),
                     span,
                 });
             };
             self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
             self.emit_string_arg(out, content_expr, "r8", "r9", "filesystem content")?;
-            out.push_str("    call rune_rt_fs_write_string\n");
+            let runtime = match name.as_str() {
+                "__rune_builtin_fs_write_string" => "rune_rt_fs_write_string",
+                "__rune_builtin_fs_append_string" => "rune_rt_fs_append_string",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
             out.push_str("    movzx rax, al\n");
             return Ok(());
         }
@@ -2233,8 +2251,11 @@ impl<'a> FunctionEmitter<'a> {
         if matches!(
             name.as_str(),
             "__rune_builtin_fs_remove"
+                | "__rune_builtin_fs_set_current_dir"
                 | "__rune_builtin_fs_create_dir"
                 | "__rune_builtin_fs_create_dir_all"
+                | "__rune_builtin_fs_is_file"
+                | "__rune_builtin_fs_is_dir"
         ) {
             let [CallArg::Positional(path_expr)] = args else {
                 return Err(CodegenError {
@@ -2245,12 +2266,35 @@ impl<'a> FunctionEmitter<'a> {
             self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
             let runtime = match name.as_str() {
                 "__rune_builtin_fs_remove" => "rune_rt_fs_remove",
+                "__rune_builtin_fs_set_current_dir" => "rune_rt_fs_set_current_dir",
                 "__rune_builtin_fs_create_dir" => "rune_rt_fs_create_dir",
                 "__rune_builtin_fs_create_dir_all" => "rune_rt_fs_create_dir_all",
+                "__rune_builtin_fs_is_file" => "rune_rt_fs_is_file",
+                "__rune_builtin_fs_is_dir" => "rune_rt_fs_is_dir",
                 _ => unreachable!(),
             };
             out.push_str(&format!("    call {runtime}\n"));
             out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_fs_canonicalize" | "__rune_builtin_fs_file_size"
+        ) {
+            let [CallArg::Positional(path_expr)] = args else {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 1 positional argument"),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
+            let runtime = match name.as_str() {
+                "__rune_builtin_fs_canonicalize" => "rune_rt_fs_canonicalize",
+                "__rune_builtin_fs_file_size" => "rune_rt_fs_file_size",
+                _ => unreachable!(),
+            };
+            out.push_str(&format!("    call {runtime}\n"));
             return Ok(());
         }
 
@@ -5589,7 +5633,11 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"
         | "__rune_builtin_fs_exists"
+        | "__rune_builtin_fs_set_current_dir"
+        | "__rune_builtin_fs_is_file"
+        | "__rune_builtin_fs_is_dir"
         | "__rune_builtin_fs_write_string"
+        | "__rune_builtin_fs_append_string"
         | "__rune_builtin_fs_remove"
         | "__rune_builtin_fs_rename"
         | "__rune_builtin_fs_copy"
@@ -5608,10 +5656,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_last_error_message"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv"
-        | "__rune_builtin_fs_read_string" => Some(IrType::String),
+        | "__rune_builtin_fs_current_dir"
+        | "__rune_builtin_fs_read_string"
+        | "__rune_builtin_fs_canonicalize" => Some(IrType::String),
         "__rune_builtin_network_last_error_code" => Some(IrType::I32),
         "__rune_builtin_network_tcp_server_open"
         | "__rune_builtin_network_tcp_client_open" => Some(IrType::I32),
+        "__rune_builtin_fs_file_size" => Some(IrType::I64),
         _ => None,
     }
 }

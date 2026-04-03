@@ -755,6 +755,36 @@ fn fs_program() -> Program {
     Program {
         items: vec![
             Item::Function(function(
+                "current_dir",
+                vec![],
+                "String",
+                vec![return_stmt(call_name("__rune_builtin_fs_current_dir", vec![]))],
+            )),
+            Item::Function(function(
+                "cwd",
+                vec![],
+                "String",
+                vec![return_stmt(call_name("current_dir", vec![]))],
+            )),
+            Item::Function(function(
+                "set_current_dir",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_set_current_dir",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "chdir",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "set_current_dir",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
                 "exists",
                 vec![param("path", "String")],
                 "bool",
@@ -812,6 +842,33 @@ fn fs_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "append_string",
+                vec![param("path", "String"), param("content", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_append_string",
+                    vec![pos(ident("path")), pos(ident("content"))],
+                ))],
+            )),
+            Item::Function(function(
+                "append_text",
+                vec![param("path", "String"), param("content", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "append_string",
+                    vec![pos(ident("path")), pos(ident("content"))],
+                ))],
+            )),
+            Item::Function(function(
+                "append",
+                vec![param("path", "String"), param("content", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "append_string",
+                    vec![pos(ident("path")), pos(ident("content"))],
+                ))],
+            )),
+            Item::Function(function(
                 "remove",
                 vec![param("path", "String")],
                 "bool",
@@ -857,6 +914,60 @@ fn fs_program() -> Program {
                 vec![return_stmt(call_name(
                     "__rune_builtin_fs_copy",
                     vec![pos(ident("from_path")), pos(ident("to_path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "is_file",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_is_file",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "is_dir",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_is_dir",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "canonicalize",
+                vec![param("path", "String")],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_canonicalize",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "absolute",
+                vec![param("path", "String")],
+                "String",
+                vec![return_stmt(call_name(
+                    "canonicalize",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "file_size",
+                vec![param("path", "String")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_file_size",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "size",
+                vec![param("path", "String")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "file_size",
+                    vec![pos(ident("path"))],
                 ))],
             )),
             Item::Function(function(

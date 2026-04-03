@@ -995,12 +995,16 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"
         | "__rune_builtin_fs_exists"
+        | "__rune_builtin_fs_set_current_dir"
         | "__rune_builtin_fs_write_string"
+        | "__rune_builtin_fs_append_string"
         | "__rune_builtin_fs_remove"
         | "__rune_builtin_fs_rename"
         | "__rune_builtin_fs_copy"
         | "__rune_builtin_fs_create_dir"
         | "__rune_builtin_fs_create_dir_all"
+        | "__rune_builtin_fs_is_file"
+        | "__rune_builtin_fs_is_dir"
         | "__rune_builtin_audio_bell"
         | "__rune_builtin_json_is_null"
         | "__rune_builtin_json_to_bool"
@@ -1008,14 +1012,18 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_arduino_servo_detach"
         | "__rune_builtin_arduino_servo_write"
         | "__rune_builtin_arduino_servo_write_us" => Some(IrType::Unit),
-        "__rune_builtin_fs_read_string"
+        "__rune_builtin_fs_current_dir"
+        | "__rune_builtin_fs_read_string"
+        | "__rune_builtin_fs_canonicalize"
         | "__rune_builtin_json_stringify"
         | "__rune_builtin_json_kind"
         | "__rune_builtin_json_to_string" => Some(IrType::String),
         "__rune_builtin_json_parse"
         | "__rune_builtin_json_get"
         | "__rune_builtin_json_index" => Some(IrType::Json),
-        "__rune_builtin_json_len" | "__rune_builtin_json_to_i64" => Some(IrType::I64),
+        "__rune_builtin_fs_file_size"
+        | "__rune_builtin_json_len"
+        | "__rune_builtin_json_to_i64" => Some(IrType::I64),
         _ => None,
     }
 }
