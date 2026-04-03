@@ -513,8 +513,13 @@ fn build_arduino_uno_hex(
     let variant_dir = core_root.join("variants").join("standard");
     let servo_dir = find_arduino_avr_servo_library_root();
     let include_servo_sources = program_uses_arduino_servo(program);
+    let servo_include_dir = if include_servo_sources {
+        servo_dir.as_deref()
+    } else {
+        None
+    };
     let common_args =
-        arduino_uno_common_compile_args(&core_dir, &variant_dir, servo_dir.as_deref());
+        arduino_uno_common_compile_args(&core_dir, &variant_dir, servo_include_dir);
 
     let sketch_compile = Command::new(&gpp)
         .args(&common_args)
@@ -545,7 +550,7 @@ fn build_arduino_uno_hex(
         &gpp,
         &core_dir,
         &variant_dir,
-        servo_dir.as_deref(),
+        servo_include_dir,
         include_servo_sources,
     )?);
 
@@ -742,8 +747,13 @@ fn build_arduino_uno_hex_via_llvm_cbe(
     let variant_dir = core_root.join("variants").join("standard");
     let servo_dir = find_arduino_avr_servo_library_root();
     let include_servo_sources = program_uses_arduino_servo(program);
+    let servo_include_dir = if include_servo_sources {
+        servo_dir.as_deref()
+    } else {
+        None
+    };
     let common_args =
-        arduino_uno_common_compile_args(&core_dir, &variant_dir, servo_dir.as_deref());
+        arduino_uno_common_compile_args(&core_dir, &variant_dir, servo_include_dir);
 
     let c_compile = Command::new(&gcc)
         .args(&common_args)
@@ -794,7 +804,7 @@ fn build_arduino_uno_hex_via_llvm_cbe(
         &gpp,
         &core_dir,
         &variant_dir,
-        servo_dir.as_deref(),
+        servo_include_dir,
         include_servo_sources,
     )?);
 
@@ -875,6 +885,7 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
         BuildError::ToolNotFound("packaged Rune Arduino AVR runtime header not found".into())
     })?;
     let entrypoint = detect_arduino_uno_entrypoint_kind(program).map_err(BuildError::Codegen)?;
+    let include_servo_sources = program_uses_arduino_servo(program);
     let llvm_ir = emit_llvm_ir(program).map_err(|error| {
         BuildError::Codegen(CodegenError {
             message: error.message,
@@ -917,7 +928,7 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
         context: format!("failed to read `{}`", runtime_header_path.display()),
         source,
     })?;
-    let runtime_cpp = emit_arduino_uno_cbe_runtime_cpp(entrypoint);
+    let runtime_cpp = emit_arduino_uno_cbe_runtime_cpp_with_features(entrypoint, include_servo_sources);
 
     let _ = fs::remove_file(&llvm_ir_path);
     let _ = fs::remove_file(&c_path);
@@ -1011,12 +1022,18 @@ fn rewrite_llvm_global_identifiers(source: &str, rename_map: &HashMap<String, St
     out
 }
 
-fn emit_arduino_uno_cbe_runtime_cpp(entrypoint: ArduinoUnoEntrypointKind) -> String {
-    let define = match entrypoint {
+fn emit_arduino_uno_cbe_runtime_cpp_with_features(
+    entrypoint: ArduinoUnoEntrypointKind,
+    enable_servo: bool,
+) -> String {
+    let mut defines = vec![match entrypoint {
         ArduinoUnoEntrypointKind::Main => "#define RUNE_ARDUINO_ENTRY_MAIN 1",
         ArduinoUnoEntrypointKind::SetupLoop => "#define RUNE_ARDUINO_ENTRY_SETUP_LOOP 1",
-    };
-    format!("{define}\n#include \"rune_arduino_runtime.hpp\"\n")
+    }];
+    if enable_servo {
+        defines.push("#define RUNE_ARDUINO_ENABLE_SERVO 1");
+    }
+    format!("{}\n#include \"rune_arduino_runtime.hpp\"\n", defines.join("\n"))
 }
 
 fn flash_arduino_uno_hex(hex_path: &Path, port: Option<&str>) -> Result<(), BuildError> {
@@ -2365,7 +2382,11 @@ fn compile_arduino_uno_core_sources(
     }
     }
 
-    let common_args = arduino_uno_common_compile_args(core_dir, variant_dir, servo_dir);
+    let common_args = arduino_uno_common_compile_args(
+        core_dir,
+        variant_dir,
+        if include_servo_sources { servo_dir } else { None },
+    );
     let mut objects = Vec::new();
 
     for source_path in sources {

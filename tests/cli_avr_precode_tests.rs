@@ -45,3 +45,52 @@ fn emit_avr_precode_command_prints_real_uno_pre_elf_code() {
             || stdout.contains("int main(")
     );
 }
+
+#[test]
+fn emit_avr_precode_omits_servo_runtime_when_unused() {
+    let dir = temp_dir();
+    let source_path = dir.join("uno_no_servo_precode.rn");
+
+    fs::write(&source_path, "println(\"hello avr\")\n")
+        .expect("failed to write rune source");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rune"))
+        .arg("emit-avr-precode")
+        .arg(&source_path)
+        .output()
+        .expect("failed to run rune emit-avr-precode");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    if stdout.contains("// --- rune_arduino_uno_runtime.cpp ---") {
+        assert!(!stdout.contains("#define RUNE_ARDUINO_ENABLE_SERVO 1"));
+    }
+}
+
+#[test]
+fn emit_avr_precode_enables_servo_runtime_when_used() {
+    let dir = temp_dir();
+    let source_path = dir.join("uno_servo_precode.rn");
+
+    fs::write(
+        &source_path,
+        "from arduino import servo_attach\n\n\
+def main() -> i32:\n    println(servo_attach(9))\n    return 0\n",
+    )
+    .expect("failed to write rune source");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rune"))
+        .arg("emit-avr-precode")
+        .arg(&source_path)
+        .output()
+        .expect("failed to run rune emit-avr-precode");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    if stdout.contains("// --- rune_arduino_uno_runtime.cpp ---") {
+        assert!(stdout.contains("#define RUNE_ARDUINO_ENABLE_SERVO 1"));
+    } else {
+        assert!(stdout.contains("rune_rt_arduino_servo_attach("));
+        assert!(stdout.contains("alignas(Servo)"));
+    }
+}
