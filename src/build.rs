@@ -1107,6 +1107,7 @@ enum ArduinoUnoReturnKind {
 }
 
 fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
+    let include_servo_sources = program_uses_arduino_servo(program);
     let main = program.items.iter().find_map(|item| match item {
         Item::Function(function) if function.name == "main" => Some(function),
         _ => None,
@@ -1230,19 +1231,77 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
         emit_arduino_uno_function_definitions(&helper_functions, &helper_signatures, &struct_signatures)?;
     let method_definitions =
         emit_arduino_uno_method_definitions(program, &helper_signatures, &struct_signatures)?;
+    let servo_include = if include_servo_sources {
+        "#include <Servo.h>\n"
+    } else {
+        ""
+    };
+    let servo_globals = if include_servo_sources {
+        "alignas(Servo) static unsigned char rune_servo_storage[20][sizeof(Servo)];\n\
+static Servo* rune_servo_slots[20] = { nullptr };\n\
+static bool rune_servo_constructed_flags[20] = { false };\n\
+static bool rune_servo_attached_flags[20] = { false };\n\n\
+"
+    } else {
+        ""
+    };
+    let servo_functions = if include_servo_sources {
+        "static bool rune_rt_arduino_servo_attach(int64_t pin) {\n\
+    if (pin < 0 || pin >= 20) {\n\
+        return false;\n\
+    }\n\
+    uint8_t slot = (uint8_t)pin;\n\
+    if (rune_servo_slots[slot] == nullptr) {\n\
+        rune_servo_slots[slot] = new (&rune_servo_storage[slot][0]) Servo();\n\
+        rune_servo_constructed_flags[slot] = true;\n\
+    }\n\
+    if (!rune_servo_attached_flags[slot]) {\n\
+        rune_servo_slots[slot]->attach((int)pin);\n\
+        rune_servo_attached_flags[slot] = true;\n\
+    }\n\
+    return rune_servo_attached_flags[slot];\n\
+}\n\n\
+static void rune_rt_arduino_servo_detach(int64_t pin) {\n\
+    if (pin < 0 || pin >= 20) {\n\
+        return;\n\
+    }\n\
+    uint8_t slot = (uint8_t)pin;\n\
+    if (rune_servo_slots[slot] != nullptr && rune_servo_attached_flags[slot]) {\n\
+        rune_servo_slots[slot]->detach();\n\
+        rune_servo_attached_flags[slot] = false;\n\
+    }\n\
+}\n\n\
+static void rune_rt_arduino_servo_write(int64_t pin, int64_t angle) {\n\
+    if (!rune_rt_arduino_servo_attach(pin)) {\n\
+        return;\n\
+    }\n\
+    if (angle < 0) {\n\
+        angle = 0;\n\
+    } else if (angle > 180) {\n\
+        angle = 180;\n\
+    }\n\
+    rune_servo_slots[(uint8_t)pin]->write((int)angle);\n\
+}\n\n\
+static void rune_rt_arduino_servo_write_us(int64_t pin, int64_t pulse_us) {\n\
+    if (!rune_rt_arduino_servo_attach(pin)) {\n\
+        return;\n\
+    }\n\
+    rune_servo_slots[(uint8_t)pin]->writeMicroseconds((int)pulse_us);\n\
+}\n\n\
+"
+    } else {
+        ""
+    };
 
     Ok(format!(
-        "#include <Arduino.h>\n#include <Servo.h>\n#include <new>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\n\
+        "#include <Arduino.h>\n{servo_include}#include <new>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\n\
 static char rune_input_buffer[96];\n\n\
 static char rune_dynamic_concat_buffer[160];\n\n\
 #define RUNE_STRING_SLOT_COUNT 8\n\
 #define RUNE_STRING_SLOT_SIZE 96\n\n\
 static char rune_string_slots[RUNE_STRING_SLOT_COUNT][RUNE_STRING_SLOT_SIZE];\n\
 static uint8_t rune_string_slot_index = 0;\n\n\
-alignas(Servo) static unsigned char rune_servo_storage[20][sizeof(Servo)];\n\
-static Servo* rune_servo_slots[20] = {{ nullptr }};\n\
-static bool rune_servo_constructed_flags[20] = {{ false }};\n\
-static bool rune_servo_attached_flags[20] = {{ false }};\n\n\
+{servo_globals}\
 typedef struct rune_dynamic_value {{\n\
     int64_t tag;\n\
     int64_t payload;\n\
@@ -1348,48 +1407,7 @@ static const char* rune_string_from_i64(int64_t value) {{\n\
 static const char* rune_string_from_bool(bool value) {{\n\
     return value ? \"true\" : \"false\";\n\
 }}\n\n\
-static bool rune_rt_arduino_servo_attach(int64_t pin) {{\n\
-    if (pin < 0 || pin >= 20) {{\n\
-        return false;\n\
-    }}\n\
-    uint8_t slot = (uint8_t)pin;\n\
-    if (rune_servo_slots[slot] == nullptr) {{\n\
-        rune_servo_slots[slot] = new (&rune_servo_storage[slot][0]) Servo();\n\
-        rune_servo_constructed_flags[slot] = true;\n\
-    }}\n\
-    if (!rune_servo_attached_flags[slot]) {{\n\
-        rune_servo_slots[slot]->attach((int)pin);\n\
-        rune_servo_attached_flags[slot] = true;\n\
-    }}\n\
-    return rune_servo_attached_flags[slot];\n\
-}}\n\n\
-static void rune_rt_arduino_servo_detach(int64_t pin) {{\n\
-    if (pin < 0 || pin >= 20) {{\n\
-        return;\n\
-    }}\n\
-    uint8_t slot = (uint8_t)pin;\n\
-    if (rune_servo_slots[slot] != nullptr && rune_servo_attached_flags[slot]) {{\n\
-        rune_servo_slots[slot]->detach();\n\
-        rune_servo_attached_flags[slot] = false;\n\
-    }}\n\
-}}\n\n\
-static void rune_rt_arduino_servo_write(int64_t pin, int64_t angle) {{\n\
-    if (!rune_rt_arduino_servo_attach(pin)) {{\n\
-        return;\n\
-    }}\n\
-    if (angle < 0) {{\n\
-        angle = 0;\n\
-    }} else if (angle > 180) {{\n\
-        angle = 180;\n\
-    }}\n\
-    rune_servo_slots[(uint8_t)pin]->write((int)angle);\n\
-}}\n\n\
-static void rune_rt_arduino_servo_write_us(int64_t pin, int64_t pulse_us) {{\n\
-    if (!rune_rt_arduino_servo_attach(pin)) {{\n\
-        return;\n\
-    }}\n\
-    rune_servo_slots[(uint8_t)pin]->writeMicroseconds((int)pulse_us);\n\
-}}\n\n\
+{servo_functions}\
 static rune_dynamic_value rune_dynamic_from_i64(int64_t value) {{\n\
     rune_dynamic_value out = {{1, value, nullptr}};\n\
     return out;\n\
