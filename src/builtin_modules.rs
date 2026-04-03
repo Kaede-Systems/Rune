@@ -639,6 +639,118 @@ fn io_program() -> Program {
     }
 }
 
+fn terminal_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "clear",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("__rune_builtin_terminal_clear", vec![]))],
+            )),
+            Item::Function(function(
+                "clear_screen",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("clear", vec![]))],
+            )),
+            Item::Function(function(
+                "move_to",
+                vec![param("row", "i32"), param("col", "i32")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_terminal_move_to",
+                    vec![pos(ident("row")), pos(ident("col"))],
+                ))],
+            )),
+            Item::Function(function(
+                "move_cursor",
+                vec![param("row", "i32"), param("col", "i32")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "move_to",
+                    vec![pos(ident("row")), pos(ident("col"))],
+                ))],
+            )),
+            Item::Function(function(
+                "hide_cursor",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_terminal_hide_cursor",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "cursor_hide",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("hide_cursor", vec![]))],
+            )),
+            Item::Function(function(
+                "show_cursor",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_terminal_show_cursor",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "cursor_show",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("show_cursor", vec![]))],
+            )),
+            Item::Function(function(
+                "set_title",
+                vec![param("title", "String")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_terminal_set_title",
+                    vec![pos(ident("title"))],
+                ))],
+            )),
+            Item::Function(function(
+                "title",
+                vec![param("text", "String")],
+                "unit",
+                vec![expr_stmt(call_name("set_title", vec![pos(ident("text"))]))],
+            )),
+            Item::Function(function(
+                "home",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "move_to",
+                    vec![pos(int_lit(1)), pos(int_lit(1))],
+                ))],
+            )),
+            Item::Function(function(
+                "clear_and_home",
+                vec![],
+                "unit",
+                vec![
+                    expr_stmt(call_name("clear", vec![])),
+                    expr_stmt(call_name("move_to", vec![pos(int_lit(1)), pos(int_lit(1))])),
+                ],
+            )),
+            Item::Function(function(
+                "hide",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("hide_cursor", vec![]))],
+            )),
+            Item::Function(function(
+                "show",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("show_cursor", vec![]))],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -2869,6 +2981,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "io" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/io"),
             body: BuiltinModuleBody::Program(io_program()),
+        }),
+        [name] if name == "terminal" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/terminal"),
+            body: BuiltinModuleBody::Program(terminal_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),
