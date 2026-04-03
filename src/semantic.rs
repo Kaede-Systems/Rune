@@ -1368,16 +1368,18 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::String)
                 }
-                "str" => {
+                "str" | "repr" => {
+                    let display_name = name;
+                    let magic_name = if name == "repr" { "__repr__" } else { "__str__" };
                     if args.len() != 1 {
                         return Err(SemanticError {
-                            message: "`str` expects 1 argument".to_string(),
+                            message: format!("`{display_name}` expects 1 argument"),
                             span,
                         });
                     }
                     let CallArg::Positional(expr) = &args[0] else {
                         return Err(SemanticError {
-                            message: "`str` does not accept keyword arguments".to_string(),
+                            message: format!("`{display_name}` does not accept keyword arguments"),
                             span,
                         });
                     };
@@ -1399,13 +1401,13 @@ impl<'a> Analyzer<'a> {
                                 span: expr.span,
                             });
                         };
-                        if let Some(method_sig) = struct_sig.methods.get("__str__")
+                        if let Some(method_sig) = struct_sig.methods.get(magic_name)
                             && (method_sig.params.len() != 1
                                 || method_sig.return_type != Type::String)
                         {
                             return Err(SemanticError {
                                 message: format!(
-                                    "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String`"
+                                    "`{display_name}` on `{struct_name}` requires `{magic_name}`, when defined, to have signature `{magic_name}(self) -> String`"
                                 ),
                                 span: expr.span,
                             });
@@ -1414,7 +1416,7 @@ impl<'a> Analyzer<'a> {
                     } else {
                         Err(SemanticError {
                             message: format!(
-                                "`str` expects a bool, integer, Json, string, dynamic value, or a class/struct value, found `{}`",
+                                "`{display_name}` expects a bool, integer, Json, string, dynamic value, or a class/struct value, found `{}`",
                                 actual.name()
                             ),
                             span: expr.span,

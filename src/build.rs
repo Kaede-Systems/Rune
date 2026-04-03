@@ -2948,10 +2948,12 @@ fn emit_arduino_uno_expr(
                         })?;
                     Ok((format!("(Serial.println({}), true)", text), ArduinoUnoType::Bool))
                 }
-                "str" => {
+                "str" | "repr" => {
+                    let display_name = dispatch_name;
+                    let magic_name = if dispatch_name == "repr" { "__repr__" } else { "__str__" };
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
                         return Err(CodegenError {
-                            message: "`str` expects 1 positional argument on the Arduino Uno target".into(),
+                            message: format!("`{display_name}` expects 1 positional argument on the Arduino Uno target"),
                             span: expr.span,
                         });
                     };
@@ -2975,13 +2977,13 @@ fn emit_arduino_uno_expr(
                                 message: format!("Arduino Uno target is missing struct layout for `{struct_name}`"),
                                 span: expr.span,
                             })?;
-                            if let Some(method_sig) = struct_sig.methods.get("__str__") {
+                            if let Some(method_sig) = struct_sig.methods.get(magic_name) {
                                 if method_sig.params.len() != 1
                                     || method_sig.return_type != Some(ArduinoUnoType::String)
                                 {
                                     return Err(CodegenError {
                                         message: format!(
-                                            "Arduino Uno target `str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String`"
+                                            "Arduino Uno target `{display_name}` on `{struct_name}` requires `{magic_name}`, when defined, to have signature `{magic_name}(self) -> String`"
                                         ),
                                         span: expr.span,
                                     });
@@ -2992,7 +2994,7 @@ fn emit_arduino_uno_expr(
                                         functions,
                                         structs,
                                         &struct_name,
-                                        "__str__",
+                                        magic_name,
                                         method_sig,
                                         &rendered,
                                         &[],

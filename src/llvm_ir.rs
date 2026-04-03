@@ -1098,17 +1098,21 @@ impl<'a> FunctionEmitter<'a> {
         }
 
         match callee {
-            "str" => {
+            "str" | "repr" => {
+                let display_name = callee;
+                let magic_name = if callee == "repr" { "__repr__" } else { "__str__" };
                 let [arg] = args else {
                     return Err(LlvmIrError {
-                        message: "`str` expects exactly 1 positional argument in the current LLVM IR backend".into(),
+                        message: format!(
+                            "`{display_name}` expects exactly 1 positional argument in the current LLVM IR backend"
+                        ),
                     });
                 };
                 if arg.name.is_some() {
                     return Err(LlvmIrError {
-                        message:
-                            "`str` does not accept keyword arguments in the current LLVM IR backend"
-                                .into(),
+                        message: format!(
+                            "`{display_name}` does not accept keyword arguments in the current LLVM IR backend"
+                        ),
                     });
                 }
                 let src_ty = self
@@ -1117,7 +1121,7 @@ impl<'a> FunctionEmitter<'a> {
                     .or_else(|| self.local_types.get(&arg.value))
                     .cloned()
                     .ok_or_else(|| LlvmIrError {
-                        message: format!("missing type for `str` argument `{}`", arg.value),
+                        message: format!("missing type for `{display_name}` argument `{}`", arg.value),
                     })?;
                 let rendered = match src_ty {
                     IrType::String => self.resolve_value(&arg.value, &IrType::String, out)?,
@@ -1205,12 +1209,12 @@ impl<'a> FunctionEmitter<'a> {
                         format!("ptr {ptr_reg}, i64 {len_reg}")
                     }
                     IrType::Struct(struct_name) => {
-                        let synthetic_name = struct_method_symbol(&struct_name, "__str__");
+                        let synthetic_name = struct_method_symbol(&struct_name, magic_name);
                         if let Some(sig) = self.signatures.get(&synthetic_name) {
                             if sig.params.len() != 1 || sig.ret != IrType::String {
                                 return Err(LlvmIrError {
                                     message: format!(
-                                        "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String` in the current LLVM IR backend"
+                                        "`{display_name}` on `{struct_name}` requires `{magic_name}`, when defined, to have signature `{magic_name}(self) -> String` in the current LLVM IR backend"
                                     ),
                                 });
                             }
@@ -1247,7 +1251,7 @@ impl<'a> FunctionEmitter<'a> {
                     other => {
                         return Err(LlvmIrError {
                             message: format!(
-                                "`str` currently supports only bool, i32, i64, Json, dynamic, String, and class/struct values in the LLVM IR backend, found `{}`",
+                                "`{display_name}` currently supports only bool, i32, i64, Json, dynamic, String, and class/struct values in the LLVM IR backend, found `{}`",
                                 match other {
                                     IrType::Bool => "bool",
                                     IrType::Dynamic => "dynamic",
@@ -3911,7 +3915,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
             Some(IrType::String)
         }
         "panic" => Some(IrType::Unit),
-        "str" => Some(IrType::String),
+        "str" | "repr" => Some(IrType::String),
         "int" => Some(IrType::I64),
         "__rune_builtin_json_parse" => Some(IrType::Json),
         "__rune_builtin_json_stringify"

@@ -146,6 +146,7 @@ Current implemented struct rules:
 - class values are stack-backed in the native backend
 - object layout is concrete and low-level, not hidden-heap by default
 - `str(obj)` uses `__str__(self) -> String` when defined
+- `repr(obj)` uses `__repr__(self) -> String` when defined
 - `obj1 == obj2` / `obj1 != obj2` use `__eq__(self, other: SameType) -> bool` when defined
 - when `__eq__` is not defined, current same-type class equality falls back to field-wise comparison
 

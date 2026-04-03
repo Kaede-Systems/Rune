@@ -3616,11 +3616,13 @@ impl<'a> FunctionEmitter<'a> {
     ) -> Result<(), CodegenError> {
         if let ExprKind::Call { callee, args } = &expr.kind
             && let ExprKind::Identifier(name) = &callee.kind
-            && name == "str"
+            && (name == "str" || name == "repr")
         {
+            let display_name = name.as_str();
+            let magic_name = if name == "repr" { "__repr__" } else { "__str__" };
             let [CallArg::Positional(value_expr)] = args.as_slice() else {
                 return Err(CodegenError {
-                    message: "`str` expects 1 positional argument in the native backend".into(),
+                    message: format!("`{display_name}` expects 1 positional argument in the native backend"),
                     span: expr.span,
                 });
             };
@@ -3653,12 +3655,12 @@ impl<'a> FunctionEmitter<'a> {
                     out.push_str("    call rune_rt_json_to_string\n");
                 }
                 Some(IrType::Struct(struct_name)) => {
-                    let synthetic_name = struct_method_symbol(&struct_name, "__str__");
+                    let synthetic_name = struct_method_symbol(&struct_name, magic_name);
                     if self.function_names.contains(&synthetic_name) {
                         if self.function_returns.get(&synthetic_name) != Some(&IrType::String) {
                             return Err(CodegenError {
                                 message: format!(
-                                    "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String` in the native backend"
+                                    "`{display_name}` on `{struct_name}` requires `{magic_name}`, when defined, to have signature `{magic_name}(self) -> String` in the native backend"
                                 ),
                                 span: expr.span,
                             });
@@ -3687,8 +3689,9 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 _ => {
                     return Err(CodegenError {
-                        message: "`str` conversion is not supported for this expression in the native backend"
-                            .into(),
+                        message: format!(
+                            "`{display_name}` conversion is not supported for this expression in the native backend"
+                        ),
                         span: expr.span,
                     });
                 }
@@ -5387,7 +5390,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
             Some(IrType::String)
         }
         "panic" => Some(IrType::Unit),
-        "str" => Some(IrType::String),
+        "str" | "repr" => Some(IrType::String),
         "int" => Some(IrType::I64),
         "__rune_builtin_json_parse" => Some(IrType::Json),
         "__rune_builtin_json_stringify"

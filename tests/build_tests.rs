@@ -1265,6 +1265,36 @@ fn builds_arduino_uno_with_str_magic_method() {
 }
 
 #[test]
+fn builds_arduino_uno_with_repr_magic_method() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_repr_magic.rn");
+    let output_path = dir.join("arduino_uno_repr_magic.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __repr__(self) -> String:\n        return \"Counter<value=\" + str(self.value) + \">\"\n\n\
+         def main() -> i32:\n    println(repr(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno repr magic method build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno repr magic hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_with_default_object_string() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_default_object_str.rn");

@@ -511,6 +511,31 @@ fn builds_and_runs_str_magic_method_program() {
 }
 
 #[test]
+fn builds_and_runs_repr_magic_method_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_repr_magic_demo.rn");
+    let exe_path = dir.join("class_repr_magic_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __repr__(self) -> String:\n        return \"Counter<value=\" + str(self.value) + \">\"\n\n\
+         def main() -> i32:\n    println(repr(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("repr magic method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run repr magic method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter<value=5>\n");
+}
+
+#[test]
 fn builds_and_runs_default_struct_equality_program() {
     let dir = temp_dir();
     let source_path = dir.join("default_struct_eq.rn");
