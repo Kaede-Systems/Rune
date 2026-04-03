@@ -656,14 +656,63 @@ def main() -> i32:
         .expect("failed to run persistent network server program");
 
     let client_a = spawn_tcp_client_send_on_port(server_port as u16, b"alpha");
+    client_a.join().expect("accept client should finish");
     let client_b = spawn_tcp_client_request_on_port(server_port as u16, b"beta\n", "pong\n");
+    client_b.join().expect("reply client should finish");
 
     let output = child
         .wait_with_output()
         .expect("failed to wait for persistent network server program");
 
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "alpha\nbeta\n\ntrue\n");
+}
+
+#[test]
+fn builds_and_runs_stdlib_network_persistent_server_class_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("stdlib_network_persistent_server_class.rn");
+    let exe_path = dir.join("stdlib_network_persistent_server_class.exe");
+    let server_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve server port");
+    let server_port = server_probe.local_addr().expect("server probe addr").port() as i32;
+    drop(server_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import tcp_server
+
+def main() -> i32:
+    let server = tcp_server("127.0.0.1", {0})
+    let handle: i32 = server.open_handle()
+    println(server.accept(handle, 64, 1000))
+    println(server.reply_line(handle, "pong", 64, 1000))
+    println(server.close_handle(handle))
+    return 0
+"#,
+            server_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("persistent network server class program should build");
+
+    let child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run persistent network server class program");
+
+    let client_a = spawn_tcp_client_send_on_port(server_port as u16, b"alpha");
     client_a.join().expect("accept client should finish");
+    let client_b = spawn_tcp_client_request_on_port(server_port as u16, b"beta\n", "pong\n");
     client_b.join().expect("reply client should finish");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for persistent network server class program");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");

@@ -1235,6 +1235,102 @@ fn network_program() -> Program {
                 ],
             ))],
         ),
+        function(
+            "open_handle",
+            vec![param("self", "dynamic")],
+            "i32",
+            vec![return_stmt(call_name(
+                "tcp_server_open",
+                vec![pos(field(ident("self"), "host")), pos(field(ident("self"), "port"))],
+            ))],
+        ),
+        function(
+            "accept",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_server_accept",
+                vec![
+                    pos(ident("handle")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "reply",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("value", "dynamic"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_server_reply",
+                vec![
+                    pos(ident("handle")),
+                    pos(call_name("str", vec![pos(ident("value"))])),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "reply_line",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("value", "dynamic"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_server_reply_line",
+                vec![
+                    pos(ident("handle")),
+                    pos(ident("value")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "reply_text",
+            vec![
+                param("self", "dynamic"),
+                param("handle", "i32"),
+                param("value", "String"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_server_reply",
+                vec![
+                    pos(ident("handle")),
+                    pos(ident("value")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "close_handle",
+            vec![param("self", "dynamic"), param("handle", "i32")],
+            "bool",
+            vec![return_stmt(call_name(
+                "tcp_server_close",
+                vec![pos(ident("handle"))],
+            ))],
+        ),
     ];
 
     let udp_endpoint_methods = vec![
@@ -1688,6 +1784,29 @@ fn network_program() -> Program {
                     vec![
                         pos(ident("handle")),
                         pos(ident("data")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_server_reply_line",
+                vec![
+                    param("handle", "i32"),
+                    param("value", "dynamic"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "tcp_server_reply",
+                    vec![
+                        pos(ident("handle")),
+                        pos(binary(
+                            call_name("str", vec![pos(ident("value"))]),
+                            BinaryOp::Add,
+                            string_lit("\n"),
+                        )),
                         pos(ident("max_bytes")),
                         pos(ident("timeout_ms")),
                     ],

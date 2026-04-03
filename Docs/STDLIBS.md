@@ -401,7 +401,7 @@ from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 from network import tcp_send_line, udp_send_line, tcp_recv, tcp_recv_timeout, udp_recv
 from network import tcp_request, request, request_line, recv, recv_timeout, recv_udp
 from network import tcp_accept_once, accept_once, tcp_reply_once, reply_once, reply_once_line
-from network import tcp_server_open, tcp_server_accept, tcp_server_reply, tcp_server_close
+from network import tcp_server_open, tcp_server_accept, tcp_server_reply, tcp_server_reply_line, tcp_server_close
 from network import last_error_code, last_error, clear_error
 from network import connect, connect_timeout, probe, probe_timeout
 from network import listen, bind, send, send_line, send_udp, send_line_udp
@@ -435,6 +435,7 @@ Exports:
 - `tcp_server_open(host: String, port: i32) -> i32`
 - `tcp_server_accept(handle: i32, max_bytes: i32, timeout_ms: i32) -> String`
 - `tcp_server_reply(handle: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_server_reply_line(handle: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
 - `tcp_server_close(handle: i32) -> bool`
 - `last_error_code() -> i32`
 - `last_error() -> String`
@@ -475,6 +476,13 @@ Current implemented network scope:
 - class-style client/endpoint wrappers using the same `connect`, `probe`, `send`, and `send_line` names
 - class-style client/endpoint wrappers using the same `connect`, `bind`, `probe`, `send`, `send_line`, `recv`, `recv_timeout`, `request`, `request_line`, `send_text`, and `send_line_text` names
 - `TcpServer` exposes `listen`, `bind`, `accept_once`, `reply_once`, `reply_once_line`, and `reply_once_text`
+- `TcpServer` also exposes higher-level persistent-handle helpers:
+  - `open_handle()`
+  - `accept(handle, max_bytes, timeout_ms)`
+  - `reply(handle, value, max_bytes, timeout_ms)`
+  - `reply_line(handle, value, max_bytes, timeout_ms)`
+  - `reply_text(handle, value, max_bytes, timeout_ms)`
+  - `close_handle(handle)`
 - class-style client/endpoint wrappers also expose `send_text` and `send_line_text` for callers that prefer explicit text payloads
 - the current receive/request slice is verified on native and LLVM executable paths
 - the current one-shot server accept/reply slice is also verified on native and LLVM executable paths
