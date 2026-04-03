@@ -525,6 +525,120 @@ fn sys_program() -> Program {
     }
 }
 
+fn io_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "write",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name("print", vec![pos(call_name("str", vec![pos(ident("value"))]))]))],
+            )),
+            Item::Function(function(
+                "stdout_write",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name("write", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "writeln",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "println",
+                    vec![pos(call_name("str", vec![pos(ident("value"))]))],
+                ))],
+            )),
+            Item::Function(function(
+                "stdout_writeln",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name("writeln", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "error",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "eprint",
+                    vec![pos(call_name("str", vec![pos(ident("value"))]))],
+                ))],
+            )),
+            Item::Function(function(
+                "stderr_write",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name("error", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "errorln",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "eprintln",
+                    vec![pos(call_name("str", vec![pos(ident("value"))]))],
+                ))],
+            )),
+            Item::Function(function(
+                "stderr_writeln",
+                vec![param("value", "dynamic")],
+                "unit",
+                vec![expr_stmt(call_name("errorln", vec![pos(ident("value"))]))],
+            )),
+            Item::Function(function(
+                "flush_out",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("flush", vec![]))],
+            )),
+            Item::Function(function(
+                "flush_stdout",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("flush_out", vec![]))],
+            )),
+            Item::Function(function(
+                "flush_err",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("eflush", vec![]))],
+            )),
+            Item::Function(function(
+                "flush_stderr",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name("flush_err", vec![]))],
+            )),
+            Item::Function(function(
+                "read_line",
+                vec![],
+                "String",
+                vec![return_stmt(call_name("input", vec![]))],
+            )),
+            Item::Function(function(
+                "prompt",
+                vec![param("message", "String")],
+                "String",
+                vec![
+                    expr_stmt(call_name("write", vec![pos(ident("message"))])),
+                    expr_stmt(call_name("flush_out", vec![])),
+                    return_stmt(call_name("read_line", vec![])),
+                ],
+            )),
+            Item::Function(function(
+                "error_prompt",
+                vec![param("message", "String")],
+                "String",
+                vec![
+                    expr_stmt(call_name("error", vec![pos(ident("message"))])),
+                    expr_stmt(call_name("flush_err", vec![])),
+                    return_stmt(call_name("read_line", vec![])),
+                ],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -2751,6 +2865,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "sys" || name == "system" => Some(BuiltinModule {
             virtual_path: PathBuf::from(format!("<builtin>/{name}")),
             body: BuiltinModuleBody::Program(sys_program()),
+        }),
+        [name] if name == "io" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/io"),
+            body: BuiltinModuleBody::Program(io_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),

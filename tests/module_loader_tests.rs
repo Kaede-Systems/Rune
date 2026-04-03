@@ -74,11 +74,11 @@ fn loads_relative_imports() {
 }
 
 #[test]
-fn loads_builtin_env_time_sys_system_network_serial_and_gpio_modules_from_registry() {
+fn loads_builtin_env_time_sys_system_io_network_serial_and_gpio_modules_from_registry() {
     let dir = temp_dir();
     fs::write(
         dir.join("main.rn"),
-        "from env import get_or_empty\nfrom time import monotonic_ms\nfrom sys import platform\nfrom system import cpu_count\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    println(get_or_empty(\"RUNE_TEST\"))\n    println(monotonic_ms())\n    println(platform())\n    println(cpu_count())\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    return 0\n",
+        "from env import get_or_empty\nfrom time import monotonic_ms\nfrom sys import platform\nfrom system import cpu_count\nfrom io import writeln\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    writeln(get_or_empty(\"RUNE_TEST\"))\n    println(monotonic_ms())\n    println(platform())\n    println(cpu_count())\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    return 0\n",
     )
     .unwrap();
 
@@ -87,6 +87,7 @@ fn loads_builtin_env_time_sys_system_network_serial_and_gpio_modules_from_regist
     let time_path = PathBuf::from("<builtin>/time");
     let sys_path = PathBuf::from("<builtin>/sys");
     let system_path = PathBuf::from("<builtin>/system");
+    let io_path = PathBuf::from("<builtin>/io");
     let network_path = PathBuf::from("<builtin>/network");
     let serial_path = PathBuf::from("<builtin>/serial");
     let gpio_path = PathBuf::from("<builtin>/gpio");
@@ -94,12 +95,14 @@ fn loads_builtin_env_time_sys_system_network_serial_and_gpio_modules_from_regist
     assert!(bundle.sources.contains_key(&time_path));
     assert!(bundle.sources.contains_key(&sys_path));
     assert!(bundle.sources.contains_key(&system_path));
+    assert!(bundle.sources.contains_key(&io_path));
     assert!(bundle.sources.contains_key(&network_path));
     assert!(bundle.sources.contains_key(&serial_path));
     assert!(bundle.sources.contains_key(&gpio_path));
     assert_eq!(bundle.function_origins.get("get_or_empty"), Some(&env_path));
     assert_eq!(bundle.function_origins.get("monotonic_ms"), Some(&time_path));
     assert_eq!(bundle.function_origins.get("cpu_count"), Some(&system_path));
+    assert_eq!(bundle.function_origins.get("writeln"), Some(&io_path));
     assert!(
         bundle.function_origins.get("platform") == Some(&sys_path)
             || bundle.function_origins.get("platform") == Some(&system_path)
