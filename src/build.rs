@@ -3205,6 +3205,53 @@ fn emit_arduino_uno_expr(
         ExprKind::Binary { left, op, right } => {
             let lhs = emit_arduino_uno_expr(scope, functions, structs, left)?;
             let rhs = emit_arduino_uno_expr(scope, functions, structs, right)?;
+            if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual)
+                && matches!((&lhs.1, &rhs.1), (ArduinoUnoType::Struct(a), ArduinoUnoType::Struct(b)) if a == b)
+            {
+                let ArduinoUnoType::Struct(struct_name) = &lhs.1 else {
+                    unreachable!();
+                };
+                let struct_sig = structs.get(struct_name).ok_or_else(|| CodegenError {
+                    message: format!("Arduino Uno target is missing struct layout for `{struct_name}`"),
+                    span: expr.span,
+                })?;
+                if let Some(method_sig) = struct_sig.methods.get("__eq__") {
+                    if method_sig.params.len() != 2
+                        || method_sig.params[1].1 != ArduinoUnoType::Struct(struct_name.clone())
+                        || method_sig.return_type != Some(ArduinoUnoType::Bool)
+                    {
+                        return Err(CodegenError {
+                            message: format!(
+                                "Arduino Uno target `__eq__` on `{struct_name}` requires signature `__eq__(self, other: {struct_name}) -> bool`"
+                            ),
+                            span: expr.span,
+                        });
+                    }
+                    let rendered = emit_arduino_uno_method_call(
+                        scope,
+                        functions,
+                        structs,
+                        struct_name,
+                        "__eq__",
+                        method_sig,
+                        &lhs,
+                        &[CallArg::Positional((**right).clone())],
+                        expr.span,
+                    )?;
+                    let rendered = if matches!(op, BinaryOp::NotEqual) {
+                        format!("(!{rendered})")
+                    } else {
+                        rendered
+                    };
+                    return Ok((rendered, ArduinoUnoType::Bool));
+                }
+                return emit_arduino_uno_expr(
+                    scope,
+                    functions,
+                    structs,
+                    &build_default_struct_eq_expr(left, right, &struct_sig.fields, *op),
+                );
+            }
             match op {
                 BinaryOp::Add
                 | BinaryOp::Subtract
@@ -3792,6 +3839,13 @@ fn build_string_expr(span: crate::lexer::Span, value: impl Into<String>) -> Expr
     }
 }
 
+fn build_bool_expr(span: crate::lexer::Span, value: bool) -> Expr {
+    Expr {
+        kind: ExprKind::Bool(value),
+        span,
+    }
+}
+
 fn build_identifier_expr(span: crate::lexer::Span, name: &str) -> Expr {
     Expr {
         kind: ExprKind::Identifier(name.to_string()),
@@ -3800,10 +3854,14 @@ fn build_identifier_expr(span: crate::lexer::Span, name: &str) -> Expr {
 }
 
 fn build_binary_add_expr(span: crate::lexer::Span, left: Expr, right: Expr) -> Expr {
+    build_binary_expr(span, left, BinaryOp::Add, right)
+}
+
+fn build_binary_expr(span: crate::lexer::Span, left: Expr, op: BinaryOp, right: Expr) -> Expr {
     Expr {
         kind: ExprKind::Binary {
             left: Box::new(left),
-            op: BinaryOp::Add,
+            op,
             right: Box::new(right),
         },
         span,
@@ -3846,6 +3904,45 @@ fn build_default_struct_string_expr(
         rendered = build_binary_add_expr(span, rendered, build_str_call_expr(&field_expr));
     }
     build_binary_add_expr(span, rendered, build_string_expr(span, ")"))
+}
+
+fn build_default_struct_eq_expr(
+    left: &Expr,
+    right: &Expr,
+    fields: &[(String, ArduinoUnoType)],
+    op: BinaryOp,
+) -> Expr {
+    let span = left.span;
+    let mut rendered = build_bool_expr(span, true);
+    for (field_name, _) in fields {
+        let left_field = Expr {
+            kind: ExprKind::Field {
+                base: Box::new(left.clone()),
+                name: field_name.clone(),
+            },
+            span,
+        };
+        let right_field = Expr {
+            kind: ExprKind::Field {
+                base: Box::new(right.clone()),
+                name: field_name.clone(),
+            },
+            span,
+        };
+        let field_eq = build_binary_expr(span, left_field, BinaryOp::EqualEqual, right_field);
+        rendered = build_binary_expr(span, rendered, BinaryOp::And, field_eq);
+    }
+    if matches!(op, BinaryOp::NotEqual) {
+        Expr {
+            kind: ExprKind::Unary {
+                op: UnaryOp::Not,
+                expr: Box::new(rendered),
+            },
+            span,
+        }
+    } else {
+        rendered
+    }
 }
 
 fn stmt_span(stmt: &Stmt) -> crate::lexer::Span {

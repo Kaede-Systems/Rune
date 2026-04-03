@@ -1140,6 +1140,9 @@ impl<'a> FunctionEmitter<'a> {
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
                     return self.emit_logical_expr(out, left, op, right);
                 }
+                if self.try_emit_struct_equality(out, expr, left, op, right)? {
+                    return Ok(());
+                }
                 if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual)
                     && self.infer_expr_type(left) == Some(IrType::String)
                     && self.infer_expr_type(right) == Some(IrType::String)
@@ -4482,6 +4485,49 @@ impl<'a> FunctionEmitter<'a> {
         })
     }
 
+    fn try_emit_struct_equality(
+        &mut self,
+        out: &mut String,
+        expr: &Expr,
+        left: &Expr,
+        op: &BinaryOp,
+        right: &Expr,
+    ) -> Result<bool, CodegenError> {
+        if !matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual) {
+            return Ok(false);
+        }
+        let Some(IrType::Struct(struct_name)) = self.infer_expr_type(left) else {
+            return Ok(false);
+        };
+        if self.infer_expr_type(right) != Some(IrType::Struct(struct_name.clone())) {
+            return Ok(false);
+        }
+        if self.function_names.contains(&struct_method_symbol(&struct_name, "__eq__")) {
+            let callee = Expr {
+                kind: ExprKind::Identifier(struct_method_symbol(&struct_name, "__eq__")),
+                span: expr.span,
+            };
+            let args = vec![CallArg::Positional(left.clone()), CallArg::Positional(right.clone())];
+            self.emit_call(out, &callee, &args, expr.span)?;
+            if matches!(op, BinaryOp::NotEqual) {
+                out.push_str("    xor eax, 1\n");
+            }
+            out.push_str("    movzx rax, al\n");
+            return Ok(true);
+        }
+        let layout = self
+            .struct_layouts
+            .get(&struct_name)
+            .cloned()
+            .ok_or_else(|| CodegenError {
+                message: format!("missing struct layout for `{struct_name}` in the native backend"),
+                span: expr.span,
+            })?;
+        let compare_expr = build_default_struct_eq_expr(left, right, &layout, *op);
+        self.emit_expr(out, &compare_expr)?;
+        Ok(true)
+    }
+
     fn emit_struct_arg_ptr(
         &self,
         out: &mut String,
@@ -5485,6 +5531,13 @@ fn build_string_expr(span: Span, value: impl Into<String>) -> Expr {
     }
 }
 
+fn build_bool_expr(span: Span, value: bool) -> Expr {
+    Expr {
+        kind: ExprKind::Bool(value),
+        span,
+    }
+}
+
 fn build_identifier_expr(span: Span, name: &str) -> Expr {
     Expr {
         kind: ExprKind::Identifier(name.to_string()),
@@ -5493,10 +5546,14 @@ fn build_identifier_expr(span: Span, name: &str) -> Expr {
 }
 
 fn build_binary_add_expr(span: Span, left: Expr, right: Expr) -> Expr {
+    build_binary_expr(span, left, BinaryOp::Add, right)
+}
+
+fn build_binary_expr(span: Span, left: Expr, op: BinaryOp, right: Expr) -> Expr {
     Expr {
         kind: ExprKind::Binary {
             left: Box::new(left),
-            op: BinaryOp::Add,
+            op,
             right: Box::new(right),
         },
         span,
@@ -5539,6 +5596,45 @@ fn build_default_struct_string_expr(
         rendered = build_binary_add_expr(span, rendered, build_str_call_expr(&field_expr));
     }
     build_binary_add_expr(span, rendered, build_string_expr(span, ")"))
+}
+
+fn build_default_struct_eq_expr(
+    left: &Expr,
+    right: &Expr,
+    fields: &[(String, IrType)],
+    op: BinaryOp,
+) -> Expr {
+    let span = left.span;
+    let mut rendered = build_bool_expr(span, true);
+    for (field_name, _) in fields {
+        let left_field = Expr {
+            kind: ExprKind::Field {
+                base: Box::new(left.clone()),
+                name: field_name.clone(),
+            },
+            span,
+        };
+        let right_field = Expr {
+            kind: ExprKind::Field {
+                base: Box::new(right.clone()),
+                name: field_name.clone(),
+            },
+            span,
+        };
+        let field_eq = build_binary_expr(span, left_field, BinaryOp::EqualEqual, right_field);
+        rendered = build_binary_expr(span, rendered, BinaryOp::And, field_eq);
+    }
+    if matches!(op, BinaryOp::NotEqual) {
+        Expr {
+            kind: ExprKind::Unary {
+                op: UnaryOp::Not,
+                expr: Box::new(rendered),
+            },
+            span,
+        }
+    } else {
+        rendered
+    }
 }
 
 fn escape_ascii(value: &str) -> String {

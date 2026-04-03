@@ -1242,7 +1242,27 @@ impl<'a> Analyzer<'a> {
                 }
             }
             BinaryOp::EqualEqual | BinaryOp::NotEqual => {
-                if *left == *right || self.is_integer_pair(left, right) {
+                if let (Type::Struct(left_name), Type::Struct(right_name)) = (left, right)
+                    && left_name == right_name
+                {
+                    if let Some(struct_sig) = self.structs.get(left_name)
+                        && let Some(method_sig) = struct_sig.methods.get("__eq__")
+                    {
+                        let valid = method_sig.params.len() == 2
+                            && method_sig.params[0].1 == Type::Struct(left_name.clone())
+                            && method_sig.params[1].1 == Type::Struct(left_name.clone())
+                            && method_sig.return_type == Type::Bool;
+                        if !valid {
+                            return Err(SemanticError {
+                                message: format!(
+                                    "`__eq__` on `{left_name}` must have signature `__eq__(self, other: {left_name}) -> bool`"
+                                ),
+                                span,
+                            });
+                        }
+                    }
+                    Ok(Type::Bool)
+                } else if *left == *right || self.is_integer_pair(left, right) {
                     Ok(Type::Bool)
                 } else if self.is_dynamic_equality_supported(left, right) {
                     Ok(Type::Bool)

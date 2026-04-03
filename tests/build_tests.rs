@@ -1326,6 +1326,66 @@ fn builds_arduino_uno_with_direct_print_object() {
 }
 
 #[test]
+fn builds_arduino_uno_with_default_struct_equality() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_default_struct_eq.rn");
+    let output_path = dir.join("arduino_uno_default_struct_eq.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Point:\n    x: i32\n    y: i32\n\n\
+         def main() -> i32:\n    let left: Point = Point(x=1, y=2)\n    let same: Point = Point(x=1, y=2)\n    let other: Point = Point(x=1, y=3)\n    println(left == same)\n    println(left != other)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno default struct equality build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno default struct equality hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_eq_magic_method() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_eq_magic.rn");
+    let output_path = dir.join("arduino_uno_eq_magic.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __eq__(self, other: Counter) -> bool:\n        return self.value == other.value\n\n\
+         def main() -> i32:\n    let left: Counter = Counter(value=5)\n    let same: Counter = Counter(value=5)\n    let other: Counter = Counter(value=7)\n    println(left == same)\n    println(left != other)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno __eq__ magic method build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno __eq__ magic method hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_with_string_returning_class_method() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_string_method.hex.rn");

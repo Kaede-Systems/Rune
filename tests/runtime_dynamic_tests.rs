@@ -511,6 +511,56 @@ fn builds_and_runs_str_magic_method_program() {
 }
 
 #[test]
+fn builds_and_runs_default_struct_equality_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("default_struct_eq.rn");
+    let exe_path = dir.join("default_struct_eq.exe");
+
+    fs::write(
+        &source_path,
+        "class Point:\n    x: i32\n    y: i32\n\n\
+def main() -> i32:\n    let left: Point = Point(x=1, y=2)\n    let same: Point = Point(x=1, y=2)\n    let other: Point = Point(x=1, y=3)\n    println(left == same)\n    println(left != other)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("default struct equality program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run default struct equality executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\ntrue\n");
+}
+
+#[test]
+fn builds_and_runs_eq_magic_method_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("eq_magic_method.rn");
+    let exe_path = dir.join("eq_magic_method.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __eq__(self, other: Counter) -> bool:\n        return self.value == other.value\n\n\
+def main() -> i32:\n    let left: Counter = Counter(value=5)\n    let same: Counter = Counter(value=5)\n    let other: Counter = Counter(value=7)\n    println(left == same)\n    println(left != other)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("__eq__ magic method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run __eq__ magic method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\ntrue\n");
+}
+
+#[test]
 fn builds_and_runs_default_object_string_program() {
     let dir = temp_dir();
     let source_path = dir.join("class_default_str_demo.rn");

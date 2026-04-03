@@ -142,9 +142,12 @@ Current implemented struct rules:
 - `self` is required as the first method parameter
 - class locals must currently be explicitly typed
 - class parameters are supported for user functions
-- class methods are supported in the semantic checker, native executable path, and LLVM executable path
+- class methods are supported in the semantic checker, native executable path, LLVM executable path, and AVR executable builds
 - class values are stack-backed in the native backend
 - object layout is concrete and low-level, not hidden-heap by default
+- `str(obj)` uses `__str__(self) -> String` when defined
+- `obj1 == obj2` / `obj1 != obj2` use `__eq__(self, other: SameType) -> bool` when defined
+- when `__eq__` is not defined, current same-type class equality falls back to field-wise comparison
 
 Current struct limitations:
 

@@ -618,6 +618,9 @@ impl<'a> FunctionEmitter<'a> {
             self.value_map.insert(dst.to_string(), reg);
             return Ok(());
         }
+        if self.try_emit_struct_equality(out, dst, op, left, right, &left_ty, &right_ty)? {
+            return Ok(());
+        }
         if *ty == IrType::Dynamic {
             let value = self.emit_dynamic_binary(out, left, right, op)?;
             self.value_map.insert(dst.to_string(), value);
@@ -797,6 +800,141 @@ impl<'a> FunctionEmitter<'a> {
         out.push_str(&line);
         self.value_map.insert(dst.to_string(), reg);
         Ok(())
+    }
+
+    fn try_emit_struct_equality(
+        &mut self,
+        out: &mut String,
+        dst: &str,
+        op: &BinaryOp,
+        left: &str,
+        right: &str,
+        left_ty: &IrType,
+        right_ty: &IrType,
+    ) -> Result<bool, LlvmIrError> {
+        if !matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual) {
+            return Ok(false);
+        }
+        let (IrType::Struct(struct_name), IrType::Struct(other_name)) = (left_ty, right_ty) else {
+            return Ok(false);
+        };
+        if struct_name != other_name {
+            return Ok(false);
+        }
+        let reg = if let Some(sig) = self.signatures.get(&struct_method_symbol(struct_name, "__eq__")) {
+            if sig.params.len() != 2
+                || sig.params[0].1 != IrType::Struct(struct_name.clone())
+                || sig.params[1].1 != IrType::Struct(struct_name.clone())
+                || sig.ret != IrType::Bool
+            {
+                return Err(LlvmIrError {
+                    message: format!(
+                        "`__eq__` on `{struct_name}` must have signature `__eq__(self, other: {struct_name}) -> bool` in the current LLVM IR backend"
+                    ),
+                });
+            }
+            let left_val = self.resolve_value(left, left_ty, out)?;
+            let right_val = self.resolve_value(right, right_ty, out)?;
+            let synthetic_name = struct_method_symbol(struct_name, "__eq__");
+            let reg = self.next_reg();
+            out.push_str(&format!(
+                "  {reg} = call i1 @{}({} {}, {} {})\n",
+                llvm_internal_symbol_name(&synthetic_name, sig),
+                llvm_internal_type(left_ty, self.struct_layouts)?,
+                left_val,
+                llvm_internal_type(right_ty, self.struct_layouts)?,
+                right_val
+            ));
+            reg
+        } else {
+            let left_val = self.resolve_value(left, left_ty, out)?;
+            let right_val = self.resolve_value(right, right_ty, out)?;
+            self.emit_default_struct_eq_value(out, struct_name, &left_val, &right_val)?
+        };
+        if matches!(op, BinaryOp::EqualEqual) {
+            self.value_map.insert(dst.to_string(), reg);
+        } else {
+            let neg = self.next_reg();
+            out.push_str(&format!("  {neg} = xor i1 {reg}, true\n"));
+            self.value_map.insert(dst.to_string(), neg);
+        }
+        Ok(true)
+    }
+
+    fn emit_default_struct_eq_value(
+        &mut self,
+        out: &mut String,
+        struct_name: &str,
+        left_val: &str,
+        right_val: &str,
+    ) -> Result<String, LlvmIrError> {
+        let layout = self.struct_layouts.get(struct_name).cloned().ok_or_else(|| LlvmIrError {
+            message: format!("missing struct layout for `{struct_name}` in the current LLVM IR backend"),
+        })?;
+        let struct_ty = llvm_internal_type(&IrType::Struct(struct_name.to_string()), self.struct_layouts)?;
+        let mut result = None;
+        for (index, (_, field_ty)) in layout.iter().enumerate() {
+            let left_field = self.next_reg();
+            let right_field = self.next_reg();
+            out.push_str(&format!(
+                "  {left_field} = extractvalue {struct_ty} {left_val}, {index}\n"
+            ));
+            out.push_str(&format!(
+                "  {right_field} = extractvalue {struct_ty} {right_val}, {index}\n"
+            ));
+            let field_eq = match field_ty {
+                IrType::String => {
+                    let left_ptr = self.next_reg();
+                    let left_len = self.next_reg();
+                    let right_ptr = self.next_reg();
+                    let right_len = self.next_reg();
+                    let cmp_reg = self.next_reg();
+                    self.declared_runtime.insert(
+                        "declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)\n".into(),
+                    );
+                    let string_ty = llvm_internal_type(field_ty, self.struct_layouts)?;
+                    out.push_str(&format!(
+                        "  {left_ptr} = extractvalue {string_ty} {left_field}, 0\n"
+                    ));
+                    out.push_str(&format!(
+                        "  {left_len} = extractvalue {string_ty} {left_field}, 1\n"
+                    ));
+                    out.push_str(&format!(
+                        "  {right_ptr} = extractvalue {string_ty} {right_field}, 0\n"
+                    ));
+                    out.push_str(&format!(
+                        "  {right_len} = extractvalue {string_ty} {right_field}, 1\n"
+                    ));
+                    out.push_str(&format!(
+                        "  {cmp_reg} = call i32 @rune_rt_string_compare({left_ptr}, {left_len}, {right_ptr}, {right_len})\n"
+                    ));
+                    let eq_reg = self.next_reg();
+                    out.push_str(&format!("  {eq_reg} = icmp eq i32 {cmp_reg}, 0\n"));
+                    eq_reg
+                }
+                IrType::Struct(nested_name) => {
+                    self.emit_default_struct_eq_value(out, nested_name, &left_field, &right_field)?
+                }
+                _ => {
+                    let eq_reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {eq_reg} = icmp eq {} {}, {}\n",
+                        llvm_scalar_type(field_ty)?,
+                        left_field,
+                        right_field
+                    ));
+                    eq_reg
+                }
+            };
+            result = Some(if let Some(current) = result {
+                let next = self.next_reg();
+                out.push_str(&format!("  {next} = and i1 {current}, {field_eq}\n"));
+                next
+            } else {
+                field_eq
+            });
+        }
+        Ok(result.unwrap_or_else(|| "true".to_string()))
     }
 
     fn emit_call(
