@@ -52,6 +52,20 @@ fn rejects_await_in_sync_function() {
 }
 
 #[test]
+fn rejects_break_outside_loop() {
+    let error = check_source("def main() -> i32:\n    break\n")
+        .expect_err("break outside a loop should fail");
+    assert!(error.message.contains("`break` is only allowed inside a loop"));
+}
+
+#[test]
+fn rejects_continue_outside_loop() {
+    let error = check_source("def main() -> i32:\n    continue\n")
+        .expect_err("continue outside a loop should fail");
+    assert!(error.message.contains("`continue` is only allowed inside a loop"));
+}
+
+#[test]
 fn rejects_wrong_argument_count() {
     let error = check_source(
         "def add(a: i32, b: i32) -> i32:\n    return a + b\n\ndef main() -> i32:\n    return add(1)\n",

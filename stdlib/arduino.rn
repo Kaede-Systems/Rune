@@ -19,6 +19,18 @@ def analog_read(pin: i64) -> i64:
 def analog_in(channel: i64) -> i64:
     return analog_read(channel)
 
+def clamp_i64(value: i64, minimum: i64, maximum: i64) -> i64:
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+def map_range(value: i64, in_min: i64, in_max: i64, out_min: i64, out_max: i64) -> i64:
+    if in_max == in_min:
+        return out_min
+    return out_min + ((value - in_min) * (out_max - out_min)) / (in_max - in_min)
+
 def pwm_duty_max() -> i64:
     return 255
 
@@ -33,12 +45,45 @@ def shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit
     __rune_builtin_arduino_shift_out(data_pin, clock_pin, bit_order, value)
     return
 
+def shift_in(data_pin: i64, clock_pin: i64, bit_order: i64) -> i64:
+    return __rune_builtin_arduino_shift_in(data_pin, clock_pin, bit_order)
+
 def tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit:
     __rune_builtin_arduino_tone(pin, frequency_hz, duration_ms)
     return
 
 def no_tone(pin: i64) -> unit:
     __rune_builtin_arduino_no_tone(pin)
+    return
+
+def servo_attach(pin: i64) -> bool:
+    return __rune_builtin_arduino_servo_attach(pin)
+
+def servo_detach(pin: i64) -> unit:
+    __rune_builtin_arduino_servo_detach(pin)
+    return
+
+def torque_on(pin: i64) -> bool:
+    return servo_attach(pin)
+
+def torque_off(pin: i64) -> unit:
+    servo_detach(pin)
+    return
+
+def servo_write(pin: i64, angle: i64) -> unit:
+    __rune_builtin_arduino_servo_write(pin, angle)
+    return
+
+def servo_write_us(pin: i64, pulse_us: i64) -> unit:
+    __rune_builtin_arduino_servo_write_us(pin, pulse_us)
+    return
+
+def servo_pulse_for_angle(angle: i64, min_us: i64, max_us: i64) -> i64:
+    let clamped: i64 = clamp_i64(angle, 0, 180)
+    return map_range(clamped, 0, 180, min_us, max_us)
+
+def servo_write_calibrated(pin: i64, angle: i64, min_us: i64, max_us: i64) -> unit:
+    servo_write_us(pin, servo_pulse_for_angle(angle, min_us, max_us))
     return
 
 def delay_ms(ms: i64) -> unit:
@@ -109,6 +154,24 @@ def uart_write(text: String) -> unit:
     __rune_builtin_arduino_uart_write(text)
     return
 
+def interrupts_enable() -> unit:
+    __rune_builtin_arduino_interrupts_enable()
+    return
+
+def interrupts_disable() -> unit:
+    __rune_builtin_arduino_interrupts_disable()
+    return
+
+def random_seed(seed: i64) -> unit:
+    __rune_builtin_arduino_random_seed(seed)
+    return
+
+def random_i64(max_value: i64) -> i64:
+    return __rune_builtin_arduino_random_i64(max_value)
+
+def random_range(min_value: i64, max_value: i64) -> i64:
+    return __rune_builtin_arduino_random_range(min_value, max_value)
+
 def blink(pin: i64, times: i64, on_ms: i64, off_ms: i64) -> unit:
     let count: i64 = 0
     while count < times:
@@ -132,6 +195,11 @@ def pwm_write(pin: i64, duty: i64) -> unit:
 def digital_out(pin: i64, value: bool) -> unit:
     pin_mode(pin, mode_output())
     digital_write(pin, value)
+    return
+
+def digital_toggle(pin: i64) -> unit:
+    pin_mode(pin, mode_output())
+    digital_write(pin, not digital_read(pin))
     return
 
 def digital_in(pin: i64) -> bool:
@@ -193,7 +261,7 @@ class DigitalPin:
         return digital_read(self.pin)
 
     def toggle(self) -> unit:
-        digital_write(self.pin, not digital_read(self.pin))
+        digital_toggle(self.pin)
         return
 
     def blink(self, times: i64, on_ms: i64, off_ms: i64) -> unit:

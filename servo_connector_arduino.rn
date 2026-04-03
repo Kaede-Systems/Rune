@@ -15,14 +15,16 @@ def parse_i64(value: String, fallback: i64) -> i64:
         return fallback
     return int(value)
 
-def main() -> i32:
+def default_port() -> String:
     let host: String = platform()
-    let port: String = "/dev/ttyACM0"
     if host == "windows":
-        port = "COM5"
+        return "COM5"
     elif host == "macos":
-        port = "/dev/cu.usbmodem14101"
-    port = parse_flag_value("--port", parse_flag_value("--PORT", port))
+        return "/dev/cu.usbmodem14101"
+    return "/dev/ttyACM0"
+
+def main() -> i32:
+    let port: String = parse_flag_value("--port", parse_flag_value("--PORT", default_port()))
     let baud: i64 = parse_i64(parse_flag_value("--baud", "115200"), 115200)
     println("connecting to " + port)
     let serial = serial_port(port, baud)
@@ -33,11 +35,14 @@ def main() -> i32:
     while true:
         let line: String = serial.recv_nonempty()
         println(line)
-        if line == "answer>":
+        if line == "servo>":
             print("> ")
-            let answer: String = input()
-            if not serial.send_line(answer):
-                println("failed to send answer")
+            let command: String = input()
+            if command == "quit":
+                serial.close()
+                return 0
+            if not serial.send_line(command):
+                println("failed to send command")
                 serial.close()
                 return 1
     return 0

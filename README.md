@@ -36,6 +36,7 @@ Rune is aiming at:
 - WASM and WASI support
 - freestanding embedded object/static-library output for supported LLVM targets
 - packaged Arduino Uno AVR builds for the current embedded slice using the packaged Arduino AVR core and AVR GCC/G++
+- common `gpio` stdlib surface for embedded pin/timing access on the current Uno backend
 
 ## What Works Now
 
@@ -66,7 +67,9 @@ Current stdlib modules live under [stdlib](stdlib):
 - `env`
 - `fs`
 - `io`
+- `json`
 - `network`
+- `gpio`
 - `serial`
 - `system`
 - `terminal`
@@ -74,11 +77,31 @@ Current stdlib modules live under [stdlib](stdlib):
 - `audio`
 - `arduino`
 
+Core ergonomics are available through `io`, `terminal`, `env`, and `sys` aliases such as `prompt(...)`, `flush_stdout()`, `cursor_hide()`, `arg_or(...)`, and `is_host()`.
+
+The `fs` and `json` modules include convenience aliases on top of the current runtime-backed operations, but they do not add capabilities beyond what is documented in [Docs/STDLIBS.md](Docs/STDLIBS.md).
+
 Current class-style stdlib wrappers include:
 
+- `gpio.GpioPin`
+- `gpio.GpioPwm`
+- `gpio.GpioAnalogIn`
 - `serial.SerialPort`
 - `network.TcpClient`
 - `network.UdpEndpoint`
+
+Current network aliases include:
+
+- `network.connect`
+- `network.connect_timeout`
+- `network.probe`
+- `network.probe_timeout`
+- `network.listen`
+- `network.bind`
+- `network.send`
+- `network.send_line`
+- `network.send_udp`
+- `network.send_line_udp`
 
 ### FFI
 
@@ -161,6 +184,7 @@ Build and flash the current Arduino quiz/buzzer examples:
 ```powershell
 cargo run -- build serial_math_quiz_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o serial_math_quiz_arduino.hex
 cargo run -- build buzzer_serial_control_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o buzzer_serial_control_arduino.hex
+cargo run -- build servo_serial_control_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o servo_serial_control_arduino.hex
 ```
 
 Verify the AVR OOP/string runtime example on real hardware:
@@ -204,6 +228,7 @@ For embedded targets, Rune currently supports freestanding object/static-library
 - `riscv32-unknown-elf`
 
 Arduino Uno is implemented through the packaged Arduino AVR core plus AVR GCC/G++/objcopy/avrdude toolchain path. Xtensa ESP32 is not claimed as implemented yet.
+Rune now also prunes unreachable functions, methods, and structs from the Uno program slice before precode/CBE/toolchain compilation, so unused Rune items do not survive into the firmware build path.
 
 When the packaged LLVM C backend is available, the Uno path now goes through:
 
@@ -220,6 +245,12 @@ Rune release bundles and installers now treat `llvm-cbe` as part of the packaged
 - CI builds a host `llvm-cbe` binary for each release bundle
 - installers verify that `llvm-cbe` exists and can build it locally against the packaged LLVM bundle if needed
 
+Uno build-size behavior:
+
+- AVR builds use `-flto` plus linker section garbage collection
+- packaged Arduino libraries are compiled only when the Rune program actually uses them
+- the current packaged optional library slice includes the Arduino Servo library
+
 ## Examples
 
 Current repo examples include:
@@ -227,8 +258,12 @@ Current repo examples include:
 - [hello_arduino.rn](hello_arduino.rn): minimal Arduino Uno serial hello-world
 - [serial_math_quiz_arduino.rn](serial_math_quiz_arduino.rn): serial-driven positive math quiz with LED feedback
 - [serial_connector_arduino.rn](serial_connector_arduino.rn): host-side serial connector for the Uno quiz
+- [serial_reader.rn](serial_reader.rn): cross-platform serial line reader with `--port` / `--baud`
 - [buzzer_arduino.rn](buzzer_arduino.rn): basic buzzer example for pins `8` and `7`
 - [buzzer_serial_control_arduino.rn](buzzer_serial_control_arduino.rn): interactive buzzer control over serial
+- [servo_serial_control_arduino.rn](servo_serial_control_arduino.rn): interactive calibrated servo control over serial on pin `9`
+- [servo_angle_control_arduino.rn](servo_angle_control_arduino.rn): positional `0/90/180` servo demo for a normal angle servo on pin `9`
+- [servo_connector_arduino.rn](servo_connector_arduino.rn): host-side servo CLI for sending calibrated angle and raw pulse commands
 - [ultrasonic_distance_arduino.rn](ultrasonic_distance_arduino.rn): HC-SR04 distance reader example
 - [avr_oop_string_test.rn](avr_oop_string_test.rn): AVR class/method/string runtime smoke test
 - [calculator.rn](calculator.rn): native desktop calculator example
@@ -312,6 +347,7 @@ The current Arduino Uno slice now supports:
 - serial I/O through the normal Rune surface: `print`, `println`, and `input`
 - lower-level serial control through `uart_*` helpers when byte-oriented hardware control is needed
 - pin/timing helpers like `pin_mode`, `digital_write`, `analog_write`, `delay_ms`, `millis`, and board constants
+- the shared `gpio` stdlib layer with `pin`, `pwm`, and `analog` aliases for simple cross-target pin code
 - real `.hex` generation and flashing with packaged AVR tools
 
 Example:

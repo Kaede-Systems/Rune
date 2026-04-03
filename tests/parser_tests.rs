@@ -157,6 +157,26 @@ fn parses_assignment_statements() {
 }
 
 #[test]
+fn parses_break_and_continue_statements() {
+    let program = parse_source(
+        "def run() -> unit:\n    while true:\n        break\n    while true:\n        continue\n",
+    )
+    .expect("program should parse");
+
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function item");
+    };
+    let Stmt::While(first_loop) = &function.body.statements[0] else {
+        panic!("expected while statement");
+    };
+    assert!(matches!(first_loop.body.statements[0], Stmt::Break(_)));
+    let Stmt::While(second_loop) = &function.body.statements[1] else {
+        panic!("expected while statement");
+    };
+    assert!(matches!(second_loop.body.statements[0], Stmt::Continue(_)));
+}
+
+#[test]
 fn parses_import_items() {
     let program = parse_source(
         "import math.core\nfrom net.http import get, post\n\ndef main() -> i32:\n    return 0\n",

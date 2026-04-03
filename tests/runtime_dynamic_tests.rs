@@ -135,6 +135,31 @@ fn builds_and_runs_modulo_program() {
 }
 
 #[test]
+fn builds_and_runs_arduino_random_and_shift_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_host_random_shift.rn");
+    let exe_path = dir.join("arduino_host_random_shift.exe");
+
+    fs::write(
+        &source_path,
+        "from arduino import bit_order_msb_first, interrupts_disable, interrupts_enable, random_i64, random_range, random_seed, shift_in\n\n\
+         def main() -> i32:\n    interrupts_disable()\n    random_seed(123)\n    let first: i64 = random_i64(10)\n    let second: i64 = random_range(5, 9)\n    interrupts_enable()\n    println(first >= 0 and first < 10)\n    println(second >= 5 and second < 9)\n    println(shift_in(8, 7, bit_order_msb_first()))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("arduino random/shift host program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\ntrue\n0\n");
+}
+
+#[test]
 fn builds_and_runs_panic_program() {
     let dir = temp_dir();
     let source_path = dir.join("panic_demo.rn");
@@ -313,6 +338,79 @@ fn builds_and_runs_class_method_program() {
 }
 
 #[test]
+fn builds_and_runs_break_continue_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("break_continue_demo.rn");
+    let exe_path = dir.join("break_continue_demo.exe");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    let value = 0\n    while value < 5:\n        value = value + 1\n        if value == 2:\n            continue\n        println(value)\n        if value == 4:\n            break\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("break/continue program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "1\n3\n4\n");
+}
+
+#[test]
+fn builds_and_runs_class_method_program_with_keyword_args() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_method_keywords_demo.rn");
+    let exe_path = dir.join("class_method_keywords_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Mixer:\n    base: i32\n    def combine(self, left: i32, right: i32) -> i32:\n        return self.base + left + right\n\n\
+         def main() -> i32:\n    let mixer: Mixer = Mixer(base=10)\n    println(mixer.combine(right=8, left=4))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("class method keyword-arg program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run class method keyword-arg executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "22\n");
+}
+
+#[test]
+fn builds_and_runs_inline_constructor_method_program_with_keyword_args() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_inline_method_keywords_demo.rn");
+    let exe_path = dir.join("class_inline_method_keywords_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Mixer:\n    base: i32\n    def combine(self, left: i32, right: i32) -> i32:\n        return self.base + left + right\n\n\
+         def main() -> i32:\n    println(Mixer(base=10).combine(right=8, left=4))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("inline constructor method keyword-arg program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run inline constructor method keyword-arg executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "22\n");
+}
+
+#[test]
 fn builds_and_runs_class_return_program() {
     let dir = temp_dir();
     let source_path = dir.join("class_return_demo.rn");
@@ -385,6 +483,108 @@ fn builds_and_runs_string_returning_method_program() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "hi Rune\n");
+}
+
+#[test]
+fn builds_and_runs_str_magic_method_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_str_magic_demo.rn");
+    let exe_path = dir.join("class_str_magic_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __str__(self) -> String:\n        return \"Counter(\" + str(self.value) + \")\"\n\n\
+         def main() -> i32:\n    println(str(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("str magic method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run str magic method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter(5)\n");
+}
+
+#[test]
+fn builds_and_runs_default_object_string_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_default_str_demo.rn");
+    let exe_path = dir.join("class_default_str_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n\n\
+         def main() -> i32:\n    println(str(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("default object string program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run default object string executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter(value=5)\n");
+}
+
+#[test]
+fn builds_and_runs_direct_print_object_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("class_direct_print_demo.rn");
+    let exe_path = dir.join("class_direct_print_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n\n\
+         def main() -> i32:\n    println(Counter(value=5))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("direct object print program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run direct object print executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter(value=5)\n");
+}
+
+#[test]
+fn builds_and_runs_cli_arg_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("cli_args_demo.rn");
+    let exe_path = dir.join("cli_args_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from env import arg, arg_count\n\n\
+         def main() -> i32:\n    println(arg_count())\n    println(arg(0))\n    println(arg(1))\n    println(arg(2))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("cli arg program should build");
+
+    let output = Command::new(&exe_path)
+        .arg("--port")
+        .arg("COM5")
+        .output()
+        .expect("failed to run cli arg executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "2\n--port\nCOM5\n\n");
 }
 
 #[test]

@@ -209,7 +209,7 @@ fn wasm_build_runs_stdlib_builtin_program_in_node() {
 
     fs::write(
         &source_path,
-        "def main() -> i32:\n    println(__rune_builtin_system_pid())\n    println(__rune_builtin_system_cpu_count())\n    println(__rune_builtin_env_arg_count())\n    println(__rune_builtin_env_exists(\"RUNE_WASM_FLAG\"))\n    println(__rune_builtin_env_get_i32(\"RUNE_WASM_PORT\", 8080))\n    println(__rune_builtin_env_get_bool(\"RUNE_WASM_BOOL\", false))\n    println(__rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", 65535, 10))\n    return 0\n",
+        "def main() -> i32:\n    println(__rune_builtin_system_pid())\n    println(__rune_builtin_system_cpu_count())\n    println(__rune_builtin_env_arg_count())\n    println(__rune_builtin_env_exists(\"RUNE_WASM_FLAG\"))\n    println(__rune_builtin_env_get_i32(\"RUNE_WASM_PORT\", 8080))\n    println(__rune_builtin_env_get_bool(\"RUNE_WASM_BOOL\", false))\n    println(__rune_builtin_env_get_string(\"RUNE_WASM_HOST\", \"fallback-host\"))\n    println(__rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", 65535, 10))\n    return 0\n",
     )
     .expect("failed to write source");
 
@@ -220,7 +220,7 @@ fn wasm_build_runs_stdlib_builtin_program_in_node() {
     fs::write(
         &runner_path,
         format!(
-            "process.env.RUNE_WASM_FLAG = '1';\nprocess.env.RUNE_WASM_PORT = '9091';\nprocess.env.RUNE_WASM_BOOL = 'true';\nconst {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            "process.env.RUNE_WASM_FLAG = '1';\nprocess.env.RUNE_WASM_PORT = '9091';\nprocess.env.RUNE_WASM_BOOL = 'true';\nprocess.env.RUNE_WASM_HOST = 'node-host';\nconst {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
             loader_path.to_string_lossy().to_string(),
             wasm_path.to_string_lossy().to_string(),
         ),
@@ -241,14 +241,15 @@ fn wasm_build_runs_stdlib_builtin_program_in_node() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     let lines = stdout.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 7, "unexpected stdout: {stdout}");
+    assert_eq!(lines.len(), 8, "unexpected stdout: {stdout}");
     assert!(lines[0].parse::<i32>().unwrap_or_default() > 0);
     assert!(lines[1].parse::<i32>().unwrap_or_default() >= 1);
     assert_eq!(lines[2], "2");
     assert_eq!(lines[3], "true");
     assert_eq!(lines[4], "9091");
     assert_eq!(lines[5], "true");
-    assert_eq!(lines[6], "false");
+    assert_eq!(lines[6], "node-host");
+    assert_eq!(lines[7], "false");
 }
 
 #[test]
@@ -262,7 +263,7 @@ fn wasi_build_runs_stdlib_builtin_program_in_packaged_wasmtime() {
 
     fs::write(
         &source_path,
-        "def main() -> i32:\n    println(__rune_builtin_system_pid())\n    println(__rune_builtin_system_cpu_count())\n    println(__rune_builtin_env_arg_count())\n    println(__rune_builtin_env_exists(\"RUNE_WASM_FLAG\"))\n    println(__rune_builtin_env_get_i32(\"RUNE_WASM_PORT\", 8080))\n    println(__rune_builtin_env_get_bool(\"RUNE_WASM_BOOL\", false))\n    println(__rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", 65535, 10))\n    return 0\n",
+        "def main() -> i32:\n    println(__rune_builtin_system_pid())\n    println(__rune_builtin_system_cpu_count())\n    println(__rune_builtin_env_arg_count())\n    println(__rune_builtin_env_exists(\"RUNE_WASM_FLAG\"))\n    println(__rune_builtin_env_get_i32(\"RUNE_WASM_PORT\", 8080))\n    println(__rune_builtin_env_get_bool(\"RUNE_WASM_BOOL\", false))\n    println(__rune_builtin_env_get_string(\"RUNE_WASM_HOST\", \"fallback-host\"))\n    println(__rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", 65535, 10))\n    return 0\n",
     )
     .expect("failed to write source");
 
@@ -280,26 +281,180 @@ fn wasi_build_runs_stdlib_builtin_program_in_packaged_wasmtime() {
         .arg("RUNE_WASM_PORT")
         .arg("--env")
         .arg("RUNE_WASM_BOOL")
+        .arg("--env")
+        .arg("RUNE_WASM_HOST")
         .arg(&wasm_path)
         .arg("alpha")
         .arg("beta")
         .env("RUNE_WASM_FLAG", "1")
         .env("RUNE_WASM_PORT", "9091")
         .env("RUNE_WASM_BOOL", "true")
+        .env("RUNE_WASM_HOST", "wasi-host")
         .output()
         .expect("failed to run packaged wasmtime stdlib runner");
 
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     let lines = stdout.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 7, "unexpected stdout: {stdout}");
+    assert_eq!(lines.len(), 8, "unexpected stdout: {stdout}");
     assert!(lines[0].parse::<i32>().unwrap_or_default() > 0);
     assert!(lines[1].parse::<i32>().unwrap_or_default() >= 1);
     assert_eq!(lines[2], "2");
     assert_eq!(lines[3], "true");
     assert_eq!(lines[4], "9091");
     assert_eq!(lines[5], "true");
-    assert_eq!(lines[6], "false");
+    assert_eq!(lines[6], "wasi-host");
+    assert_eq!(lines[7], "false");
+}
+
+#[test]
+fn wasm_build_runs_time_microsecond_program_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("time_micro_node.rn");
+    let wasm_path = dir.join("time_micro_node.wasm");
+    let runner_path = dir.join("run_time_micro.js");
+
+    fs::write(
+        &source_path,
+        "from time import monotonic_us, sleep_us, sleep_until_us\n\n\
+         def main() -> i32:\n    let start: i64 = monotonic_us()\n    sleep_us(1000)\n    sleep_until_us(monotonic_us())\n    println(monotonic_us() >= start)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm time micro build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write node runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node wasm time runner");
+
+    assert!(
+        output.status.success(),
+        "node stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\n");
+}
+
+#[test]
+fn wasi_build_runs_time_microsecond_program_in_packaged_wasmtime() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("time_micro_wasi.rn");
+    let wasm_path = dir.join("time_micro_wasi.wasm");
+
+    fs::write(
+        &source_path,
+        "from time import monotonic_us, sleep_us, sleep_until_us\n\n\
+         def main() -> i32:\n    let start: i64 = monotonic_us()\n    sleep_us(1000)\n    sleep_until_us(monotonic_us())\n    println(monotonic_us() >= start)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-wasip1"))
+        .expect("wasi time micro build should succeed");
+
+    let wasmtime = find_packaged_wasmtime().expect("packaged wasmtime.exe should exist");
+    let output = Command::new(wasmtime)
+        .arg(&wasm_path)
+        .output()
+        .expect("failed to run packaged wasmtime");
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\n");
+}
+
+#[test]
+fn wasm_build_runs_network_stdlib_program_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("network_stdlib_node.rn");
+    let wasm_path = dir.join("network_stdlib_node.wasm");
+    let runner_path = dir.join("run_network_stdlib.js");
+
+    fs::write(
+        &source_path,
+        "from network import connect_timeout, tcp_client\n\n\
+         def main() -> i32:\n    let client = tcp_client(\"127.0.0.1\", 65535)\n    println(connect_timeout(\"127.0.0.1\", 65535, 10))\n    println(client.probe_timeout(10))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm network stdlib build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write node runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node wasm network stdlib runner");
+
+    assert!(
+        output.status.success(),
+        "node stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\nfalse\n");
+}
+
+#[test]
+fn wasi_build_runs_network_stdlib_program_in_packaged_wasmtime() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("network_stdlib_wasi.rn");
+    let wasm_path = dir.join("network_stdlib_wasi.wasm");
+
+    fs::write(
+        &source_path,
+        "from network import connect_timeout, tcp_client\n\n\
+         def main() -> i32:\n    let client = tcp_client(\"127.0.0.1\", 65535)\n    println(connect_timeout(\"127.0.0.1\", 65535, 10))\n    println(client.probe_timeout(10))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-wasip1"))
+        .expect("wasi network stdlib build should succeed");
+
+    let wasmtime = find_packaged_wasmtime().expect("packaged wasmtime.exe should exist");
+    let output = Command::new(wasmtime)
+        .arg(&wasm_path)
+        .output()
+        .expect("failed to run packaged wasmtime");
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\nfalse\n");
 }
 
 #[test]

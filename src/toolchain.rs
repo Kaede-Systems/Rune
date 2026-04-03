@@ -167,6 +167,44 @@ pub fn find_arduino_avr_runtime_header() -> Option<PathBuf> {
     None
 }
 
+pub fn find_packaged_llvm_avr_tool(tool_name: &str) -> Option<PathBuf> {
+    let candidate_names = llvm_tool_candidate_names(tool_name);
+    for root in bundled_llvm_avr_roots() {
+        for candidate_name in &candidate_names {
+            let candidate = root.join("bin").join(candidate_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        for candidate_name in &candidate_names {
+            let candidate = root.join("Release").join("bin").join(candidate_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+pub fn find_packaged_llvm_tool_for_target(tool_name: &str, target_triple: &str) -> Option<PathBuf> {
+    if target_triple == "avr-atmega328p-arduino-uno"
+        && let Some(tool) = find_packaged_llvm_avr_tool(tool_name)
+    {
+        return Some(tool);
+    }
+    find_packaged_llvm_tool(tool_name)
+}
+
+pub fn find_arduino_avr_servo_library_root() -> Option<PathBuf> {
+    for root in bundled_arduino_avr_roots() {
+        let candidate = root.join("libraries").join("Servo").join("src");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 pub fn detect_windows_dev_assets() -> Option<WindowsDevAssets> {
     let msvc_root = newest_child_dir_with_subdir(
         Path::new(r"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC"),
@@ -236,6 +274,48 @@ fn bundled_llvm_roots() -> Vec<PathBuf> {
         for ancestor in exe_path.ancestors() {
             let llvm_root = ancestor.join("tools").join("llvm21");
             append_llvm_bundle_roots(&mut roots, &llvm_root, &host_bundle_dirs);
+        }
+    }
+
+    dedupe_paths(roots)
+}
+
+fn bundled_llvm_avr_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let host_bundle_dirs = host_llvm_bundle_dirs();
+
+    if let Some(exe_path) = std::env::current_exe().ok() {
+        if let Some(bin_dir) = exe_path.parent()
+            && let Some(prefix) = bin_dir.parent()
+        {
+            append_llvm_bundle_roots(
+                &mut roots,
+                &prefix.join("share").join("rune").join("tools").join("llvm-avr"),
+                &host_bundle_dirs,
+            );
+            roots.push(prefix.join("share").join("rune").join("tools").join("llvm-project-avr"));
+        }
+    }
+
+    if let Some(cwd) = std::env::current_dir().ok() {
+        for ancestor in cwd.ancestors() {
+            append_llvm_bundle_roots(
+                &mut roots,
+                &ancestor.join("tools").join("llvm-avr"),
+                &host_bundle_dirs,
+            );
+            roots.push(ancestor.join("tools").join("llvm-project-avr").join("build"));
+        }
+    }
+
+    if let Some(exe_path) = std::env::current_exe().ok() {
+        for ancestor in exe_path.ancestors() {
+            append_llvm_bundle_roots(
+                &mut roots,
+                &ancestor.join("tools").join("llvm-avr"),
+                &host_bundle_dirs,
+            );
+            roots.push(ancestor.join("tools").join("llvm-project-avr").join("build"));
         }
     }
 

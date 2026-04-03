@@ -2,7 +2,12 @@
 
 This document lists the Rune standard library modules that are implemented today.
 
-These modules live in [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib).
+These modules are part of Rune's default stdlib registry.
+
+Current loading model:
+- `env`, `network`, `serial`, and `gpio` are now registered directly in Rust and loaded from the built-in module registry.
+- the remaining stdlib modules are still loaded from [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib) while they are migrated.
+- this keeps the migration honest: each module is moved only when its real registry-backed path is working end to end.
 
 ## `arduino`
 
@@ -10,7 +15,9 @@ These modules live in [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib).
 from arduino import (
     pin_mode, digital_write, digital_read,
     analog_write, analog_read, analog_reference,
-    pulse_in, shift_out, tone, no_tone,
+    pulse_in, shift_out, shift_in, tone, no_tone,
+    servo_attach, servo_detach, servo_write, servo_write_us,
+    servo_pulse_for_angle, servo_write_calibrated,
     delay_ms, delay_us, millis, micros,
     read_line,
     mode_input, mode_output, mode_input_pullup, led_builtin,
@@ -18,6 +25,8 @@ from arduino import (
     bit_order_lsb_first, bit_order_msb_first,
     analog_ref_default, analog_ref_internal, analog_ref_external,
     uart_begin, uart_available, uart_read_byte, uart_write_byte, uart_write,
+    interrupts_enable, interrupts_disable,
+    random_seed, random_i64, random_range,
 )
 ```
 
@@ -29,9 +38,12 @@ Exports:
 - `analog_write(pin: i64, value: i64) -> unit`
 - `analog_read(pin: i64) -> i64`
 - `analog_in(channel: i64) -> i64`
+- `clamp_i64(value: i64, minimum: i64, maximum: i64) -> i64`
+- `map_range(value: i64, in_min: i64, in_max: i64, out_min: i64, out_max: i64) -> i64`
 - `pwm_write(pin: i64, duty: i64) -> unit`
 - `pwm_duty_max() -> i64`
 - `digital_out(pin: i64, value: bool) -> unit`
+- `digital_toggle(pin: i64) -> unit`
 - `digital_in(pin: i64) -> bool`
 - `digital_in_pullup(pin: i64) -> bool`
 - `analog_read_voltage_mv(pin: i64, reference_mv: i64) -> i64`
@@ -41,8 +53,17 @@ Exports:
 - `analog_reference(mode: i64) -> unit`
 - `pulse_in(pin: i64, state: bool, timeout_us: i64) -> i64`
 - `shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit`
+- `shift_in(data_pin: i64, clock_pin: i64, bit_order: i64) -> i64`
 - `tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit`
 - `no_tone(pin: i64) -> unit`
+- `servo_attach(pin: i64) -> bool`
+- `servo_detach(pin: i64) -> unit`
+- `torque_on(pin: i64) -> bool`
+- `torque_off(pin: i64) -> unit`
+- `servo_write(pin: i64, angle: i64) -> unit`
+- `servo_write_us(pin: i64, pulse_us: i64) -> unit`
+- `servo_pulse_for_angle(angle: i64, min_us: i64, max_us: i64) -> i64`
+- `servo_write_calibrated(pin: i64, angle: i64, min_us: i64, max_us: i64) -> unit`
 - `delay_ms(ms: i64) -> unit`
 - `delay_us(us: i64) -> unit`
 - `millis() -> i64`
@@ -66,6 +87,11 @@ Exports:
 - `uart_read_byte() -> i64`
 - `uart_write_byte(value: i64) -> unit`
 - `uart_write(text: String) -> unit`
+- `interrupts_enable() -> unit`
+- `interrupts_disable() -> unit`
+- `random_seed(seed: i64) -> unit`
+- `random_i64(max_value: i64) -> i64`
+- `random_range(min_value: i64, max_value: i64) -> i64`
 
 Current implemented Arduino scope:
 
@@ -75,8 +101,14 @@ Current implemented Arduino scope:
 - byte-oriented UART access with `uart_available`, `uart_read_byte`, and `uart_write_byte`
 - board constants and pin/timing helpers
 - PWM, pulse timing, tone generation, shift register output, and analog reference selection
+- shift register input, interrupt enable/disable control, and Arduino random helpers
+- Servo control through the packaged Arduino Servo library
+- `servo_write(pin, angle)` is the normal positional-servo API using the Arduino Servo library defaults
+- `servo_write_us(pin, pulse_us)` is the lower-level pulse interface and is also useful for calibrated servo control when a specific servo's angle mapping differs from the library defaults
+- `servo_pulse_for_angle(...)` and `servo_write_calibrated(...)` make that calibration reusable in ordinary Rune code
 - Arduino-style `setup()` / `loop()` entrypoints on the Uno target
 - top-level/script-style Rune programs also work on the Uno target, so you can often just write normal top-level statements and `while true:` loops without manually defining `setup()` and `loop()`
+- Uno builds use LTO plus linker section garbage collection, and packaged Arduino libraries are compiled only when the Rune program actually uses them
 
 Recommended usage:
 
@@ -89,6 +121,9 @@ Current Uno example files using this surface:
 - [serial_math_quiz_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/serial_math_quiz_arduino.rn)
 - [buzzer_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/buzzer_arduino.rn)
 - [buzzer_serial_control_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/buzzer_serial_control_arduino.rn)
+- [servo_serial_control_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/servo_serial_control_arduino.rn)
+- [servo_angle_control_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/servo_angle_control_arduino.rn)
+- [servo_connector_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/servo_connector_arduino.rn)
 - [ultrasonic_distance_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/ultrasonic_distance_arduino.rn)
 - [avr_oop_string_test.rn](/C:/Users/kaededevkentohinode/KUROX/avr_oop_string_test.rn)
 
@@ -99,11 +134,61 @@ Current Arduino limitations:
 - AVR string-heavy OOP/dynamic operations now use a bounded rotating temporary-string slot pool in the packaged runtime instead of a single shared string buffer, which makes chained method/string expressions behave correctly on Uno without heap allocation
 - full dynamic object parity and richer polymorphism are not implemented on AVR yet
 
+## `gpio`
+
+```rune
+from gpio import gpio_pin, pwm_pin, analog_pin
+from gpio import pin, pwm, analog
+from gpio import led_builtin, delay_ms, millis
+```
+
+Exports:
+
+- `gpio_pin(pin: i64) -> GpioPin`
+- `pin(pin: i64) -> GpioPin`
+- `pwm_pin(pin: i64) -> GpioPwm`
+- `pwm(pin: i64) -> GpioPwm`
+- `analog_pin(pin: i64) -> GpioAnalogIn`
+- `analog(pin: i64) -> GpioAnalogIn`
+- plus the shared timing/pin helpers re-exported from the current embedded backend
+
+Current implemented GPIO scope:
+
+- Rust-side built-in module surface with the current low-level operations still backed by the `arduino` layer
+- common GPIO-style surface on top of the current Arduino Uno backend
+- `GpioPin`
+  - `.output()`
+  - `.input()`
+  - `.input_pullup()`
+  - `.write(value: bool)`
+  - `.high()`
+  - `.low()`
+  - `.toggle()`
+  - `.read() -> bool`
+  - `.read_pullup() -> bool`
+  - `.blink(times, on_ms, off_ms)`
+- `GpioPwm`
+  - `.output()`
+  - `.write(duty: i64)`
+  - `.max_duty() -> i64`
+  - `.off()`
+- `GpioAnalogIn`
+  - `.read() -> i64`
+  - `.read_percent() -> i64`
+  - `.read_voltage_mv(reference_mv: i64) -> i64`
+
+Current GPIO limitations:
+
+- today this module is backed by the Arduino Uno target only
+- it exists to give Rune a common GPIO-facing surface that can later gain Raspberry Pi and ESP32 backends honestly
+- Raspberry Pi and ESP32 are not implemented yet, so `gpio` is not a claim that those targets already work
+
 ## `serial`
 
 ```rune
 from serial import begin, open, is_open, close
 from serial import available, read_byte, recv_line, write, write_line, send, send_line
+from serial import send_i64, send_bool, send_line_i64, send_line_bool
 from serial import SerialPort, serial_port
 ```
 
@@ -119,14 +204,20 @@ Exports:
 - `write(text: String) -> unit`
 - `write_line(text: String) -> unit`
 - `send(value: dynamic) -> bool`
+- `send_i64(value: i64) -> bool`
+- `send_bool(value: bool) -> bool`
 - `send_line(value: dynamic) -> bool`
+- `send_line_i64(value: i64) -> bool`
+- `send_line_bool(value: bool) -> bool`
 - `SerialPort`
 - `serial_port(port: String, baud: i64) -> SerialPort`
 
 Current implemented serial scope:
 
+- Rust-side built-in module surface for shared serial-facing Rune code
 - shared serial-facing Rune surface for embedded and host code
 - class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_nonempty`, `send`, and `send_line` method names
+- typed serial helpers are also available as `send_i64`, `send_bool`, `send_line_i64`, and `send_line_bool`
 - on Arduino Uno:
   - `begin` lowers to `uart_begin`
   - `open` behaves like `begin`
@@ -150,6 +241,7 @@ Current serial limitations:
 ```rune
 from json import parse, stringify, kind, is_null, len, get, index
 from json import to_string, to_i64, to_bool
+from json import as_string, as_text, as_i64, as_bool, value_kind
 ```
 
 Exports:
@@ -164,6 +256,11 @@ Exports:
 - `to_string(value: Json) -> String`
 - `to_i64(value: Json) -> i64`
 - `to_bool(value: Json) -> bool`
+- `as_string(value: Json) -> String`
+- `as_text(value: Json) -> String`
+- `as_i64(value: Json) -> i64`
+- `as_bool(value: Json) -> bool`
+- `value_kind(value: Json) -> String`
 
 Current implemented JSON scope:
 
@@ -174,6 +271,12 @@ Current implemented JSON scope:
 - null checks
 - container length
 - scalar conversion to `String`, `i64`, and `bool`
+- convenience aliases for conversion and kind helpers:
+  - `as_string`
+  - `as_text`
+  - `as_i64`
+  - `as_bool`
+  - `value_kind`
 
 Current JSON limitations:
 
@@ -184,6 +287,8 @@ Current JSON limitations:
 
 ```rune
 from io import write, writeln, error, errorln, flush_out, flush_err, read_line
+from io import stdout_write, stdout_writeln, stderr_write, stderr_writeln
+from io import flush_stdout, flush_stderr, prompt, error_prompt
 ```
 
 Exports:
@@ -195,6 +300,14 @@ Exports:
 - `flush_out() -> unit`
 - `flush_err() -> unit`
 - `read_line() -> String`
+- `stdout_write(value) -> unit`
+- `stdout_writeln(value) -> unit`
+- `stderr_write(value) -> unit`
+- `stderr_writeln(value) -> unit`
+- `flush_stdout() -> unit`
+- `flush_stderr() -> unit`
+- `prompt(message: String) -> String`
+- `error_prompt(message: String) -> String`
 
 Current implemented IO scope:
 
@@ -202,20 +315,25 @@ Current implemented IO scope:
 - stderr writes
 - explicit stdout/stderr flush
 - line input
+- explicit stream-named aliases for callers that prefer more descriptive APIs
+- prompt helpers that write, flush, and read in one step
 
 ## `time`
 
 ```rune
-from time import unix_now, monotonic_ms, sleep_ms, sleep, sleep_until
+from time import unix_now, monotonic_ms, monotonic_us, sleep_ms, sleep_us, sleep, sleep_until, sleep_until_us
 ```
 
 Exports:
 
 - `unix_now() -> i64`
 - `monotonic_ms() -> i64`
+- `monotonic_us() -> i64`
 - `sleep_ms(ms: i64) -> unit`
+- `sleep_us(us: i64) -> unit`
 - `sleep(seconds: i64) -> unit`
 - `sleep_until(deadline_ms: i64) -> unit`
+- `sleep_until_us(deadline_us: i64) -> unit`
 
 ## `system`
 
@@ -223,6 +341,7 @@ Exports:
 from system import pid, cpu_count, platform, arch, target, board, is_embedded, is_wasm, exit, quit, exit_success, exit_failure
 
 from sys import platform, arch, target, board, is_embedded, is_wasm
+from sys import is_host, is_desktop, is_windows, is_linux, is_macos
 ```
 
 Exports:
@@ -235,6 +354,11 @@ Exports:
 - `board() -> String`
 - `is_embedded() -> bool`
 - `is_wasm() -> bool`
+- `is_host() -> bool`
+- `is_desktop() -> bool`
+- `is_windows() -> bool`
+- `is_linux() -> bool`
+- `is_macos() -> bool`
 - `exit(code: i32) -> unit`
 - `quit(code: i32) -> unit`
 - `exit_success() -> unit`
@@ -243,19 +367,30 @@ Exports:
 ## `env`
 
 ```rune
-from env import has, get_i32, get_bool, arg_count
-from env import get_i32_or_zero, get_bool_or_false, get_bool_or_true
+ from env import has, get, get_i32, get_bool, arg_count, arg
+from env import get_or_empty, get_i32_or_zero, get_bool_or_false, get_bool_or_true, arg_or
 ```
 
 Exports:
 
 - `has(name: String) -> bool`
+- `get(name: String, default: String) -> String`
 - `get_i32(name: String, default: i32) -> i32`
 - `get_bool(name: String, default: bool) -> bool`
 - `arg_count() -> i32`
+- `arg(index: i32) -> String`
+- `arg_or(index: i32, default: String) -> String`
+- `get_or_empty(name: String) -> String`
 - `get_i32_or_zero(name: String) -> i32`
 - `get_bool_or_false(name: String) -> bool`
 - `get_bool_or_true(name: String) -> bool`
+
+Notes:
+
+- `arg_count()` and `arg(index)` use only user arguments, not the executable path
+- out-of-range indexes return `""`
+- missing environment variables return the provided default for `get(...)`
+- `arg_or(...)` provides an explicit fallback string when the requested argument is missing
 
 ## `network`
 
@@ -263,7 +398,10 @@ Exports:
 from network import tcp_connect, tcp_connect_timeout
 from network import tcp_probe, tcp_probe_timeout
 from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
-from network import tcp_send_line, udp_send_line
+from network import tcp_send_line, udp_send_line, tcp_recv, tcp_recv_timeout, udp_recv
+from network import tcp_request, request, request_line, recv, recv_timeout, recv_udp
+from network import connect, connect_timeout, probe, probe_timeout
+from network import listen, bind, send, send_line, send_udp, send_line_udp
 from network import TcpClient, UdpEndpoint, tcp_client, udp_endpoint
 ```
 
@@ -280,6 +418,22 @@ Exports:
 - `udp_send(host: String, port: i32, data: String) -> bool`
 - `tcp_send_line(host: String, port: i32, value: dynamic) -> bool`
 - `udp_send_line(host: String, port: i32, value: dynamic) -> bool`
+- `tcp_recv(host: String, port: i32, max_bytes: i32) -> String`
+- `tcp_recv_timeout(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `udp_recv(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_request(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `request(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `request_line(host: String, port: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
+- `connect(host: String, port: i32) -> bool`
+- `connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
+- `probe(host: String, port: i32) -> bool`
+- `probe_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
+- `listen(host: String, port: i32) -> bool`
+- `bind(host: String, port: i32) -> bool`
+- `send(host: String, port: i32, data: String) -> bool`
+- `send_line(host: String, port: i32, value: dynamic) -> bool`
+- `send_udp(host: String, port: i32, data: String) -> bool`
+- `send_line_udp(host: String, port: i32, value: dynamic) -> bool`
 - `TcpClient`
 - `UdpEndpoint`
 - `tcp_client(host: String, port: i32) -> TcpClient`
@@ -292,37 +446,49 @@ Current implemented network scope:
 - TCP bind/listen availability checks
 - UDP bind availability checks
 - TCP/UDP send convenience wrappers for dynamic values and lines
+- TCP receive helpers returning `String`
+- timeout-aware TCP receive
+- TCP request/response helpers returning `String`
+- UDP receive helpers returning `String`
 - class-style client/endpoint wrappers using the same `connect`, `probe`, `send`, and `send_line` names
+- class-style client/endpoint wrappers using the same `connect`, `bind`, `probe`, `send`, `send_line`, `recv`, `recv_timeout`, `request`, `request_line`, `send_text`, and `send_line_text` names
+- class-style client/endpoint wrappers also expose `send_text` and `send_line_text` for callers that prefer explicit text payloads
+- the current receive/request slice is verified on native and LLVM executable paths
+- Uno-class Arduino targets do not claim direct `network` support without a real backing network stack
 
 Not implemented in this module yet:
 
 - TCP server accept/send/receive
-- UDP send/receive
 - HTTP
 - WebSocket
 
 ## `fs`
 
 ```rune
-from fs import exists, read_string, read_text, write_string, write_text
-from fs import remove, remove_file, rename, copy
-from fs import create_dir, create_dir_all, mkdir, mkdirs
+from fs import exists, read, read_string, read_text, write, write_string, write_text
+from fs import remove, delete, remove_file, rename, move, copy
+from fs import create_dir, create_dir_all, mkdir, mkdir_p, mkdirs
 ```
 
 Exports:
 
 - `exists(path: String) -> bool`
+- `read(path: String) -> String`
 - `read_string(path: String) -> String`
 - `read_text(path: String) -> String`
+- `write(path: String, content: String) -> bool`
 - `write_string(path: String, content: String) -> bool`
 - `write_text(path: String, content: String) -> bool`
 - `remove(path: String) -> bool`
+- `delete(path: String) -> bool`
 - `remove_file(path: String) -> bool`
 - `rename(from_path: String, to_path: String) -> bool`
+- `move(from_path: String, to_path: String) -> bool`
 - `copy(from_path: String, to_path: String) -> bool`
 - `create_dir(path: String) -> bool`
 - `mkdir(path: String) -> bool`
 - `create_dir_all(path: String) -> bool`
+- `mkdir_p(path: String) -> bool`
 - `mkdirs(path: String) -> bool`
 
 Current implemented filesystem scope:
@@ -334,6 +500,12 @@ Current implemented filesystem scope:
 - renaming files or directories
 - copying files
 - creating directories recursively or non-recursively
+- convenience aliases for common filesystem verbs:
+  - `read`
+  - `write`
+  - `delete`
+  - `move`
+  - `mkdir_p`
 
 Not implemented in this module yet:
 
@@ -345,6 +517,7 @@ Not implemented in this module yet:
 ```rune
 from terminal import clear, move_to, hide_cursor, show_cursor, set_title
 from terminal import clear_screen, home, clear_and_home, hide, show
+from terminal import cursor_hide, cursor_show, move_cursor, title
 ```
 
 Exports:
@@ -359,6 +532,10 @@ Exports:
 - `clear_and_home() -> unit`
 - `hide() -> unit`
 - `show() -> unit`
+- `cursor_hide() -> unit`
+- `cursor_show() -> unit`
+- `move_cursor(row: i32, col: i32) -> unit`
+- `title(text: String) -> unit`
 
 ## `audio`
 

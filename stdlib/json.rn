@@ -4,8 +4,14 @@ def parse(text: String) -> Json:
 def stringify(value: Json) -> String:
     return __rune_builtin_json_stringify(value)
 
+def as_string(value: Json) -> String:
+    return to_string(value)
+
 def kind(value: Json) -> String:
     return __rune_builtin_json_kind(value)
+
+def value_kind(value: Json) -> String:
+    return kind(value)
 
 def is_null(value: Json) -> bool:
     return __rune_builtin_json_is_null(value)
@@ -22,8 +28,17 @@ def index(value: Json, at: i64) -> Json:
 def to_string(value: Json) -> String:
     return __rune_builtin_json_to_string(value)
 
+def as_text(value: Json) -> String:
+    return to_string(value)
+
 def to_i64(value: Json) -> i64:
     return __rune_builtin_json_to_i64(value)
 
+def as_i64(value: Json) -> i64:
+    return to_i64(value)
+
 def to_bool(value: Json) -> bool:
     return __rune_builtin_json_to_bool(value)
+
+def as_bool(value: Json) -> bool:
+    return to_bool(value)

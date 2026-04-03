@@ -4,9 +4,9 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rune::build::{
-    BuildError, BuildOptions, build_executable, build_executable_llvm,
-    build_executable_llvm_with_options, build_object_file, build_shared_library,
-    build_static_library, default_library_extension, supported_targets, target_spec,
+    build_executable, build_executable_llvm, build_executable_llvm_with_options, build_object_file,
+    build_shared_library, build_static_library, default_library_extension, supported_targets,
+    target_spec, BuildError, BuildOptions,
 };
 
 fn temp_dir() -> PathBuf {
@@ -47,46 +47,30 @@ fn chooses_host_library_extension() {
 #[test]
 fn exposes_known_cross_targets() {
     let targets = supported_targets();
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "x86_64-unknown-linux-gnu")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "x86_64-apple-darwin")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "x86_64-pc-windows-gnu")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "aarch64-pc-windows-gnu")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "wasm32-unknown-unknown")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "thumbv6m-none-eabi")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "riscv32-unknown-elf")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.triple == "avr-atmega328p-arduino-uno")
-    );
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "x86_64-unknown-linux-gnu"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "x86_64-apple-darwin"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "x86_64-pc-windows-gnu"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "aarch64-pc-windows-gnu"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "wasm32-unknown-unknown"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "thumbv6m-none-eabi"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "riscv32-unknown-elf"));
+    assert!(targets
+        .iter()
+        .any(|target| target.triple == "avr-atmega328p-arduino-uno"));
 }
 
 #[test]
@@ -112,8 +96,7 @@ fn resolves_target_specific_extensions() {
     assert_eq!(wasm.static_library_extension, "a");
     assert_eq!(wasm.object_extension, "o");
 
-    let embedded =
-        target_spec(Some("thumbv6m-none-eabi")).expect("embedded target should resolve");
+    let embedded = target_spec(Some("thumbv6m-none-eabi")).expect("embedded target should resolve");
     assert_eq!(embedded.exe_extension, "");
     assert_eq!(embedded.library_extension, "a");
     assert_eq!(embedded.static_library_extension, "a");
@@ -143,11 +126,9 @@ fn resolves_host_default_target_sensibly() {
 #[test]
 fn reports_unsupported_target_backend_clearly() {
     let error = BuildError::UnsupportedBackendForTarget("unsupported-target".to_string());
-    assert!(
-        error
-            .to_string()
-            .contains("requires a target-aware backend")
-    );
+    assert!(error
+        .to_string()
+        .contains("requires a target-aware backend"));
 }
 
 #[test]
@@ -452,6 +433,30 @@ fn builds_thumb_embedded_object_via_packaged_llvm_backend() {
 }
 
 #[test]
+fn builds_avr_embedded_object_via_avr_capable_llvm_backend_when_available() {
+    if rune::toolchain::find_packaged_llvm_avr_tool("llc").is_none() {
+        return;
+    }
+
+    let dir = temp_dir();
+    let source_path = dir.join("avr_embedded.rn");
+    let output_path = dir.join("avr_embedded.o");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    println(\"avr llvm object\")\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_object_file(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
+        .expect("avr embedded object build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read avr embedded object");
+    assert!(!bytes.is_empty());
+    assert!(bytes.starts_with(&[0x7F, b'E', b'L', b'F']));
+}
+
+#[test]
 fn builds_riscv32_embedded_static_library_via_packaged_llvm_archiver() {
     let dir = temp_dir();
     let source_path = dir.join("riscv_embedded.rn");
@@ -482,8 +487,12 @@ fn builds_arduino_uno_hex_via_packaged_avr_gcc() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno hex build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno hex build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno hex");
     assert!(!bytes.is_empty());
@@ -503,8 +512,12 @@ fn builds_arduino_uno_hex_with_locals_and_control_flow() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno logic hex build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno logic hex build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno logic hex");
     assert!(!bytes.is_empty());
@@ -517,7 +530,9 @@ fn builds_arduino_uno_hex_with_arduino_stdlib_runtime_calls() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_runtime.rn");
     let output_path = dir.join("arduino_uno_runtime.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -527,8 +542,12 @@ fn builds_arduino_uno_hex_with_arduino_stdlib_runtime_calls() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno stdlib runtime hex build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno stdlib runtime hex build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno runtime hex");
     assert!(!bytes.is_empty());
@@ -541,7 +560,9 @@ fn builds_arduino_uno_hex_with_pwm_and_board_constants() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_pwm.rn");
     let output_path = dir.join("arduino_uno_pwm.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -551,8 +572,12 @@ fn builds_arduino_uno_hex_with_pwm_and_board_constants() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno pwm hex build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno pwm hex build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno pwm hex");
     assert!(!bytes.is_empty());
@@ -565,7 +590,9 @@ fn builds_arduino_uno_hex_with_uart_calls() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_uart.rn");
     let output_path = dir.join("arduino_uno_uart.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -575,8 +602,12 @@ fn builds_arduino_uno_hex_with_uart_calls() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno uart hex build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno uart hex build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno uart hex");
     assert!(!bytes.is_empty());
@@ -590,13 +621,20 @@ fn builds_arduino_uno_serial_calculator_example() {
     let source_path = dir.join("serial_calculator_arduino.rn");
     let output_path = dir.join("serial_calculator_arduino.hex");
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    fs::copy(root.join("stdlib").join("arduino.rn"), dir.join("arduino.rn"))
-        .expect("failed to stage arduino stdlib");
+    fs::copy(
+        root.join("stdlib").join("arduino.rn"),
+        dir.join("arduino.rn"),
+    )
+    .expect("failed to stage arduino stdlib");
     fs::copy(root.join("serial_calculator_arduino.rn"), &source_path)
         .expect("failed to stage serial calculator example");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno serial calculator example should build");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno serial calculator example should build");
 
     let bytes = fs::read(&output_path).expect("failed to read serial calculator hex");
     assert!(!bytes.is_empty());
@@ -613,8 +651,12 @@ fn builds_arduino_uno_serial_math_quiz_example() {
     fs::copy(root.join("serial_math_quiz_arduino.rn"), &source_path)
         .expect("failed to stage serial math quiz example");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno serial math quiz example should build");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno serial math quiz example should build");
 
     let bytes = fs::read(&output_path).expect("failed to read serial math quiz hex");
     assert!(!bytes.is_empty());
@@ -627,7 +669,9 @@ fn builds_arduino_uno_with_serial_class_wrapper() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_serial_class.rn");
     let output_path = dir.join("arduino_uno_serial_class.hex");
-    let stdlib_serial = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("serial.rn");
+    let stdlib_serial = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("serial.rn");
     fs::copy(&stdlib_serial, dir.join("serial.rn")).expect("failed to stage serial stdlib");
 
     fs::write(
@@ -638,8 +682,12 @@ fn builds_arduino_uno_with_serial_class_wrapper() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno serial class wrapper example should build");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno serial class wrapper example should build");
 
     let bytes = fs::read(&output_path).expect("failed to read serial class hex");
     assert!(!bytes.is_empty());
@@ -663,7 +711,80 @@ fn builds_host_serial_connector_example() {
     build_executable(&source_path, &output_path, None)
         .expect("host serial connector example should build");
 
-    assert!(output_path.is_file(), "expected host connector output to exist");
+    assert!(
+        output_path.is_file(),
+        "expected host connector output to exist"
+    );
+}
+
+#[test]
+fn builds_host_serial_typed_send_helpers_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("serial_typed_send_helpers.rn");
+    let output_path = dir.join(if cfg!(windows) {
+        "serial_typed_send_helpers.exe"
+    } else {
+        "serial_typed_send_helpers"
+    });
+
+    fs::write(
+        &source_path,
+        "from serial import send_bool, send_i64, send_line_bool, send_line_i64\n\n\
+         def main() -> i32:\n    println(send_i64(42))\n    println(send_bool(true))\n    println(send_line_i64(7))\n    println(send_line_bool(false))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &output_path, None)
+        .expect("host serial typed send helpers example should build");
+
+    assert!(
+        output_path.is_file(),
+        "expected typed send helpers output to exist"
+    );
+}
+
+#[test]
+fn builds_host_serial_reader_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("serial_reader.rn");
+    let output_path = dir.join(if cfg!(windows) {
+        "serial_reader.exe"
+    } else {
+        "serial_reader"
+    });
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("serial_reader.rn"), &source_path)
+        .expect("failed to stage serial reader example");
+
+    build_executable(&source_path, &output_path, None)
+        .expect("host serial reader example should build");
+
+    assert!(
+        output_path.is_file(),
+        "expected host serial reader output to exist"
+    );
+}
+
+#[test]
+fn builds_host_servo_connector_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("servo_connector_arduino.rn");
+    let output_path = dir.join(if cfg!(windows) {
+        "servo_connector_arduino.exe"
+    } else {
+        "servo_connector_arduino"
+    });
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("servo_connector_arduino.rn"), &source_path)
+        .expect("failed to stage servo connector example");
+
+    build_executable(&source_path, &output_path, None)
+        .expect("host servo connector example should build");
+
+    assert!(
+        output_path.is_file(),
+        "expected host servo connector output to exist"
+    );
 }
 
 #[test]
@@ -671,7 +792,9 @@ fn builds_arduino_uno_with_shared_input_print_surface() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_shared_io.rn");
     let output_path = dir.join("arduino_uno_shared_io.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -681,8 +804,12 @@ fn builds_arduino_uno_with_shared_input_print_surface() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno shared input/print build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno shared input/print build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno shared io hex");
     assert!(!bytes.is_empty());
@@ -695,7 +822,9 @@ fn builds_arduino_uno_with_user_defined_helper_functions() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_helpers.rn");
     let output_path = dir.join("arduino_uno_helpers.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -707,8 +836,12 @@ fn builds_arduino_uno_with_user_defined_helper_functions() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno helper function build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno helper function build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno helper hex");
     assert!(!bytes.is_empty());
@@ -721,7 +854,9 @@ fn builds_arduino_uno_with_setup_and_loop_entrypoints() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_setup_loop.rn");
     let output_path = dir.join("arduino_uno_setup_loop.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -732,8 +867,12 @@ fn builds_arduino_uno_with_setup_and_loop_entrypoints() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno setup/loop build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno setup/loop build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno setup/loop hex");
     assert!(!bytes.is_empty());
@@ -746,7 +885,9 @@ fn builds_arduino_uno_stdlib_wrappers_without_recursive_calls() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_wrapper_lowering.rn");
     let output_path = dir.join("arduino_uno_wrapper_lowering.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -757,8 +898,12 @@ fn builds_arduino_uno_stdlib_wrappers_without_recursive_calls() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno wrapper lowering build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno wrapper lowering build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno wrapper lowering hex");
     assert!(!bytes.is_empty());
@@ -772,7 +917,9 @@ fn builds_arduino_uno_with_extended_hardware_io() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_hardware_io.rn");
     let output_path = dir.join("arduino_uno_hardware_io.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -782,10 +929,15 @@ fn builds_arduino_uno_with_extended_hardware_io() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno extended hardware io build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno extended hardware io build should succeed");
 
-    let bytes = fs::read(&output_path).expect("failed to read arduino uno extended hardware io hex");
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno extended hardware io hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());
@@ -796,7 +948,9 @@ fn builds_arduino_uno_with_string_and_int_conversions() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_string_int.rn");
     let output_path = dir.join("arduino_uno_string_int.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -806,10 +960,15 @@ fn builds_arduino_uno_with_string_and_int_conversions() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno string/int conversion build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno string/int conversion build should succeed");
 
-    let bytes = fs::read(&output_path).expect("failed to read arduino uno string/int conversion hex");
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno string/int conversion hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());
@@ -827,8 +986,12 @@ fn builds_arduino_uno_with_for_range_and_sum() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno for/range/sum build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno for/range/sum build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno for/range/sum hex");
     assert!(!bytes.is_empty());
@@ -850,8 +1013,12 @@ fn builds_arduino_uno_with_sys_platform_detection() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno sys program should build");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno sys program should build");
 
     assert!(output_path.is_file(), "expected HEX output to exist");
 }
@@ -861,7 +1028,9 @@ fn builds_arduino_uno_with_class_field_access() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_class_fields.rn");
     let output_path = dir.join("arduino_uno_class_fields.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -871,8 +1040,12 @@ fn builds_arduino_uno_with_class_field_access() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno class field build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno class field build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno class field hex");
     assert!(!bytes.is_empty());
@@ -885,7 +1058,9 @@ fn builds_arduino_uno_with_class_method_calls() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_class_methods.rn");
     let output_path = dir.join("arduino_uno_class_methods.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -895,8 +1070,12 @@ fn builds_arduino_uno_with_class_method_calls() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno class method build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno class method build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno class method hex");
     assert!(!bytes.is_empty());
@@ -909,7 +1088,9 @@ fn builds_arduino_uno_with_class_method_calls_using_self_fields() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_class_method_self.rn");
     let output_path = dir.join("arduino_uno_class_method_self.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -919,8 +1100,12 @@ fn builds_arduino_uno_with_class_method_calls_using_self_fields() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno class method self build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno class method self build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno class method self hex");
     assert!(!bytes.is_empty());
@@ -933,7 +1118,9 @@ fn builds_arduino_uno_with_object_returning_and_object_accepting_methods() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_oop_combo.rn");
     let output_path = dir.join("arduino_uno_oop_combo.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -943,10 +1130,196 @@ fn builds_arduino_uno_with_object_returning_and_object_accepting_methods() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno object-returning method build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno object-returning method build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno oop combo hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_keyword_args_for_helper_functions() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_keyword_helpers.rn");
+    let output_path = dir.join("arduino_uno_keyword_helpers.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "def add_scaled(left: i32, right: i32, scale: i32) -> i32:\n    return (left + right) * scale\n\n\
+         def main() -> i32:\n    println(add_scaled(left=4, right=8, scale=2))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno keyword helper arg build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno keyword helper hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_keyword_args_for_methods() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_keyword_methods.rn");
+    let output_path = dir.join("arduino_uno_keyword_methods.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Mixer:\n    base: i32\n    def combine(self, left: i32, right: i32) -> i32:\n        return self.base + left + right\n\n\
+         def main() -> i32:\n    let mixer = Mixer(base=10)\n    println(mixer.combine(right=8, left=4))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno keyword method arg build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno keyword method hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_inline_constructor_keyword_method_calls() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_inline_keyword_methods.rn");
+    let output_path = dir.join("arduino_uno_inline_keyword_methods.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Mixer:\n    base: i32\n    def combine(self, left: i32, right: i32) -> i32:\n        return self.base + left + right\n\n\
+         def main() -> i32:\n    println(Mixer(base=10).combine(right=8, left=4))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno inline keyword method build should succeed");
+
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno inline keyword method hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_str_magic_method() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_str_magic.rn");
+    let output_path = dir.join("arduino_uno_str_magic.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __str__(self) -> String:\n        return \"Counter(\" + str(self.value) + \")\"\n\n\
+         def main() -> i32:\n    println(str(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno str magic method build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno str magic hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_default_object_string() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_default_object_str.rn");
+    let output_path = dir.join("arduino_uno_default_object_str.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n\n\
+         def main() -> i32:\n    println(str(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno default object string build should succeed");
+
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno default object string hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_direct_print_object() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_direct_print_object.rn");
+    let output_path = dir.join("arduino_uno_direct_print_object.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n\n\
+         def main() -> i32:\n    println(Counter(value=5))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno direct object print build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno direct object print hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());
@@ -957,7 +1330,9 @@ fn builds_arduino_uno_with_string_returning_class_method() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_string_method.hex.rn");
     let output_path = dir.join("arduino_uno_string_method.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -967,8 +1342,12 @@ fn builds_arduino_uno_with_string_returning_class_method() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno string-returning method build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno string-returning method build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno string method hex");
     assert!(!bytes.is_empty());
@@ -981,7 +1360,9 @@ fn builds_arduino_uno_with_chained_string_method_results() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_string_chain.rn");
     let output_path = dir.join("arduino_uno_string_chain.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -991,10 +1372,15 @@ fn builds_arduino_uno_with_chained_string_method_results() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno chained string method build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno chained string method build should succeed");
 
-    let bytes = fs::read(&output_path).expect("failed to read arduino uno chained string method hex");
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno chained string method hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());
@@ -1005,7 +1391,9 @@ fn builds_arduino_uno_with_pin_pwm_and_voltage_abstractions() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_hardware_classes.rn");
     let output_path = dir.join("arduino_uno_hardware_classes.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -1015,10 +1403,15 @@ fn builds_arduino_uno_with_pin_pwm_and_voltage_abstractions() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno hardware abstraction build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno hardware abstraction build should succeed");
 
-    let bytes = fs::read(&output_path).expect("failed to read arduino uno hardware abstraction hex");
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno hardware abstraction hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());
@@ -1029,7 +1422,9 @@ fn builds_arduino_uno_with_pin_pulse_and_analog_percent() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_pin_pulse_percent.rn");
     let output_path = dir.join("arduino_uno_pin_pulse_percent.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -1039,8 +1434,12 @@ fn builds_arduino_uno_with_pin_pulse_and_analog_percent() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno pulse/percent build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno pulse/percent build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno pulse/percent hex");
     assert!(!bytes.is_empty());
@@ -1053,7 +1452,9 @@ fn builds_arduino_uno_with_direct_function_pin_io() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_direct_pin_io.rn");
     let output_path = dir.join("arduino_uno_direct_pin_io.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -1063,10 +1464,15 @@ fn builds_arduino_uno_with_direct_function_pin_io() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno direct function pin io build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno direct function pin io build should succeed");
 
-    let bytes = fs::read(&output_path).expect("failed to read arduino uno direct function pin io hex");
+    let bytes =
+        fs::read(&output_path).expect("failed to read arduino uno direct function pin io hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());
@@ -1077,7 +1483,9 @@ fn builds_arduino_uno_with_direct_analog_input_functions() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_direct_analog_io.rn");
     let output_path = dir.join("arduino_uno_direct_analog_io.hex");
-    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("stdlib").join("arduino.rn");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
     fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
 
     fs::write(
@@ -1087,8 +1495,12 @@ fn builds_arduino_uno_with_direct_analog_input_functions() {
     )
     .expect("failed to write source");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno direct analog input build should succeed");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno direct analog input build should succeed");
 
     let bytes = fs::read(&output_path).expect("failed to read arduino uno direct analog input hex");
     assert!(!bytes.is_empty());
@@ -1102,11 +1514,14 @@ fn builds_arduino_uno_buzzer_example() {
     let source_path = dir.join("buzzer_arduino.rn");
     let output_path = dir.join("buzzer_arduino.hex");
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    fs::copy(root.join("buzzer_arduino.rn"), &source_path)
-        .expect("failed to stage buzzer example");
+    fs::copy(root.join("buzzer_arduino.rn"), &source_path).expect("failed to stage buzzer example");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno buzzer example should build");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno buzzer example should build");
 
     let bytes = fs::read(&output_path).expect("failed to read buzzer hex");
     assert!(!bytes.is_empty());
@@ -1123,10 +1538,199 @@ fn builds_arduino_uno_buzzer_serial_control_example() {
     fs::copy(root.join("buzzer_serial_control_arduino.rn"), &source_path)
         .expect("failed to stage buzzer serial control example");
 
-    build_executable(&source_path, &output_path, Some("avr-atmega328p-arduino-uno"))
-        .expect("arduino uno buzzer serial control example should build");
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno buzzer serial control example should build");
 
     let bytes = fs::read(&output_path).expect("failed to read buzzer serial control hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_gpio_stdlib_surface() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_gpio_surface.rn");
+    let output_path = dir.join("arduino_uno_gpio_surface.hex");
+
+    fs::write(
+        &source_path,
+        "from gpio import analog_pin, gpio_pin, pwm_pin\n\n\
+         def main() -> i32:\n    let led = gpio_pin(13)\n    let pwm = pwm_pin(9)\n    let sensor = analog_pin(0)\n    led.output()\n    led.toggle()\n    pwm.output()\n    pwm.write(64)\n    println(sensor.read())\n    println(sensor.read_percent())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno gpio stdlib build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read gpio stdlib hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_gpio_alias_factories() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_gpio_aliases.rn");
+    let output_path = dir.join("arduino_uno_gpio_aliases.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("gpio.rn");
+    fs::copy(&stdlib_source, dir.join("gpio.rn")).expect("failed to stage gpio stdlib");
+
+    fs::write(
+        &source_path,
+        "from gpio import analog, pin, pwm\n\n\
+         def main() -> i32:\n    let led = pin(13)\n    let pwm_out = pwm(9)\n    let sensor = analog(0)\n    led.output()\n    pwm_out.output()\n    println(sensor.read())\n    println(sensor.read_percent())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno gpio alias build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read gpio alias hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_servo_serial_control_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("servo_serial_control_arduino.rn");
+    let output_path = dir.join("servo_serial_control_arduino.hex");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("servo_serial_control_arduino.rn"), &source_path)
+        .expect("failed to stage servo serial control example");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno servo serial control example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read servo serial control hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_servo_angle_control_example() {
+    let dir = temp_dir();
+    let source_path = dir.join("servo_angle_control_arduino.rn");
+    let output_path = dir.join("servo_angle_control_arduino.hex");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::copy(root.join("servo_angle_control_arduino.rn"), &source_path)
+        .expect("failed to stage servo angle control example");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno servo angle control example should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read servo angle control hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_calibrated_servo_and_range_helpers() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_servo_calibrated_helpers.rn");
+    let output_path = dir.join("arduino_uno_servo_calibrated_helpers.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import clamp_i64, digital_toggle, map_range, servo_attach, servo_pulse_for_angle, servo_write_calibrated\n\n\
+         def main() -> i32:\n    let servo_pin: i64 = 9\n    let angle: i64 = clamp_i64(200, 0, 180)\n    let pulse_us: i64 = servo_pulse_for_angle(angle, 2000, 1000)\n    if servo_attach(servo_pin):\n        servo_write_calibrated(servo_pin, angle, 2000, 1000)\n    digital_toggle(13)\n    println(map_range(50, 0, 100, 1000, 2000))\n    println(pulse_us)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno calibrated servo helper build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read calibrated servo helper hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_break_and_continue() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_break_continue.rn");
+    let output_path = dir.join("arduino_uno_break_continue.hex");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    let value = 0\n    while value < 5:\n        value = value + 1\n        if value == 2:\n            continue\n        println(value)\n        if value == 4:\n            break\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno break/continue build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read break/continue hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_shift_interrupts_and_random() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_shift_interrupts_random.rn");
+    let output_path = dir.join("arduino_uno_shift_interrupts_random.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import (\n    bit_order_msb_first,\n    interrupts_disable,\n    interrupts_enable,\n    random_i64,\n    random_range,\n    random_seed,\n    shift_in,\n)\n\n\
+         def main() -> i32:\n    interrupts_disable()\n    random_seed(42)\n    let sampled: i64 = random_i64(10)\n    let ranged: i64 = random_range(5, 9)\n    interrupts_enable()\n    let bits: i64 = shift_in(8, 7, bit_order_msb_first())\n    println(sampled)\n    println(ranged)\n    println(bits)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno shift/interrupts/random build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read shift/interrupts/random hex");
     assert!(!bytes.is_empty());
     assert_eq!(bytes[0], b':');
     assert!(output_path.with_extension("elf").is_file());

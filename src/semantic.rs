@@ -604,6 +604,7 @@ impl<'a> Analyzer<'a> {
             &sig.return_type,
             sig.raises.as_ref(),
             sig.is_async,
+            false,
         )
     }
 
@@ -644,6 +645,7 @@ impl<'a> Analyzer<'a> {
             &sig.return_type,
             sig.raises.as_ref(),
             sig.is_async,
+            false,
             &mut errors,
         );
         errors
@@ -656,9 +658,10 @@ impl<'a> Analyzer<'a> {
         expected_return: &Type,
         expected_raises: Option<&Type>,
         in_async: bool,
+        in_loop: bool,
     ) -> Result<(), SemanticError> {
         for stmt in &block.statements {
-            self.check_stmt(stmt, scope, expected_return, expected_raises, in_async)?;
+            self.check_stmt(stmt, scope, expected_return, expected_raises, in_async, in_loop)?;
         }
         Ok(())
     }
@@ -670,6 +673,7 @@ impl<'a> Analyzer<'a> {
         expected_return: &Type,
         expected_raises: Option<&Type>,
         in_async: bool,
+        in_loop: bool,
         errors: &mut Vec<SemanticError>,
     ) {
         for stmt in &block.statements {
@@ -679,6 +683,7 @@ impl<'a> Analyzer<'a> {
                 expected_return,
                 expected_raises,
                 in_async,
+                in_loop,
                 errors,
             );
         }
@@ -691,6 +696,7 @@ impl<'a> Analyzer<'a> {
         expected_return: &Type,
         expected_raises: Option<&Type>,
         in_async: bool,
+        in_loop: bool,
     ) -> Result<(), SemanticError> {
         match stmt {
             Stmt::Block(stmt) => {
@@ -701,6 +707,7 @@ impl<'a> Analyzer<'a> {
                     expected_return,
                     expected_raises,
                     in_async,
+                    in_loop,
                 )
             }
             Stmt::Let(stmt) => self.check_let(stmt, scope, in_async),
@@ -717,6 +724,7 @@ impl<'a> Analyzer<'a> {
                     expected_return,
                     expected_raises,
                     in_async,
+                    in_loop,
                 )?;
                 for elif in &stmt.elif_blocks {
                     let elif_ty = self.check_expr(&elif.condition, scope, in_async)?;
@@ -728,6 +736,7 @@ impl<'a> Analyzer<'a> {
                         expected_return,
                         expected_raises,
                         in_async,
+                        in_loop,
                     )?;
                 }
                 if let Some(block) = &stmt.else_block {
@@ -738,6 +747,7 @@ impl<'a> Analyzer<'a> {
                         expected_return,
                         expected_raises,
                         in_async,
+                        in_loop,
                     )?;
                 }
                 Ok(())
@@ -745,6 +755,8 @@ impl<'a> Analyzer<'a> {
             Stmt::While(stmt) => {
                 self.check_while(stmt, scope, expected_return, expected_raises, in_async)
             }
+            Stmt::Break(stmt) => self.check_loop_control("break", stmt.span, in_loop),
+            Stmt::Continue(stmt) => self.check_loop_control("continue", stmt.span, in_loop),
             Stmt::Raise(stmt) => self.check_raise(stmt, scope, expected_raises, in_async),
             Stmt::Panic(stmt) => self.check_panic(stmt, scope, in_async),
             Stmt::Expr(stmt) => {
@@ -761,6 +773,7 @@ impl<'a> Analyzer<'a> {
         expected_return: &Type,
         expected_raises: Option<&Type>,
         in_async: bool,
+        in_loop: bool,
         errors: &mut Vec<SemanticError>,
     ) {
         match stmt {
@@ -772,6 +785,7 @@ impl<'a> Analyzer<'a> {
                     expected_return,
                     expected_raises,
                     in_async,
+                    in_loop,
                     errors,
                 );
             }
@@ -808,6 +822,7 @@ impl<'a> Analyzer<'a> {
                     expected_return,
                     expected_raises,
                     in_async,
+                    in_loop,
                     errors,
                 );
 
@@ -832,6 +847,7 @@ impl<'a> Analyzer<'a> {
                         expected_return,
                         expected_raises,
                         in_async,
+                        in_loop,
                         errors,
                     );
                 }
@@ -844,6 +860,7 @@ impl<'a> Analyzer<'a> {
                         expected_return,
                         expected_raises,
                         in_async,
+                        in_loop,
                         errors,
                     );
                 }
@@ -869,8 +886,20 @@ impl<'a> Analyzer<'a> {
                     expected_return,
                     expected_raises,
                     in_async,
+                    true,
                     errors,
                 );
+            }
+            Stmt::Break(break_stmt) => {
+                if let Err(error) = self.check_loop_control("break", break_stmt.span, in_loop) {
+                    errors.push(error);
+                }
+            }
+            Stmt::Continue(continue_stmt) => {
+                if let Err(error) = self.check_loop_control("continue", continue_stmt.span, in_loop)
+                {
+                    errors.push(error);
+                }
             }
             Stmt::Raise(raise_stmt) => {
                 if let Err(error) = self.check_raise(raise_stmt, scope, expected_raises, in_async)
@@ -988,7 +1017,24 @@ impl<'a> Analyzer<'a> {
             expected_return,
             expected_raises,
             in_async,
+            true,
         )
+    }
+
+    fn check_loop_control(
+        &self,
+        keyword: &str,
+        span: Span,
+        in_loop: bool,
+    ) -> Result<(), SemanticError> {
+        if in_loop {
+            Ok(())
+        } else {
+            Err(SemanticError {
+                message: format!("`{keyword}` is only allowed inside a loop"),
+                span,
+            })
+        }
     }
 
     fn check_raise(
@@ -1326,10 +1372,29 @@ impl<'a> Analyzer<'a> {
                             | Type::String
                     ) {
                         Ok(Type::String)
+                    } else if let Type::Struct(struct_name) = &actual {
+                        let Some(struct_sig) = self.structs.get(struct_name) else {
+                            return Err(SemanticError {
+                                message: format!("unknown struct `{struct_name}`"),
+                                span: expr.span,
+                            });
+                        };
+                        if let Some(method_sig) = struct_sig.methods.get("__str__")
+                            && (method_sig.params.len() != 1
+                                || method_sig.return_type != Type::String)
+                        {
+                            return Err(SemanticError {
+                                message: format!(
+                                    "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String`"
+                                ),
+                                span: expr.span,
+                            });
+                        }
+                        Ok(Type::String)
                     } else {
                         Err(SemanticError {
                             message: format!(
-                                "`str` expects a bool, integer, Json, string, or dynamic value, found `{}`",
+                                "`str` expects a bool, integer, Json, string, dynamic value, or a class/struct value, found `{}`",
                                 actual.name()
                             ),
                             span: expr.span,
@@ -1481,6 +1546,16 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::I64)
                 }
+                "__rune_builtin_time_monotonic_us" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_time_monotonic_us` takes no arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::I64)
+                }
                 "__rune_builtin_time_sleep_ms" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
@@ -1493,6 +1568,26 @@ impl<'a> Analyzer<'a> {
                         return Err(SemanticError {
                             message:
                                 "`__rune_builtin_time_sleep_ms` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let actual = self.check_expr(expr, scope, in_async)?;
+                    self.expect_type(&actual, &Type::I64, expr.span, "sleep duration")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_time_sleep_us" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_time_sleep_us` expects 1 argument"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let CallArg::Positional(expr) = &args[0] else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_time_sleep_us` does not accept keyword arguments"
                                     .to_string(),
                             span,
                         });
@@ -1655,6 +1750,39 @@ impl<'a> Analyzer<'a> {
                     )?;
                     Ok(Type::Bool)
                 }
+                "__rune_builtin_env_get_string" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_env_get_string` expects 2 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(name_expr), CallArg::Positional(default_expr)] = args
+                    else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_env_get_string` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let name_ty = self.check_expr(name_expr, scope, in_async)?;
+                    self.expect_type(
+                        &name_ty,
+                        &Type::String,
+                        name_expr.span,
+                        "environment variable name",
+                    )?;
+                    let default_ty = self.check_expr(default_expr, scope, in_async)?;
+                    self.expect_type(
+                        &default_ty,
+                        &Type::String,
+                        default_expr.span,
+                        "default environment value",
+                    )?;
+                    Ok(Type::String)
+                }
                 "__rune_builtin_env_arg_count" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -1664,6 +1792,30 @@ impl<'a> Analyzer<'a> {
                         });
                     }
                     Ok(Type::I32)
+                }
+                "__rune_builtin_env_arg" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_env_arg` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(index_expr)] = args else {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_env_arg` does not accept keyword arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    };
+                    let index_ty = self.check_expr(index_expr, scope, in_async)?;
+                    self.expect_type(
+                        &index_ty,
+                        &Type::I32,
+                        index_expr.span,
+                        "command-line argument index",
+                    )?;
+                    Ok(Type::String)
                 }
                 "__rune_builtin_network_tcp_connect" => {
                     if args.len() != 2 {
@@ -1767,6 +1919,97 @@ impl<'a> Analyzer<'a> {
                     let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
                     self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
                     Ok(Type::Bool)
+                }
+                "__rune_builtin_network_tcp_recv" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_recv` expects 3 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                        CallArg::Positional(max_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_recv` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "TCP host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "TCP port")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "TCP receive size")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_network_tcp_recv_timeout" | "__rune_builtin_network_udp_recv" => {
+                    if args.len() != 4 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 4 arguments"),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                        CallArg::Positional(max_expr),
+                        CallArg::Positional(timeout_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "network host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "network port")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "network receive size")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "network timeout")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_network_tcp_request" => {
+                    if args.len() != 5 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_request` expects 5 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                        CallArg::Positional(data_expr),
+                        CallArg::Positional(max_expr),
+                        CallArg::Positional(timeout_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_request` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "TCP host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "TCP port")?;
+                    let data_ty = self.check_expr(data_expr, scope, in_async)?;
+                    self.expect_type(&data_ty, &Type::String, data_expr.span, "TCP request data")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "TCP receive size")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
+                    Ok(Type::String)
                 }
                 "__rune_builtin_fs_exists" => {
                     if args.len() != 1 {
@@ -2231,6 +2474,27 @@ impl<'a> Analyzer<'a> {
                     self.expect_integer_type(&value_ty, value_expr.span, "Arduino shiftOut value")?;
                     Ok(Type::Unit)
                 }
+                "__rune_builtin_arduino_shift_in" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_shift_in` expects 3 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(data_pin_expr), CallArg::Positional(clock_pin_expr), CallArg::Positional(bit_order_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_shift_in` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let data_pin_ty = self.check_expr(data_pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&data_pin_ty, data_pin_expr.span, "Arduino shiftIn data pin")?;
+                    let clock_pin_ty = self.check_expr(clock_pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&clock_pin_ty, clock_pin_expr.span, "Arduino shiftIn clock pin")?;
+                    let bit_order_ty = self.check_expr(bit_order_expr, scope, in_async)?;
+                    self.expect_integer_type(&bit_order_ty, bit_order_expr.span, "Arduino shiftIn bit order")?;
+                    Ok(Type::I64)
+                }
                 "__rune_builtin_arduino_tone" => {
                     if args.len() != 3 {
                         return Err(SemanticError {
@@ -2267,6 +2531,60 @@ impl<'a> Analyzer<'a> {
                     };
                     let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
                     self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino noTone pin")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_servo_attach" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_servo_attach` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_servo_attach` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino servo pin")?;
+                    Ok(Type::Bool)
+                }
+                "__rune_builtin_arduino_servo_detach" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_servo_detach` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_servo_detach` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino servo pin")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_servo_write"
+                | "__rune_builtin_arduino_servo_write_us" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 2 arguments"),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let pin_ty = self.check_expr(pin_expr, scope, in_async)?;
+                    self.expect_integer_type(&pin_ty, pin_expr.span, "Arduino servo pin")?;
+                    let value_ty = self.check_expr(value_expr, scope, in_async)?;
+                    self.expect_integer_type(&value_ty, value_expr.span, "Arduino servo value")?;
                     Ok(Type::Unit)
                 }
                 "__rune_builtin_arduino_delay_ms" => {
@@ -2417,6 +2735,69 @@ impl<'a> Analyzer<'a> {
                     let text_ty = self.check_expr(text_expr, scope, in_async)?;
                     self.expect_type(&text_ty, &Type::String, text_expr.span, "Arduino UART text")?;
                     Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_interrupts_enable"
+                | "__rune_builtin_arduino_interrupts_disable" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: format!("`{name}` takes no arguments"),
+                            span,
+                        });
+                    }
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_random_seed" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_random_seed` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(seed_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_random_seed` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let seed_ty = self.check_expr(seed_expr, scope, in_async)?;
+                    self.expect_integer_type(&seed_ty, seed_expr.span, "Arduino random seed")?;
+                    Ok(Type::Unit)
+                }
+                "__rune_builtin_arduino_random_i64" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_random_i64` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(max_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_random_i64` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_integer_type(&max_ty, max_expr.span, "Arduino random max value")?;
+                    Ok(Type::I64)
+                }
+                "__rune_builtin_arduino_random_range" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_random_range` expects 2 arguments".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(min_expr), CallArg::Positional(max_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_arduino_random_range` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let min_ty = self.check_expr(min_expr, scope, in_async)?;
+                    self.expect_integer_type(&min_ty, min_expr.span, "Arduino random min value")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_integer_type(&max_ty, max_expr.span, "Arduino random max value")?;
+                    Ok(Type::I64)
                 }
                 "__rune_builtin_serial_open" => {
                     if args.len() != 2 {
@@ -2825,7 +3206,9 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "int" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_now_unix" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_monotonic_ms" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_time_monotonic_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_sleep_ms" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_time_sleep_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_pid" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_cpu_count" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_system_platform" => Some(Type::Unknown("builtin".to_string())),
@@ -2838,13 +3221,19 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_env_exists" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_env_get_i32" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_env_get_bool" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_env_get_string" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_env_arg_count" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_env_arg" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_connect" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_listen" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_send" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_connect_timeout" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_recv" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_recv_timeout" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_request" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_bind" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_send" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_udp_recv" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_exists" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_read_string" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_fs_write_string" => Some(Type::Unknown("builtin".to_string())),
@@ -2871,8 +3260,13 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_arduino_analog_reference" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_pulse_in" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_shift_out" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_shift_in" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_tone" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_no_tone" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_servo_attach" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_servo_detach" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_servo_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_servo_write_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_delay_ms" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_delay_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_millis" => Some(Type::Unknown("builtin".to_string())),
@@ -2894,6 +3288,11 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_arduino_uart_read_byte" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_write_byte" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_arduino_uart_write" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_interrupts_enable" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_interrupts_disable" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_random_seed" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_random_i64" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_arduino_random_range" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_open" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_is_open" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_close" => Some(Type::Unknown("builtin".to_string())),

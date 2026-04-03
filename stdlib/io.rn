@@ -2,25 +2,59 @@ def write(value) -> unit:
     print(str(value))
     return
 
+def stdout_write(value) -> unit:
+    write(value)
+    return
+
 def writeln(value) -> unit:
     println(str(value))
+    return
+
+def stdout_writeln(value) -> unit:
+    writeln(value)
     return
 
 def error(value) -> unit:
     eprint(str(value))
     return
 
+def stderr_write(value) -> unit:
+    error(value)
+    return
+
 def errorln(value) -> unit:
     eprintln(str(value))
+    return
+
+def stderr_writeln(value) -> unit:
+    errorln(value)
     return
 
 def flush_out() -> unit:
     flush()
     return
 
+def flush_stdout() -> unit:
+    flush_out()
+    return
+
 def flush_err() -> unit:
     eflush()
     return
 
+def flush_stderr() -> unit:
+    flush_err()
+    return
+
 def read_line() -> String:
     return input()
+
+def prompt(message: String) -> String:
+    write(message)
+    flush_out()
+    return read_line()
+
+def error_prompt(message: String) -> String:
+    error(message)
+    flush_err()
+    return read_line()

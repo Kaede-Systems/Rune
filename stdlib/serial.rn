@@ -63,6 +63,12 @@ def send(value: dynamic) -> bool:
         return true
     return __rune_builtin_serial_write(text)
 
+def send_i64(value: i64) -> bool:
+    return send(value)
+
+def send_bool(value: bool) -> bool:
+    return send(value)
+
 def send_line(value: dynamic) -> bool:
     let text: String = str(value)
     if __rune_builtin_system_is_embedded():
@@ -70,6 +76,12 @@ def send_line(value: dynamic) -> bool:
         __rune_builtin_arduino_uart_write_byte(10)
         return true
     return __rune_builtin_serial_write_line(text)
+
+def send_line_i64(value: i64) -> bool:
+    return send_line(value)
+
+def send_line_bool(value: bool) -> bool:
+    return send_line(value)
 
 class SerialPort:
     port: String
@@ -100,8 +112,20 @@ class SerialPort:
     def send(self, value: dynamic) -> bool:
         return send(value)
 
+    def send_i64(self, value: i64) -> bool:
+        return send_i64(value)
+
+    def send_bool(self, value: bool) -> bool:
+        return send_bool(value)
+
     def send_line(self, value: dynamic) -> bool:
         return send_line(value)
+
+    def send_line_i64(self, value: i64) -> bool:
+        return send_line_i64(value)
+
+    def send_line_bool(self, value: bool) -> bool:
+        return send_line_bool(value)
 
 def serial_port(port: String, baud: i64) -> SerialPort:
     return SerialPort(port=port, baud=baud)

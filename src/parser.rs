@@ -81,6 +81,8 @@ pub enum Stmt {
     Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
+    Break(BreakStmt),
+    Continue(ContinueStmt),
     Raise(RaiseStmt),
     Panic(PanicStmt),
     Expr(ExprStmt),
@@ -133,6 +135,16 @@ pub struct ElifBlock {
 pub struct WhileStmt {
     pub condition: Expr,
     pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreakStmt {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinueStmt {
     pub span: Span,
 }
 
@@ -564,6 +576,8 @@ impl Parser {
             TokenKind::Return => Ok(Stmt::Return(self.parse_return_stmt()?)),
             TokenKind::If => Ok(Stmt::If(self.parse_if_stmt()?)),
             TokenKind::While => Ok(Stmt::While(self.parse_while_stmt()?)),
+            TokenKind::Break => Ok(Stmt::Break(self.parse_break_stmt()?)),
+            TokenKind::Continue => Ok(Stmt::Continue(self.parse_continue_stmt()?)),
             TokenKind::Raise => Ok(Stmt::Raise(self.parse_raise_stmt()?)),
             TokenKind::Panic => Ok(Stmt::Panic(self.parse_panic_stmt()?)),
             _ => Ok(Stmt::Expr(self.parse_expr_stmt()?)),
@@ -767,6 +781,18 @@ impl Parser {
         let value = self.parse_expr()?;
         self.expect_simple(TokenKind::Newline, "expected newline after raise")?;
         Ok(RaiseStmt { value, span })
+    }
+
+    fn parse_break_stmt(&mut self) -> Result<BreakStmt, ParseError> {
+        let span = self.expect_simple(TokenKind::Break, "expected `break`")?;
+        self.expect_simple(TokenKind::Newline, "expected newline after break")?;
+        Ok(BreakStmt { span })
+    }
+
+    fn parse_continue_stmt(&mut self) -> Result<ContinueStmt, ParseError> {
+        let span = self.expect_simple(TokenKind::Continue, "expected `continue`")?;
+        self.expect_simple(TokenKind::Newline, "expected newline after continue")?;
+        Ok(ContinueStmt { span })
     }
 
     fn parse_panic_stmt(&mut self) -> Result<PanicStmt, ParseError> {
@@ -1228,6 +1254,8 @@ impl Stmt {
             Stmt::Return(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
             Stmt::While(stmt) => stmt.span,
+            Stmt::Break(stmt) => stmt.span,
+            Stmt::Continue(stmt) => stmt.span,
             Stmt::Raise(stmt) => stmt.span,
             Stmt::Panic(stmt) => stmt.span,
             Stmt::Expr(stmt) => stmt.expr.span,

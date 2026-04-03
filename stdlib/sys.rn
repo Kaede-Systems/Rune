@@ -22,6 +22,21 @@ def is_embedded() -> bool:
 def is_wasm() -> bool:
     return __rune_builtin_system_is_wasm()
 
+def is_host() -> bool:
+    return not is_embedded() and not is_wasm()
+
+def is_desktop() -> bool:
+    return is_host()
+
+def is_windows() -> bool:
+    return platform() == "windows"
+
+def is_linux() -> bool:
+    return platform() == "linux"
+
+def is_macos() -> bool:
+    return platform() == "macos"
+
 def exit(code: i32) -> unit:
     __rune_builtin_system_exit(code)
     return

@@ -1,0 +1,65 @@
+from arduino import clamp_i64, delay_ms, servo_attach, servo_pulse_for_angle, servo_write_calibrated, servo_write_us, torque_on, torque_off
+
+println("Rune servo control ready")
+println("Servo pin: D9")
+println("Commands: on off 0..180 us 1000|1200|1500|1800|2000")
+println("This example uses calibrated pulses for the current servo")
+println("0 maps near 2000us, 180 maps near 1000us")
+
+let servo_pin: i64 = 9
+let torque_enabled: bool = true
+let current_angle: i64 = 90
+let current_pulse_us: i64 = servo_pulse_for_angle(current_angle, 2000, 1000)
+if not servo_attach(servo_pin):
+    println("failed to attach servo")
+else:
+    servo_write_us(servo_pin, current_pulse_us)
+    println("initial angle: 90")
+
+while true:
+    println("servo>")
+    let text: String = input()
+    if text == "on":
+        if torque_on(servo_pin):
+            torque_enabled = true
+            servo_write_us(servo_pin, current_pulse_us)
+            println("torque on")
+        else:
+            println("torque on failed")
+    elif text == "off":
+        torque_off(servo_pin)
+        torque_enabled = false
+        println("torque off")
+    elif text == "us 1000" or text == "1000":
+        current_pulse_us = 1000
+        if torque_enabled:
+            servo_write_us(servo_pin, current_pulse_us)
+        println("pulse_us = 1000")
+    elif text == "us 1200" or text == "1200":
+        current_pulse_us = 1200
+        if torque_enabled:
+            servo_write_us(servo_pin, current_pulse_us)
+        println("pulse_us = 1200")
+    elif text == "us 1500" or text == "1500":
+        current_pulse_us = 1500
+        if torque_enabled:
+            servo_write_us(servo_pin, current_pulse_us)
+        println("pulse_us = 1500")
+    elif text == "us 1800" or text == "1800":
+        current_pulse_us = 1800
+        if torque_enabled:
+            servo_write_us(servo_pin, current_pulse_us)
+        println("pulse_us = 1800")
+    elif text == "us 2000" or text == "2000":
+        current_pulse_us = 2000
+        if torque_enabled:
+            servo_write_us(servo_pin, current_pulse_us)
+        println("pulse_us = 2000")
+    else:
+        current_angle = clamp_i64(int(text), 0, 180)
+        current_pulse_us = servo_pulse_for_angle(current_angle, 2000, 1000)
+        if torque_enabled:
+            servo_write_calibrated(servo_pin, current_angle, 2000, 1000)
+        print("angle = ")
+        println(current_angle)
+    delay_ms(10)

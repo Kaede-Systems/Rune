@@ -253,7 +253,7 @@ fn collect_local_infos(
             Stmt::While(stmt) => {
                 collect_local_infos(&stmt.body, struct_layouts, struct_methods, function_returns, infos)
             }
-            Stmt::Return(_) | Stmt::Raise(_) | Stmt::Panic(_) | Stmt::Expr(_) => {}
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(_) | Stmt::Raise(_) | Stmt::Panic(_) | Stmt::Expr(_) => {}
         }
     }
 }
@@ -470,6 +470,7 @@ struct Lowerer {
     instructions: Vec<IrInst>,
     temp_counter: usize,
     label_counter: usize,
+    loop_labels: Vec<(String, String)>,
 }
 
 impl Lowerer {
@@ -489,6 +490,7 @@ impl Lowerer {
             instructions: Vec::new(),
             temp_counter: 0,
             label_counter: 0,
+            loop_labels: Vec::new(),
         }
     }
 
@@ -572,9 +574,26 @@ impl Lowerer {
                     else_label: end_label.clone(),
                 });
                 self.instructions.push(IrInst::Label(body_label));
+                self.loop_labels
+                    .push((loop_label.clone(), end_label.clone()));
                 self.lower_block(&stmt.body);
+                self.loop_labels.pop();
                 self.instructions.push(IrInst::Jump(loop_label));
                 self.instructions.push(IrInst::Label(end_label));
+            }
+            Stmt::Break(_) => {
+                let (_, break_label) = self
+                    .loop_labels
+                    .last()
+                    .expect("semantic analysis should reject `break` outside a loop");
+                self.instructions.push(IrInst::Jump(break_label.clone()));
+            }
+            Stmt::Continue(_) => {
+                let (continue_label, _) = self
+                    .loop_labels
+                    .last()
+                    .expect("semantic analysis should reject `continue` outside a loop");
+                self.instructions.push(IrInst::Jump(continue_label.clone()));
             }
             Stmt::Raise(stmt) => {
                 let value = self.lower_expr(&stmt.value);
@@ -938,6 +957,12 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"
         | "__rune_builtin_env_arg_count" => Some(IrType::I32),
+        "__rune_builtin_env_arg"
+        | "__rune_builtin_env_get_string"
+        | "__rune_builtin_network_tcp_recv"
+        | "__rune_builtin_network_tcp_recv_timeout"
+        | "__rune_builtin_network_tcp_request"
+        | "__rune_builtin_network_udp_recv" => Some(IrType::String),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"
@@ -955,7 +980,11 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_fs_create_dir_all"
         | "__rune_builtin_audio_bell"
         | "__rune_builtin_json_is_null"
-        | "__rune_builtin_json_to_bool" => Some(IrType::Bool),
+        | "__rune_builtin_json_to_bool"
+        | "__rune_builtin_arduino_servo_attach" => Some(IrType::Bool),
+        "__rune_builtin_arduino_servo_detach"
+        | "__rune_builtin_arduino_servo_write"
+        | "__rune_builtin_arduino_servo_write_us" => Some(IrType::Unit),
         "__rune_builtin_fs_read_string"
         | "__rune_builtin_json_stringify"
         | "__rune_builtin_json_kind"

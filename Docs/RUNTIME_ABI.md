@@ -84,7 +84,9 @@ Implemented areas today include:
 
 - `rune_rt_time_now_unix`
 - `rune_rt_time_monotonic_ms`
+- `rune_rt_time_monotonic_us`
 - `rune_rt_time_sleep_ms`
+- `rune_rt_time_sleep_us`
 
 ### System
 

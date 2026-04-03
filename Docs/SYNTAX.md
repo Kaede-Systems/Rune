@@ -276,9 +276,17 @@ Language-level builtins currently recognized:
 
 ## Current Standard Library Surface
 
-These top-level stdlib modules currently exist in [`stdlib/`](C:\Users\kaededevkentohinode\KUROX\stdlib):
+These top-level stdlib modules are available through Rune's default stdlib loader.
+
+Current implementation detail:
+- `env`, `network`, `serial`, and `gpio` are loaded from the Rust-side built-in module registry.
+- the remaining stdlib modules currently still load from [`stdlib/`](C:\Users\kaededevkentohinode\KUROX\stdlib) until they are migrated.
+
+Current stdlib surface:
 
 - `arduino`
+- `gpio`
+- `serial`
 - `json`
 - `time`
 - `system`
@@ -294,9 +302,12 @@ Current exported functions:
 `time`
 - `unix_now() -> i64`
 - `monotonic_ms() -> i64`
+- `monotonic_us() -> i64`
 - `sleep_ms(ms: i64) -> unit`
+- `sleep_us(us: i64) -> unit`
 - `sleep(seconds: i64) -> unit`
 - `sleep_until(deadline_ms: i64) -> unit`
+- `sleep_until_us(deadline_us: i64) -> unit`
 
 `system`
 - `pid() -> i32`
@@ -311,6 +322,7 @@ Current exported functions:
 - `get_i32(name: String, default: i32) -> i32`
 - `get_bool(name: String, default: bool) -> bool`
 - `arg_count() -> i32`
+- `arg(index: i32) -> String`
 - `get_i32_or_zero(name: String) -> i32`
 - `get_bool_or_false(name: String) -> bool`
 - `get_bool_or_true(name: String) -> bool`
@@ -320,6 +332,28 @@ Current exported functions:
 - `tcp_connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
 - `tcp_probe(host: String, port: i32) -> bool`
 - `tcp_probe_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
+- `tcp_recv(host: String, port: i32, max_bytes: i32) -> String`
+- `tcp_recv_timeout(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `udp_recv(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_request(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+
+`gpio`
+- `gpio_pin(pin: i64) -> GpioPin`
+- `pin(pin: i64) -> GpioPin`
+- `pwm_pin(pin: i64) -> GpioPwm`
+- `pwm(pin: i64) -> GpioPwm`
+- `analog_pin(pin: i64) -> GpioAnalogIn`
+- `analog(pin: i64) -> GpioAnalogIn`
+
+`serial`
+- `begin(baud: i64) -> unit`
+- `open(port: String, baud: i64) -> bool`
+- `is_open() -> bool`
+- `close() -> unit`
+- `recv_line() -> String`
+- `send(value: dynamic) -> bool`
+- `send_line(value: dynamic) -> bool`
+- `serial_port(port: String, baud: i64) -> SerialPort`
 
 `fs`
 - `exists(path: String) -> bool`

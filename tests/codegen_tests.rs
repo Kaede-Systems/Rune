@@ -150,11 +150,13 @@ fn emits_time_builtin_runtime_call() {
 #[test]
 fn emits_extended_stdlib_runtime_calls() {
     let asm = emit_asm_source(
-        "def main() -> bool:\n    __rune_builtin_time_sleep_ms(1)\n    let enabled: bool = __rune_builtin_env_get_bool(\"ENABLED\", false)\n    let cpus: i32 = __rune_builtin_system_cpu_count()\n    return __rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", cpus, 250)\n",
+        "def main() -> bool:\n    __rune_builtin_time_sleep_ms(1)\n    __rune_builtin_time_sleep_us(__rune_builtin_time_monotonic_us())\n    let enabled: bool = __rune_builtin_env_get_bool(\"ENABLED\", false)\n    let cpus: i32 = __rune_builtin_system_cpu_count()\n    return __rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", cpus, 250)\n",
     )
     .expect("extended runtime calls should generate");
 
     assert!(asm.contains("call rune_rt_time_sleep_ms"));
+    assert!(asm.contains("call rune_rt_time_monotonic_us"));
+    assert!(asm.contains("call rune_rt_time_sleep_us"));
     assert!(asm.contains("call rune_rt_env_get_bool"));
     assert!(asm.contains("call rune_rt_system_cpu_count"));
     assert!(asm.contains("call rune_rt_network_tcp_connect_timeout"));
@@ -163,10 +165,11 @@ fn emits_extended_stdlib_runtime_calls() {
 #[test]
 fn emits_env_and_network_runtime_calls() {
     let asm = emit_asm_source(
-        "def main() -> bool:\n    let port: i32 = __rune_builtin_env_get_i32(\"PORT\", 8080)\n    return __rune_builtin_network_tcp_connect(\"127.0.0.1\", port)\n",
+        "def main() -> bool:\n    let host: String = __rune_builtin_env_get_string(\"HOST\", \"127.0.0.1\")\n    let port: i32 = __rune_builtin_env_get_i32(\"PORT\", 8080)\n    println(host)\n    return __rune_builtin_network_tcp_connect(host, port)\n",
     )
     .expect("assembly should generate");
 
+    assert!(asm.contains("call rune_rt_env_get_string"));
     assert!(asm.contains("call rune_rt_env_get_i32"));
     assert!(asm.contains("call rune_rt_network_tcp_connect"));
 }

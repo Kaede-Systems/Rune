@@ -1,6 +1,9 @@
 def exists(path: String) -> bool:
     return __rune_builtin_fs_exists(path)
 
+def read(path: String) -> String:
+    return read_string(path)
+
 def read_string(path: String) -> String:
     return __rune_builtin_fs_read_string(path)
 
@@ -10,17 +13,26 @@ def read_text(path: String) -> String:
 def write_string(path: String, content: String) -> bool:
     return __rune_builtin_fs_write_string(path, content)
 
+def write(path: String, content: String) -> bool:
+    return write_string(path, content)
+
 def write_text(path: String, content: String) -> bool:
     return write_string(path, content)
 
 def remove(path: String) -> bool:
     return __rune_builtin_fs_remove(path)
 
+def delete(path: String) -> bool:
+    return remove(path)
+
 def remove_file(path: String) -> bool:
     return remove(path)
 
 def rename(from_path: String, to_path: String) -> bool:
     return __rune_builtin_fs_rename(from_path, to_path)
+
+def move(from_path: String, to_path: String) -> bool:
+    return rename(from_path, to_path)
 
 def copy(from_path: String, to_path: String) -> bool:
     return __rune_builtin_fs_copy(from_path, to_path)
@@ -33,6 +45,9 @@ def mkdir(path: String) -> bool:
 
 def create_dir_all(path: String) -> bool:
     return __rune_builtin_fs_create_dir_all(path)
+
+def mkdir_p(path: String) -> bool:
+    return create_dir_all(path)
 
 def mkdirs(path: String) -> bool:
     return create_dir_all(path)

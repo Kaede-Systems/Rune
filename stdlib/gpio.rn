@@ -1,0 +1,107 @@
+from arduino import (
+    AnalogPin, DigitalPin, PwmPin,
+    analog_in, analog_in_percent, analog_in_voltage_mv,
+    analog_read, analog_read_percent, analog_read_voltage_mv,
+    clamp_i64, default_reference_mv,
+    delay_ms, delay_us,
+    digital_in, digital_in_pullup, digital_out, digital_toggle,
+    high, led_builtin, low,
+    map_range, micros, millis,
+    mode_input, mode_input_pullup, mode_output,
+    pin_mode, pwm_duty_max, pwm_write,
+)
+
+class GpioPin:
+    pin: i64
+
+    def output(self) -> unit:
+        pin_mode(self.pin, mode_output())
+        return
+
+    def input(self) -> unit:
+        pin_mode(self.pin, mode_input())
+        return
+
+    def input_pullup(self) -> unit:
+        pin_mode(self.pin, mode_input_pullup())
+        return
+
+    def write(self, value: bool) -> unit:
+        digital_out(self.pin, value)
+        return
+
+    def high(self) -> unit:
+        digital_out(self.pin, true)
+        return
+
+    def low(self) -> unit:
+        digital_out(self.pin, false)
+        return
+
+    def toggle(self) -> unit:
+        digital_toggle(self.pin)
+        return
+
+    def read(self) -> bool:
+        return digital_in(self.pin)
+
+    def read_pullup(self) -> bool:
+        return digital_in_pullup(self.pin)
+
+    def blink(self, times: i64, on_ms: i64, off_ms: i64) -> unit:
+        let count: i64 = 0
+        while count < times:
+            self.high()
+            delay_ms(on_ms)
+            self.low()
+            delay_ms(off_ms)
+            count = count + 1
+        return
+
+class GpioPwm:
+    pin: i64
+
+    def output(self) -> unit:
+        pin_mode(self.pin, mode_output())
+        return
+
+    def write(self, duty: i64) -> unit:
+        pwm_write(self.pin, duty)
+        return
+
+    def max_duty(self) -> i64:
+        return pwm_duty_max()
+
+    def off(self) -> unit:
+        pwm_write(self.pin, 0)
+        return
+
+class GpioAnalogIn:
+    pin: i64
+
+    def read(self) -> i64:
+        return analog_read(self.pin)
+
+    def read_percent(self) -> i64:
+        return analog_read_percent(self.pin)
+
+    def read_voltage_mv(self, reference_mv: i64) -> i64:
+        return analog_read_voltage_mv(self.pin, reference_mv)
+
+def gpio_pin(pin: i64) -> GpioPin:
+    return GpioPin(pin=pin)
+
+def pin(pin: i64) -> GpioPin:
+    return gpio_pin(pin)
+
+def pwm_pin(pin: i64) -> GpioPwm:
+    return GpioPwm(pin=pin)
+
+def pwm(pin: i64) -> GpioPwm:
+    return pwm_pin(pin)
+
+def analog_pin(pin: i64) -> GpioAnalogIn:
+    return GpioAnalogIn(pin=pin)
+
+def analog(pin: i64) -> GpioAnalogIn:
+    return analog_pin(pin)

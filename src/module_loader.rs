@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::builtin_modules::{BuiltinModuleBody, builtin_module, builtin_module_for_path};
 use crate::diagnostics::render_file_diagnostic;
 use crate::lexer::Span;
 use crate::parser::{ExceptionDecl, Function, ImportDecl, Item, Program, StructDecl, parse_source};
@@ -265,25 +266,17 @@ fn load_module_recursive(
         return Ok(());
     }
 
-    let source = fs::read_to_string(path).map_err(|source| ModuleLoadError::Io {
-        context: format!("failed to read `{}`", path.display()),
-        source,
-        trace: Vec::new(),
-    })?;
+    let (program, source) = load_module_program(path)?;
     sources.insert(path.to_path_buf(), source.clone());
-    let program = parse_source(&source).map_err(|error| ModuleLoadError::Parse {
-        path: path.to_path_buf(),
-        source: source.clone(),
-        message: error.to_string(),
-        span: error.span,
-        trace: Vec::new(),
-    })?;
 
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     for item in &program.items {
         if let Item::Import(import) = item {
             let module_path = resolve_module_path(base_dir, import);
-            if !module_path.is_file() {
+            let is_builtin = module_path
+                .to_str()
+                .is_some_and(|path_text| path_text.starts_with("<builtin>/"));
+            if !is_builtin && !module_path.is_file() {
                 return Err(ModuleLoadError::MissingModule {
                     module: import.module.join("."),
                     path: module_path,
@@ -302,28 +295,14 @@ fn load_module_recursive(
                     module_name: import.module.join("."),
                 });
 
-            let nested_source =
-                fs::read_to_string(&module_path).map_err(|source| ModuleLoadError::Io {
-                    context: format!("failed to read `{}`", module_path.display()),
-                    source,
-                    trace: vec![ImportSite {
-                        importer_path: path.to_path_buf(),
-                        importer_span: import.span,
-                        module_name: import.module.join("."),
-                    }],
-                })?;
-            let nested_program =
-                parse_source(&nested_source).map_err(|error| ModuleLoadError::Parse {
-                    path: module_path.clone(),
-                    source: nested_source.clone(),
-                    message: error.to_string(),
-                    span: error.span,
-                    trace: vec![ImportSite {
-                        importer_path: path.to_path_buf(),
-                        importer_span: import.span,
-                        module_name: import.module.join("."),
-                    }],
-                })?;
+            let (nested_program, _) = load_module_program(&module_path).map_err(|mut error| {
+                error.push_trace(ImportSite {
+                    importer_path: path.to_path_buf(),
+                    importer_span: import.span,
+                    module_name: import.module.join("."),
+                });
+                error
+            })?;
 
             if let Some(names) = &import.names {
                 for name in names {
@@ -383,10 +362,14 @@ fn load_module_recursive(
 }
 
 fn resolve_module_path(base_dir: &Path, import: &ImportDecl) -> PathBuf {
+    if import.level == 0 && let Some(module) = builtin_module(&import.module) {
+        return module.virtual_path;
+    }
+
     if import.level == 0 {
         let roots = [
             "system", "sys", "time", "network", "env", "fs", "terminal", "audio", "io",
-            "json", "arduino", "serial",
+            "json", "arduino", "gpio", "serial",
         ];
         if import
             .module
@@ -429,4 +412,28 @@ fn resolve_module_path(base_dir: &Path, import: &ImportDecl) -> PathBuf {
     }
     path.set_extension("rn");
     path
+}
+
+fn load_module_program(path: &Path) -> Result<(Program, String), ModuleLoadError> {
+    if let Some(module) = builtin_module_for_path(path) {
+        return match module.body {
+            BuiltinModuleBody::Program(program) => {
+                Ok((program, format!("<builtin module {}>", path.display())))
+            }
+        };
+    }
+
+    let source = fs::read_to_string(path).map_err(|source| ModuleLoadError::Io {
+        context: format!("failed to read `{}`", path.display()),
+        source,
+        trace: Vec::new(),
+    })?;
+    let program = parse_source(&source).map_err(|error| ModuleLoadError::Parse {
+        path: path.to_path_buf(),
+        source: source.clone(),
+        message: error.to_string(),
+        span: error.span,
+        trace: Vec::new(),
+    })?;
+    Ok((program, source))
 }

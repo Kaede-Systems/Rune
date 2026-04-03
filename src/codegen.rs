@@ -714,6 +714,7 @@ fn collect_locals(block: &Block, locals: &mut BTreeSet<String>) -> Result<(), Co
                 }
             }
             Stmt::While(while_stmt) => collect_locals(&while_stmt.body, locals)?,
+            Stmt::Break(_) | Stmt::Continue(_) => {}
             _ => {}
         }
     }
@@ -733,6 +734,7 @@ struct FunctionEmitter<'a> {
     struct_layouts: &'a HashMap<String, Vec<(String, IrType)>>,
     string_labels: &'a mut HashMap<String, String>,
     function_span: Span,
+    loop_labels: Vec<(String, String)>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -765,6 +767,7 @@ impl<'a> FunctionEmitter<'a> {
             struct_layouts,
             string_labels,
             function_span,
+            loop_labels: Vec::new(),
         }
     }
 
@@ -885,9 +888,29 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str(&format!("{start_label}:\n"));
                 self.emit_condition(out, &stmt.condition)?;
                 out.push_str(&format!("    je {end_label}\n"));
+                self.loop_labels
+                    .push((start_label.clone(), end_label.clone()));
                 self.emit_block(out, &stmt.body)?;
+                self.loop_labels.pop();
                 out.push_str(&format!("    jmp {start_label}\n"));
                 out.push_str(&format!("{end_label}:\n"));
+                Ok(())
+            }
+            Stmt::Break(stmt) => {
+                let (_, break_label) = self.loop_labels.last().ok_or_else(|| CodegenError {
+                    message: "`break` is only allowed inside a loop".into(),
+                    span: stmt.span,
+                })?;
+                out.push_str(&format!("    jmp {break_label}\n"));
+                Ok(())
+            }
+            Stmt::Continue(stmt) => {
+                let (continue_label, _) =
+                    self.loop_labels.last().ok_or_else(|| CodegenError {
+                        message: "`continue` is only allowed inside a loop".into(),
+                        span: stmt.span,
+                    })?;
+                out.push_str(&format!("    jmp {continue_label}\n"));
                 Ok(())
             }
             Stmt::Expr(stmt) => self.emit_expr_stmt(out, &stmt.expr),
@@ -1301,6 +1324,14 @@ impl<'a> FunctionEmitter<'a> {
                         "    call rune_rt_print_str\n"
                     });
                 }
+                _ if matches!(self.infer_expr_type(expr), Some(IrType::Struct(_))) => {
+                    self.emit_string_arg(out, expr, "rcx", "rdx", "print argument")?;
+                    out.push_str(if stderr {
+                        "    call rune_rt_eprint_str\n"
+                    } else {
+                        "    call rune_rt_print_str\n"
+                    });
+                }
                 ExprKind::Integer(_)
                 | ExprKind::Identifier(_)
                 | ExprKind::Bool(_)
@@ -1421,6 +1452,17 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_time_monotonic_us" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_time_monotonic_us` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_time_monotonic_us\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_time_sleep_ms" {
             if args.len() != 1 {
                 return Err(CodegenError {
@@ -1437,6 +1479,26 @@ impl<'a> FunctionEmitter<'a> {
             };
             self.emit_into_reg(out, "rcx", expr)?;
             out.push_str("    call rune_rt_time_sleep_ms\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_time_sleep_us" {
+            if args.len() != 1 {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_time_sleep_us` expects 1 argument".to_string(),
+                    span,
+                });
+            }
+            let [CallArg::Positional(expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_time_sleep_us` does not accept keyword arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", expr)?;
+            out.push_str("    call rune_rt_time_sleep_us\n");
             out.push_str("    xor eax, eax\n");
             return Ok(());
         }
@@ -1604,6 +1666,30 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_env_get_string" {
+            let [
+                CallArg::Positional(name_expr),
+                CallArg::Positional(default_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_env_get_string` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, name_expr, "rcx", "rdx", "environment variable name")?;
+            self.emit_string_arg(
+                out,
+                default_expr,
+                "r8",
+                "r9",
+                "default environment value",
+            )?;
+            out.push_str("    call rune_rt_env_get_string\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_env_arg_count" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -1612,6 +1698,19 @@ impl<'a> FunctionEmitter<'a> {
                 });
             }
             out.push_str("    call rune_rt_env_arg_count\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_env_arg" {
+            let [CallArg::Positional(index_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_env_arg` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "ecx", index_expr)?;
+            out.push_str("    call rune_rt_env_arg\n");
             return Ok(());
         }
 
@@ -1699,6 +1798,81 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_network_tcp_recv" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(max_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_tcp_recv` expects 3 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP recv host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_into_reg(out, "r9d", max_expr)?;
+            out.push_str("    call rune_rt_network_tcp_recv\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_recv_timeout" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(max_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_recv_timeout` expects 4 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP recv host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_into_reg(out, "r9d", max_expr)?;
+            out.push_str("    sub rsp, 48\n");
+            self.emit_into_reg(out, "r10d", timeout_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
+            out.push_str("    call rune_rt_network_tcp_recv_timeout\n");
+            out.push_str("    add rsp, 48\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_request" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(data_expr),
+                CallArg::Positional(max_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_tcp_request` expects 5 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP request host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_string_arg(out, data_expr, "r9", "r10", "TCP request data")?;
+            out.push_str("    sub rsp, 64\n");
+            out.push_str("    mov QWORD PTR [rsp+32], r10\n");
+            self.emit_into_reg(out, "r10d", max_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+40], r10d\n");
+            self.emit_into_reg(out, "r10d", timeout_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+48], r10d\n");
+            out.push_str("    call rune_rt_network_tcp_request\n");
+            out.push_str("    add rsp, 64\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_network_udp_bind" {
             let [
                 CallArg::Positional(host_expr),
@@ -1715,6 +1889,31 @@ impl<'a> FunctionEmitter<'a> {
             self.emit_into_reg(out, "r8d", port_expr)?;
             out.push_str("    call rune_rt_network_udp_bind\n");
             out.push_str("    movzx rax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_udp_recv" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(max_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_udp_recv` expects 4 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "UDP recv host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_into_reg(out, "r9d", max_expr)?;
+            out.push_str("    sub rsp, 48\n");
+            self.emit_into_reg(out, "r10d", timeout_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
+            out.push_str("    call rune_rt_network_udp_recv\n");
+            out.push_str("    add rsp, 48\n");
             return Ok(());
         }
 
@@ -2088,6 +2287,21 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_arduino_shift_in" {
+            let [CallArg::Positional(data_pin_expr), CallArg::Positional(clock_pin_expr), CallArg::Positional(bit_order_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_shift_in` expects 3 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", data_pin_expr)?;
+            self.emit_into_reg(out, "rdx", clock_pin_expr)?;
+            self.emit_into_reg(out, "r8", bit_order_expr)?;
+            out.push_str("    call rune_rt_arduino_shift_in\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_arduino_tone" {
             let [CallArg::Positional(pin_expr), CallArg::Positional(freq_expr), CallArg::Positional(duration_expr)] = args else {
                 return Err(CodegenError {
@@ -2114,6 +2328,56 @@ impl<'a> FunctionEmitter<'a> {
             };
             self.emit_into_reg(out, "rcx", pin_expr)?;
             out.push_str("    call rune_rt_arduino_no_tone\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_servo_attach" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_servo_attach` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            out.push_str("    call rune_rt_arduino_servo_attach\n");
+            out.push_str("    movzx eax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_servo_detach" {
+            let [CallArg::Positional(pin_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_servo_detach` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            out.push_str("    call rune_rt_arduino_servo_detach\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_arduino_servo_write" | "__rune_builtin_arduino_servo_write_us"
+        ) {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 2 positional arguments"),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", pin_expr)?;
+            self.emit_into_reg(out, "rdx", value_expr)?;
+            let runtime = if name == "__rune_builtin_arduino_servo_write" {
+                "rune_rt_arduino_servo_write"
+            } else {
+                "rune_rt_arduino_servo_write_us"
+            };
+            out.push_str(&format!("    call {runtime}\n"));
             out.push_str("    xor eax, eax\n");
             return Ok(());
         }
@@ -2243,6 +2507,67 @@ impl<'a> FunctionEmitter<'a> {
             self.emit_string_arg(out, text_expr, "rcx", "rdx", "Arduino UART text")?;
             out.push_str("    call rune_rt_arduino_uart_write\n");
             out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if matches!(
+            name.as_str(),
+            "__rune_builtin_arduino_interrupts_enable" | "__rune_builtin_arduino_interrupts_disable"
+        ) {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{name}` expects 0 positional arguments"),
+                    span,
+                });
+            }
+            let runtime = if name == "__rune_builtin_arduino_interrupts_enable" {
+                "rune_rt_arduino_interrupts_enable"
+            } else {
+                "rune_rt_arduino_interrupts_disable"
+            };
+            out.push_str(&format!("    call {runtime}\n"));
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_random_seed" {
+            let [CallArg::Positional(seed_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_random_seed` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", seed_expr)?;
+            out.push_str("    call rune_rt_arduino_random_seed\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_random_i64" {
+            let [CallArg::Positional(max_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_random_i64` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", max_expr)?;
+            out.push_str("    call rune_rt_arduino_random_i64\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_arduino_random_range" {
+            let [CallArg::Positional(min_expr), CallArg::Positional(max_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_random_range` expects 2 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", min_expr)?;
+            self.emit_into_reg(out, "rdx", max_expr)?;
+            out.push_str("    call rune_rt_arduino_random_range\n");
             return Ok(());
         }
 
@@ -2848,19 +3173,28 @@ impl<'a> FunctionEmitter<'a> {
         Ok(true)
     }
 
-    fn emit_into_reg(&self, out: &mut String, reg: &str, expr: &Expr) -> Result<(), CodegenError> {
-        let Some(operand) = self.simple_operand(expr) else {
-            return Err(CodegenError {
-                message: "expected simple operand".to_string(),
-                span: expr.span,
-            });
-        };
-        let rendered = if is_32bit_register(reg) {
-            operand.render_32()
-        } else {
-            operand.render()
-        };
-        out.push_str(&format!("    mov {reg}, {rendered}\n"));
+    fn emit_into_reg(
+        &mut self,
+        out: &mut String,
+        reg: &str,
+        expr: &Expr,
+    ) -> Result<(), CodegenError> {
+        if let Some(operand) = self.simple_operand(expr) {
+            let rendered = if is_32bit_register(reg) {
+                operand.render_32()
+            } else {
+                operand.render()
+            };
+            out.push_str(&format!("    mov {reg}, {rendered}\n"));
+            return Ok(());
+        }
+
+        self.emit_expr(out, expr)?;
+        if is_32bit_register(reg) {
+            out.push_str(&format!("    mov {reg}, eax\n"));
+        } else if reg != "rax" {
+            out.push_str(&format!("    mov {reg}, rax\n"));
+        }
         Ok(())
     }
 
@@ -3075,6 +3409,39 @@ impl<'a> FunctionEmitter<'a> {
                     self.emit_into_reg(out, "rcx", value_expr)?;
                     out.push_str("    call rune_rt_json_to_string\n");
                 }
+                Some(IrType::Struct(struct_name)) => {
+                    let synthetic_name = struct_method_symbol(&struct_name, "__str__");
+                    if self.function_names.contains(&synthetic_name) {
+                        if self.function_returns.get(&synthetic_name) != Some(&IrType::String) {
+                            return Err(CodegenError {
+                                message: format!(
+                                    "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String` in the native backend"
+                                ),
+                                span: expr.span,
+                            });
+                        }
+                        let callee = Expr {
+                            kind: ExprKind::Identifier(synthetic_name),
+                            span: expr.span,
+                        };
+                        let call_args = vec![CallArg::Positional(value_expr.clone())];
+                        self.emit_call(out, &callee, &call_args, expr.span)?;
+                    } else {
+                        let layout = self
+                            .struct_layouts
+                            .get(&struct_name)
+                            .cloned()
+                            .ok_or_else(|| CodegenError {
+                                message: format!(
+                                    "missing struct layout for `{struct_name}` in the native backend"
+                                ),
+                                span: expr.span,
+                            })?;
+                        let fallback_expr =
+                            build_default_struct_string_expr(value_expr, &struct_name, &layout);
+                        return self.emit_string_arg(out, &fallback_expr, ptr_reg, len_reg, context);
+                    }
+                }
                 _ => {
                     return Err(CodegenError {
                         message: "`str` conversion is not supported for this expression in the native backend"
@@ -3106,7 +3473,14 @@ impl<'a> FunctionEmitter<'a> {
             && let ExprKind::Identifier(name) = &callee.kind
             && matches!(
                 name.as_str(),
-                "__rune_builtin_fs_read_string" | "__rune_builtin_serial_read_line"
+                "__rune_builtin_env_arg"
+                    | "__rune_builtin_env_get_string"
+                    | "__rune_builtin_network_tcp_recv"
+                    | "__rune_builtin_network_tcp_recv_timeout"
+                    | "__rune_builtin_network_tcp_request"
+                    | "__rune_builtin_network_udp_recv"
+                    | "__rune_builtin_fs_read_string"
+                    | "__rune_builtin_serial_read_line"
             )
         {
             if name == "__rune_builtin_fs_read_string" {
@@ -3120,6 +3494,128 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 self.emit_string_arg(out, path_expr, "rcx", "rdx", "filesystem path")?;
                 out.push_str("    call rune_rt_fs_read_string\n");
+            } else if name == "__rune_builtin_env_arg" {
+                let [CallArg::Positional(index_expr)] = args.as_slice() else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_env_arg` expects 1 positional argument in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_into_reg(out, "ecx", index_expr)?;
+                out.push_str("    call rune_rt_env_arg\n");
+            } else if name == "__rune_builtin_env_get_string" {
+                let [CallArg::Positional(name_expr), CallArg::Positional(default_expr)] =
+                    args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_env_get_string` expects 2 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, name_expr, "rcx", "rdx", "environment variable name")?;
+                self.emit_string_arg(
+                    out,
+                    default_expr,
+                    "r8",
+                    "r9",
+                    "default environment value",
+                )?;
+                out.push_str("    call rune_rt_env_get_string\n");
+            } else if name == "__rune_builtin_network_tcp_recv" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(max_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_recv` expects 3 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP recv host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_into_reg(out, "r9d", max_expr)?;
+                out.push_str("    call rune_rt_network_tcp_recv\n");
+            } else if name == "__rune_builtin_network_tcp_recv_timeout" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(max_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_recv_timeout` expects 4 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP recv host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_into_reg(out, "r9d", max_expr)?;
+                out.push_str("    sub rsp, 48\n");
+                self.emit_into_reg(out, "r10d", timeout_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
+                out.push_str("    call rune_rt_network_tcp_recv_timeout\n");
+                out.push_str("    add rsp, 48\n");
+            } else if name == "__rune_builtin_network_tcp_request" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(data_expr),
+                    CallArg::Positional(max_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_request` expects 5 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP request host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_string_arg(out, data_expr, "r9", "r10", "TCP request data")?;
+                out.push_str("    sub rsp, 64\n");
+                out.push_str("    mov QWORD PTR [rsp+32], r10\n");
+                self.emit_into_reg(out, "r10d", max_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+40], r10d\n");
+                self.emit_into_reg(out, "r10d", timeout_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+48], r10d\n");
+                out.push_str("    call rune_rt_network_tcp_request\n");
+                out.push_str("    add rsp, 64\n");
+            } else if name == "__rune_builtin_network_udp_recv" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(max_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_udp_recv` expects 4 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "UDP recv host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_into_reg(out, "r9d", max_expr)?;
+                out.push_str("    sub rsp, 48\n");
+                self.emit_into_reg(out, "r10d", timeout_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
+                out.push_str("    call rune_rt_network_udp_recv\n");
+                out.push_str("    add rsp, 48\n");
             } else {
                 if !args.is_empty() {
                     return Err(CodegenError {
@@ -4404,13 +4900,18 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"
         | "__rune_builtin_arduino_pulse_in"
+        | "__rune_builtin_arduino_shift_in"
         | "__rune_builtin_arduino_millis"
         | "__rune_builtin_arduino_micros"
+        | "__rune_builtin_arduino_random_i64"
+        | "__rune_builtin_arduino_random_range"
         | "__rune_builtin_sum_range" => Some(IrType::I64),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix"
-        | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
+        | "__rune_builtin_time_monotonic_ms"
+        | "__rune_builtin_time_monotonic_us" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
+        | "__rune_builtin_time_sleep_us"
         | "__rune_builtin_system_exit"
         | "__rune_builtin_terminal_clear"
         | "__rune_builtin_terminal_move_to"
@@ -4424,11 +4925,17 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_shift_out"
         | "__rune_builtin_arduino_tone"
         | "__rune_builtin_arduino_no_tone"
+        | "__rune_builtin_arduino_servo_detach"
+        | "__rune_builtin_arduino_servo_write"
+        | "__rune_builtin_arduino_servo_write_us"
         | "__rune_builtin_arduino_delay_ms"
         | "__rune_builtin_arduino_delay_us"
         | "__rune_builtin_arduino_uart_begin"
         | "__rune_builtin_arduino_uart_write_byte"
         | "__rune_builtin_arduino_uart_write"
+        | "__rune_builtin_arduino_interrupts_enable"
+        | "__rune_builtin_arduino_interrupts_disable"
+        | "__rune_builtin_arduino_random_seed"
         | "__rune_builtin_serial_close" => Some(IrType::Unit),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
@@ -4448,6 +4955,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
         "__rune_builtin_serial_open"
+        | "__rune_builtin_arduino_servo_attach"
         | "__rune_builtin_serial_is_open"
         | "__rune_builtin_serial_write"
         | "__rune_builtin_serial_write_line" => Some(IrType::Bool),
@@ -4467,7 +4975,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_fs_create_dir"
         | "__rune_builtin_fs_create_dir_all"
         | "__rune_builtin_audio_bell" => Some(IrType::Bool),
-        "__rune_builtin_fs_read_string" => Some(IrType::String),
+        "__rune_builtin_env_arg"
+        | "__rune_builtin_env_get_string"
+        | "__rune_builtin_network_tcp_recv"
+        | "__rune_builtin_network_tcp_recv_timeout"
+        | "__rune_builtin_network_tcp_request"
+        | "__rune_builtin_network_udp_recv"
+        | "__rune_builtin_fs_read_string" => Some(IrType::String),
         _ => None,
     }
 }
@@ -4489,6 +5003,69 @@ fn collect_struct_layouts(program: &Program) -> HashMap<String, Vec<(String, IrT
             ))
         })
         .collect()
+}
+
+fn build_string_expr(span: Span, value: impl Into<String>) -> Expr {
+    Expr {
+        kind: ExprKind::String(value.into()),
+        span,
+    }
+}
+
+fn build_identifier_expr(span: Span, name: &str) -> Expr {
+    Expr {
+        kind: ExprKind::Identifier(name.to_string()),
+        span,
+    }
+}
+
+fn build_binary_add_expr(span: Span, left: Expr, right: Expr) -> Expr {
+    Expr {
+        kind: ExprKind::Binary {
+            left: Box::new(left),
+            op: BinaryOp::Add,
+            right: Box::new(right),
+        },
+        span,
+    }
+}
+
+fn build_str_call_expr(expr: &Expr) -> Expr {
+    Expr {
+        kind: ExprKind::Call {
+            callee: Box::new(build_identifier_expr(expr.span, "str")),
+            args: vec![CallArg::Positional(expr.clone())],
+        },
+        span: expr.span,
+    }
+}
+
+fn build_default_struct_string_expr(
+    base: &Expr,
+    struct_name: &str,
+    fields: &[(String, IrType)],
+) -> Expr {
+    let span = base.span;
+    let mut rendered = build_string_expr(span, format!("{struct_name}("));
+    for (index, (field_name, _)) in fields.iter().enumerate() {
+        if index > 0 {
+            rendered = build_binary_add_expr(span, rendered, build_string_expr(span, ", "));
+        }
+        rendered = build_binary_add_expr(
+            span,
+            rendered,
+            build_string_expr(span, format!("{field_name}=")),
+        );
+        let field_expr = Expr {
+            kind: ExprKind::Field {
+                base: Box::new(base.clone()),
+                name: field_name.clone(),
+            },
+            span,
+        };
+        rendered = build_binary_add_expr(span, rendered, build_str_call_expr(&field_expr));
+    }
+    build_binary_add_expr(span, rendered, build_string_expr(span, ")"))
 }
 
 fn escape_ascii(value: &str) -> String {

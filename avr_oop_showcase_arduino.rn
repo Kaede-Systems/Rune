@@ -1,0 +1,49 @@
+from arduino import delay_ms, digital_out, led_builtin, mode_output, pin_mode, uart_begin
+
+class PlainCounter:
+    value: i32
+
+class Counter:
+    value: i32
+
+    def bump(self, amount: i32) -> Counter:
+        return Counter(value=self.value + amount)
+
+    def __str__(self) -> String:
+        return "Counter(" + str(self.value) + ")"
+
+class Quiz:
+    left: i32
+    right: i32
+
+    def total(self) -> i32:
+        return self.left + self.right
+
+    def __str__(self) -> String:
+        return "Quiz(total=" + str(self.total()) + ")"
+
+uart_begin(115200)
+pin_mode(led_builtin(), mode_output())
+
+let plain: PlainCounter = PlainCounter(value=5)
+let base: Counter = Counter(value=5)
+let next: Counter = base.bump(amount=3)
+let quiz: Quiz = Quiz(left=7, right=8)
+
+while true:
+    digital_out(led_builtin(), true)
+    println("Rune AVR OOP showcase")
+    print("plain = ")
+    println(str(plain))
+    print("base = ")
+    println(str(base))
+    print("next = ")
+    println(str(next))
+    print("quiz = ")
+    println(str(quiz))
+    print("inline = ")
+    println(str(Counter(value=10).bump(amount=2)))
+    println("----")
+    delay_ms(150)
+    digital_out(led_builtin(), false)
+    delay_ms(150)

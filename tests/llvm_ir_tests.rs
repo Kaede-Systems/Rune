@@ -41,16 +41,19 @@ fn emits_runtime_print_family_calls() {
 #[test]
 fn emits_stdlib_builtin_runtime_calls() {
     let ir = emit_llvm_ir_source(
-        "def main() -> i32:\n    let pid: i32 = __rune_builtin_system_pid()\n    let cpus: i32 = __rune_builtin_system_cpu_count()\n    let argc: i32 = __rune_builtin_env_arg_count()\n    let ok: bool = __rune_builtin_network_tcp_connect_timeout(\"127.0.0.1\", 65535, 10)\n    __rune_builtin_time_sleep_ms(__rune_builtin_time_monotonic_ms())\n    if __rune_builtin_env_exists(\"PATH\"):\n        println(pid)\n    println(cpus)\n    println(argc)\n    println(ok)\n    return 0\n",
+        "def main() -> i32:\n    let pid: i32 = __rune_builtin_system_pid()\n    let cpus: i32 = __rune_builtin_system_cpu_count()\n    let argc: i32 = __rune_builtin_env_arg_count()\n    let host: String = __rune_builtin_env_get_string(\"HOST\", \"127.0.0.1\")\n    let ok: bool = __rune_builtin_network_tcp_connect_timeout(host, 65535, 10)\n    __rune_builtin_time_sleep_ms(__rune_builtin_time_monotonic_ms())\n    __rune_builtin_time_sleep_us(__rune_builtin_time_monotonic_us())\n    if __rune_builtin_env_exists(\"PATH\"):\n        println(pid)\n    println(cpus)\n    println(argc)\n    println(ok)\n    return 0\n",
     )
     .expect("llvm ir should generate");
 
     assert!(ir.contains("declare i64 @rune_rt_time_monotonic_ms()"));
+    assert!(ir.contains("declare i64 @rune_rt_time_monotonic_us()"));
     assert!(ir.contains("declare void @rune_rt_time_sleep_ms(i64)"));
+    assert!(ir.contains("declare void @rune_rt_time_sleep_us(i64)"));
     assert!(ir.contains("declare i32 @rune_rt_system_pid()"));
     assert!(ir.contains("declare i32 @rune_rt_system_cpu_count()"));
     assert!(ir.contains("declare i32 @rune_rt_env_arg_count()"));
     assert!(ir.contains("declare i1 @rune_rt_env_exists(ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_env_get_string(ptr, i64, ptr, i64)"));
     assert!(ir.contains("declare i1 @rune_rt_network_tcp_connect_timeout(ptr, i64, i32, i32)"));
 }
 

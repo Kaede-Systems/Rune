@@ -5,7 +5,7 @@ use std::process::Command;
 use std::process::ExitCode;
 
 use rune::build::{
-    BuildOptions, build_executable, build_executable_with_options, build_object_file,
+    BuildError, BuildOptions, build_executable, build_executable_with_options, build_object_file,
     build_shared_library, build_static_library, emit_avr_precode, emit_c_header,
     supported_targets, target_spec,
 };
@@ -15,13 +15,14 @@ use rune::lexer::{TokenKind, lex};
 use rune::llvm_backend::emit_assembly_file;
 use rune::llvm_ir::emit_llvm_ir;
 use rune::module_loader::{LoadedProgram, load_program_bundle_from_path};
-use rune::optimize::optimize_program;
+use rune::optimize::{optimize_program, prune_program_for_executable};
 use rune::parser::parse_source;
 use rune::semantic::{check_program_with_context, check_program_with_context_all};
 use rune::toolchain::{
     detect_windows_dev_assets, find_arduino_avr_gcc, find_arduino_avr_objcopy,
     find_arduino_avrdude, find_packaged_ld_lld, find_packaged_ld64_lld,
-    find_packaged_lld_link, find_packaged_llvm_tool, find_packaged_wasm_ld, find_packaged_wasmtime,
+    find_packaged_lld_link, find_packaged_llvm_avr_tool, find_packaged_llvm_tool,
+    find_packaged_wasm_ld, find_packaged_wasmtime,
 };
 use rune::version::{display_version, release_tag};
 use rune::warnings::collect_warnings;
@@ -34,6 +35,22 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn build_error_exit_code(error: &BuildError) -> i32 {
+    match error {
+        BuildError::UnsupportedTarget(_) => 20,
+        BuildError::UnsupportedBackendForTarget(_) => 21,
+        BuildError::ToolNotFound(_) | BuildError::RustcNotFound => 30,
+        BuildError::Codegen(_) | BuildError::ModuleLoad(_) | BuildError::UnsupportedFfiSignature(_) => 40,
+        BuildError::ToolFailed { .. } => 50,
+        BuildError::Io { .. } => 60,
+    }
+}
+
+fn exit_with_build_error(error: BuildError) -> ! {
+    eprintln!("{error}");
+    std::process::exit(build_error_exit_code(&error));
 }
 
 fn run() -> Result<(), String> {
@@ -175,6 +192,7 @@ fn run() -> Result<(), String> {
                 )
             })?;
             optimize_program(&mut program);
+            prune_program_for_executable(&mut program);
             let ir = lower_program(&program);
             print!("{ir}");
             Ok(())
@@ -205,6 +223,7 @@ fn run() -> Result<(), String> {
                 )
             })?;
             optimize_program(&mut program);
+            prune_program_for_executable(&mut program);
             let llvm_ir = emit_llvm_ir(&program).map_err(|error| error.to_string())?;
             print!("{llvm_ir}");
             Ok(())
@@ -300,10 +319,10 @@ fn run() -> Result<(), String> {
                 }
             }
 
-            let precode =
-                emit_avr_precode(Path::new(&path), target.as_deref()).map_err(|error| {
-                    error.to_string()
-                })?;
+            let precode = match emit_avr_precode(Path::new(&path), target.as_deref()) {
+                Ok(precode) => precode,
+                Err(error) => exit_with_build_error(error),
+            };
             print!("{precode}");
             Ok(())
         }
@@ -400,7 +419,10 @@ fn run() -> Result<(), String> {
                 load_program_bundle_from_path(Path::new(&path)).map_err(|error| error.render())?;
             check_program_with_context_all(&bundle.program)
                 .map_err(|failures| render_loaded_diagnostics(&bundle, &failures))?;
-            let target_info = target_spec(target.as_deref()).map_err(|error| error.to_string())?;
+            let target_info = match target_spec(target.as_deref()) {
+                Ok(spec) => spec,
+                Err(error) => exit_with_build_error(error),
+            };
             let output_path = output.unwrap_or_else(|| {
                 if build_object {
                     source_path.with_extension(target_info.object_extension)
@@ -413,22 +435,30 @@ fn run() -> Result<(), String> {
                 }
             });
             if build_object {
-                build_object_file(&source_path, &output_path, target.as_deref())
-                    .map_err(|error| error.to_string())?;
+                if let Err(error) = build_object_file(&source_path, &output_path, target.as_deref()) {
+                    exit_with_build_error(error);
+                }
             } else if build_lib {
-                build_shared_library(&source_path, &output_path, target.as_deref())
-                    .map_err(|error| error.to_string())?;
+                if let Err(error) =
+                    build_shared_library(&source_path, &output_path, target.as_deref())
+                {
+                    exit_with_build_error(error);
+                }
             } else if build_static_lib {
-                build_static_library(&source_path, &output_path, target.as_deref())
-                    .map_err(|error| error.to_string())?;
+                if let Err(error) =
+                    build_static_library(&source_path, &output_path, target.as_deref())
+                {
+                    exit_with_build_error(error);
+                }
             } else {
-                build_executable_with_options(
+                if let Err(error) = build_executable_with_options(
                     &source_path,
                     &output_path,
                     target.as_deref(),
                     &build_options,
-                )
-                    .map_err(|error| error.to_string())?;
+                ) {
+                    exit_with_build_error(error);
+                }
             }
             println!("built {}", output_path.display());
             Ok(())
@@ -442,33 +472,43 @@ fn run() -> Result<(), String> {
         "decompile" => {
             let Some(path) = args.next() else {
                 return Err(
-                    "missing binary path\n\nUsage: rune decompile <binary> [--target triple]"
+                    "missing binary path\n\nUsage: rune decompile <binary> [--target triple] [--format asm|c]"
                         .to_string(),
                 );
             };
 
             let mut target: Option<String> = None;
+            let mut format = DecompileFormat::Asm;
             while let Some(arg) = args.next() {
                 match arg.as_str() {
                     "--target" => {
                         let Some(value) = args.next() else {
                             return Err(
-                                "missing value after `--target`\n\nUsage: rune decompile <binary> [--target triple]"
+                                "missing value after `--target`\n\nUsage: rune decompile <binary> [--target triple] [--format asm|c]"
                                     .to_string(),
                             );
                         };
                         target = Some(value);
                     }
+                    "--format" => {
+                        let Some(value) = args.next() else {
+                            return Err(
+                                "missing value after `--format`\n\nUsage: rune decompile <binary> [--target triple] [--format asm|c]"
+                                    .to_string(),
+                            );
+                        };
+                        format = parse_decompile_format(&value)?;
+                    }
                     _ => {
                         return Err(
-                            "invalid arguments for `rune decompile`\n\nUsage: rune decompile <binary> [--target triple]"
+                            "invalid arguments for `rune decompile`\n\nUsage: rune decompile <binary> [--target triple] [--format asm|c]"
                                 .to_string(),
                         );
                     }
                 }
             }
 
-            let disassembly = decompile_binary(Path::new(&path), target.as_deref())?;
+            let disassembly = decompile_binary(Path::new(&path), target.as_deref(), format)?;
             print!("{disassembly}");
             Ok(())
         }
@@ -533,6 +573,8 @@ fn run() -> Result<(), String> {
             print_tool("opt", find_packaged_llvm_tool("opt"));
             print_tool("clang", find_packaged_llvm_tool("clang"));
             print_tool("llvm-ar", find_packaged_llvm_tool("llvm-ar"));
+            print_tool("avr llc", find_packaged_llvm_avr_tool("llc"));
+            print_tool("avr clang", find_packaged_llvm_avr_tool("clang"));
             print_tool("lld-link", find_packaged_lld_link());
             print_tool("ld.lld", find_packaged_ld_lld());
             print_tool("ld64.lld", find_packaged_ld64_lld());
@@ -638,6 +680,7 @@ fn run() -> Result<(), String> {
                 )
             })?;
             optimize_program(&mut program);
+            prune_program_for_executable(&mut program);
             let ir = lower_program(&program).to_string();
             let asm = emit_llvm_asm_text(&path, target.as_deref())?;
 
@@ -756,7 +799,7 @@ fn pretty_path(path: &Path) -> String {
 }
 
 fn usage() -> String {
-    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
+    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple] [--format asm|c]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
 }
 
 fn display_kind(kind: &TokenKind) -> String {
@@ -788,6 +831,7 @@ fn emit_llvm_asm_text(path: &str, target: Option<&str>) -> Result<String, String
         )
     })?;
     optimize_program(&mut program);
+    prune_program_for_executable(&mut program);
     let target_info = target_spec(target).map_err(|error| error.to_string())?;
     let temp_dir = std::env::temp_dir().join(format!(
         "rune-emit-llvm-asm-{}",
@@ -976,9 +1020,32 @@ fn resolve_run_path(path: &Path) -> Result<PathBuf, String> {
     Ok(cwd.join(path))
 }
 
-fn decompile_binary(path: &Path, target: Option<&str>) -> Result<String, String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecompileFormat {
+    Asm,
+    C,
+}
+
+fn parse_decompile_format(value: &str) -> Result<DecompileFormat, String> {
+    match value {
+        "asm" => Ok(DecompileFormat::Asm),
+        "c" => Ok(DecompileFormat::C),
+        other => Err(format!(
+            "unsupported decompile format `{other}`; expected `asm` or `c`"
+        )),
+    }
+}
+
+fn decompile_binary(path: &Path, target: Option<&str>, format: DecompileFormat) -> Result<String, String> {
     if !path.is_file() {
         return Err(format!("binary not found: {}", path.display()));
+    }
+
+    if format == DecompileFormat::C {
+        return Err(
+            "generic binary-to-C decompilation is not implemented yet; `rune decompile --format asm` is supported today"
+                .to_string(),
+        );
     }
 
     let llvm_objdump = find_packaged_llvm_tool("llvm-objdump")

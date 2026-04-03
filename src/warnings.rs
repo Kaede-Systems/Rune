@@ -90,6 +90,7 @@ fn collect_locals_and_uses_in_block(
                 collect_used_identifiers_in_expr(&stmt.condition, used);
                 collect_locals_and_uses_in_block(&stmt.body, declared, used);
             }
+            Stmt::Break(_) | Stmt::Continue(_) => {}
             Stmt::Raise(stmt) => collect_used_identifiers_in_expr(&stmt.value, used),
             Stmt::Panic(stmt) => collect_used_identifiers_in_expr(&stmt.value, used),
             Stmt::Expr(stmt) => collect_used_identifiers_in_expr(&stmt.expr, used),
@@ -123,6 +124,7 @@ fn collect_calls_in_block(block: &crate::parser::Block, called: &mut BTreeSet<St
                 collect_calls_in_expr(&stmt.condition, called);
                 collect_calls_in_block(&stmt.body, called);
             }
+            Stmt::Break(_) | Stmt::Continue(_) => {}
             Stmt::Raise(stmt) => collect_calls_in_expr(&stmt.value, called),
             Stmt::Panic(stmt) => collect_calls_in_expr(&stmt.value, called),
             Stmt::Expr(stmt) => collect_calls_in_expr(&stmt.expr, called),

@@ -11,13 +11,13 @@ use crate::codegen::CodegenError;
 use crate::llvm_backend::{emit_object_file, emit_object_file_from_ir};
 use crate::llvm_ir::emit_llvm_ir;
 use crate::module_loader::load_program_from_path;
-use crate::optimize::optimize_program;
+use crate::optimize::{optimize_program, prune_program_for_executable};
 use crate::parser::{BinaryOp, CallArg, Expr, ExprKind, Item, Program, Stmt, TypeRef, UnaryOp};
 use crate::semantic::check_program;
 use crate::toolchain::{
     find_arduino_avr_avrdude_conf, find_arduino_avrdude, find_arduino_avr_core_root,
     find_arduino_avr_gcc, find_arduino_avr_gpp, find_arduino_avr_objcopy,
-    find_arduino_avr_runtime_header,
+    find_arduino_avr_runtime_header, find_arduino_avr_servo_library_root,
     find_packaged_llvm_cbe, find_packaged_llvm_tool, find_packaged_wasm_ld,
 };
 
@@ -351,6 +351,7 @@ pub fn emit_avr_precode(source_path: &Path, target: Option<&str>) -> Result<Stri
         })
     })?;
     optimize_program(&mut program);
+    prune_program_for_executable(&mut program);
 
     emit_arduino_uno_precode(&program)
 }
@@ -390,6 +391,7 @@ fn build_executable_with_backend(
         })
     })?;
     optimize_program(&mut program);
+    prune_program_for_executable(&mut program);
     if target_spec.triple == "avr-atmega328p-arduino-uno" {
         return build_arduino_uno_hex(&program, output_path, options);
     }
@@ -509,7 +511,10 @@ fn build_arduino_uno_hex(
 
     let core_dir = core_root.join("cores").join("arduino");
     let variant_dir = core_root.join("variants").join("standard");
-    let common_args = arduino_uno_common_compile_args(&core_dir, &variant_dir);
+    let servo_dir = find_arduino_avr_servo_library_root();
+    let include_servo_sources = program_uses_arduino_servo(program);
+    let common_args =
+        arduino_uno_common_compile_args(&core_dir, &variant_dir, servo_dir.as_deref());
 
     let sketch_compile = Command::new(&gpp)
         .args(&common_args)
@@ -540,11 +545,14 @@ fn build_arduino_uno_hex(
         &gpp,
         &core_dir,
         &variant_dir,
+        servo_dir.as_deref(),
+        include_servo_sources,
     )?);
 
     let mut link = Command::new(&gpp);
     link.arg("-mmcu=atmega328p")
         .arg("-Os")
+        .arg("-flto")
         .arg("-Wl,--gc-sections")
         .arg("-o")
         .arg(&elf_path);
@@ -732,7 +740,10 @@ fn build_arduino_uno_hex_via_llvm_cbe(
 
     let core_dir = core_root.join("cores").join("arduino");
     let variant_dir = core_root.join("variants").join("standard");
-    let common_args = arduino_uno_common_compile_args(&core_dir, &variant_dir);
+    let servo_dir = find_arduino_avr_servo_library_root();
+    let include_servo_sources = program_uses_arduino_servo(program);
+    let common_args =
+        arduino_uno_common_compile_args(&core_dir, &variant_dir, servo_dir.as_deref());
 
     let c_compile = Command::new(&gcc)
         .args(&common_args)
@@ -783,11 +794,14 @@ fn build_arduino_uno_hex_via_llvm_cbe(
         &gpp,
         &core_dir,
         &variant_dir,
+        servo_dir.as_deref(),
+        include_servo_sources,
     )?);
 
     let mut link = Command::new(&gpp);
     link.arg("-mmcu=atmega328p")
         .arg("-Os")
+        .arg("-flto")
         .arg("-Wl,--gc-sections")
         .arg("-o")
         .arg(&elf_path);
@@ -1145,6 +1159,7 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
             &helper_signatures,
             &struct_signatures,
             ArduinoUnoReturnKind::Entry,
+            false,
             1,
         )?;
         (body, String::new())
@@ -1162,6 +1177,7 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
                 &helper_signatures,
                 &struct_signatures,
                 ArduinoUnoReturnKind::Entry,
+                false,
                 1,
             )?;
         }
@@ -1176,6 +1192,7 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
                 &helper_signatures,
                 &struct_signatures,
                 ArduinoUnoReturnKind::Entry,
+                false,
                 1,
             )?;
         }
@@ -1198,16 +1215,29 @@ fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
         emit_arduino_uno_method_definitions(program, &helper_signatures, &struct_signatures)?;
 
     Ok(format!(
-        "#include <Arduino.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\n\
+        "#include <Arduino.h>\n#include <Servo.h>\n#include <new>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\n\
 static char rune_input_buffer[96];\n\n\
-static char rune_temp_string_buffer[32];\n\n\
 static char rune_dynamic_concat_buffer[160];\n\n\
+#define RUNE_STRING_SLOT_COUNT 8\n\
+#define RUNE_STRING_SLOT_SIZE 96\n\n\
+static char rune_string_slots[RUNE_STRING_SLOT_COUNT][RUNE_STRING_SLOT_SIZE];\n\
+static uint8_t rune_string_slot_index = 0;\n\n\
+alignas(Servo) static unsigned char rune_servo_storage[20][sizeof(Servo)];\n\
+static Servo* rune_servo_slots[20] = {{ nullptr }};\n\
+static bool rune_servo_constructed_flags[20] = {{ false }};\n\
+static bool rune_servo_attached_flags[20] = {{ false }};\n\n\
 typedef struct rune_dynamic_value {{\n\
     int64_t tag;\n\
     int64_t payload;\n\
     const char* text;\n\
 }} rune_dynamic_value;\n\n\
-\n\
+ \n\
+static char* rune_claim_string_slot(void) {{\n\
+    char* slot = rune_string_slots[rune_string_slot_index];\n\
+    rune_string_slot_index = (uint8_t)((rune_string_slot_index + 1) % RUNE_STRING_SLOT_COUNT);\n\
+    slot[0] = '\\0';\n\
+    return slot;\n\
+}}\n\n\
 static void rune_serial_write_cstr(const char* text) {{\n\
     Serial.print(text);\n\
 }}\n\n\
@@ -1275,11 +1305,73 @@ static int64_t rune_parse_i64(const char* text) {{\n\
     return negative ? -value : value;\n\
 }}\n\n\
 static const char* rune_string_from_i64(int64_t value) {{\n\
-    ltoa(value, rune_temp_string_buffer, 10);\n\
-    return rune_temp_string_buffer;\n\
+    char* slot = rune_claim_string_slot();\n\
+    uint8_t index = 0;\n\
+    uint64_t magnitude = (value < 0) ? (uint64_t)(-value) : (uint64_t)value;\n\
+    if (value == 0) {{\n\
+        slot[0] = '0';\n\
+        slot[1] = '\\0';\n\
+        return slot;\n\
+    }}\n\
+    if (value < 0) {{\n\
+        slot[index++] = '-';\n\
+    }}\n\
+    char reversed[21];\n\
+    uint8_t digits = 0;\n\
+    while (magnitude > 0 && digits + 1 < sizeof(reversed)) {{\n\
+        reversed[digits++] = (char)('0' + (magnitude % 10));\n\
+        magnitude /= 10;\n\
+    }}\n\
+    while (digits > 0 && index + 1 < RUNE_STRING_SLOT_SIZE) {{\n\
+        slot[index++] = reversed[--digits];\n\
+    }}\n\
+    slot[index] = '\\0';\n\
+    return slot;\n\
 }}\n\n\
 static const char* rune_string_from_bool(bool value) {{\n\
     return value ? \"true\" : \"false\";\n\
+}}\n\n\
+static bool rune_rt_arduino_servo_attach(int64_t pin) {{\n\
+    if (pin < 0 || pin >= 20) {{\n\
+        return false;\n\
+    }}\n\
+    uint8_t slot = (uint8_t)pin;\n\
+    if (rune_servo_slots[slot] == nullptr) {{\n\
+        rune_servo_slots[slot] = new (&rune_servo_storage[slot][0]) Servo();\n\
+        rune_servo_constructed_flags[slot] = true;\n\
+    }}\n\
+    if (!rune_servo_attached_flags[slot]) {{\n\
+        rune_servo_slots[slot]->attach((int)pin);\n\
+        rune_servo_attached_flags[slot] = true;\n\
+    }}\n\
+    return rune_servo_attached_flags[slot];\n\
+}}\n\n\
+static void rune_rt_arduino_servo_detach(int64_t pin) {{\n\
+    if (pin < 0 || pin >= 20) {{\n\
+        return;\n\
+    }}\n\
+    uint8_t slot = (uint8_t)pin;\n\
+    if (rune_servo_slots[slot] != nullptr && rune_servo_attached_flags[slot]) {{\n\
+        rune_servo_slots[slot]->detach();\n\
+        rune_servo_attached_flags[slot] = false;\n\
+    }}\n\
+}}\n\n\
+static void rune_rt_arduino_servo_write(int64_t pin, int64_t angle) {{\n\
+    if (!rune_rt_arduino_servo_attach(pin)) {{\n\
+        return;\n\
+    }}\n\
+    if (angle < 0) {{\n\
+        angle = 0;\n\
+    }} else if (angle > 180) {{\n\
+        angle = 180;\n\
+    }}\n\
+    rune_servo_slots[(uint8_t)pin]->write((int)angle);\n\
+}}\n\n\
+static void rune_rt_arduino_servo_write_us(int64_t pin, int64_t pulse_us) {{\n\
+    if (!rune_rt_arduino_servo_attach(pin)) {{\n\
+        return;\n\
+    }}\n\
+    rune_servo_slots[(uint8_t)pin]->writeMicroseconds((int)pulse_us);\n\
 }}\n\n\
 static rune_dynamic_value rune_dynamic_from_i64(int64_t value) {{\n\
     rune_dynamic_value out = {{1, value, nullptr}};\n\
@@ -1336,13 +1428,13 @@ static rune_dynamic_value rune_dynamic_binary(rune_dynamic_value left, rune_dyna
     if (op == 0 && (left.tag == 3 || right.tag == 3)) {{\n\
         const char* left_text = rune_dynamic_to_string(left);\n\
         const char* right_text = rune_dynamic_to_string(right);\n\
-        rune_dynamic_concat_buffer[0] = '\\0';\n\
-        strncat(rune_dynamic_concat_buffer, left_text, sizeof(rune_dynamic_concat_buffer) - 1);\n\
-        size_t used = strlen(rune_dynamic_concat_buffer);\n\
-        if (used + 1 < sizeof(rune_dynamic_concat_buffer)) {{\n\
-            strncat(rune_dynamic_concat_buffer, right_text, sizeof(rune_dynamic_concat_buffer) - used - 1);\n\
+        char* slot = rune_claim_string_slot();\n\
+        strncat(slot, left_text, RUNE_STRING_SLOT_SIZE - 1);\n\
+        size_t used = strlen(slot);\n\
+        if (used + 1 < RUNE_STRING_SLOT_SIZE) {{\n\
+            strncat(slot, right_text, RUNE_STRING_SLOT_SIZE - used - 1);\n\
         }}\n\
-        return rune_dynamic_from_string(rune_dynamic_concat_buffer);\n\
+        return rune_dynamic_from_string(slot);\n\
     }}\n\
     int64_t left_number = rune_dynamic_to_i64(left);\n\
     int64_t right_number = rune_dynamic_to_i64(right);\n\
@@ -1408,6 +1500,17 @@ static bool rune_string_eq(const char* left, const char* right) {{\n\
     }}\n\
     return strcmp(left, right) == 0;\n\
 }}\n\n\
+static const char* rune_string_concat(const char* left, const char* right) {{\n\
+    const char* left_text = left == nullptr ? \"\" : left;\n\
+    const char* right_text = right == nullptr ? \"\" : right;\n\
+    char* slot = rune_claim_string_slot();\n\
+    strncat(slot, left_text, RUNE_STRING_SLOT_SIZE - 1);\n\
+    size_t used = strlen(slot);\n\
+    if (used + 1 < RUNE_STRING_SLOT_SIZE) {{\n\
+        strncat(slot, right_text, RUNE_STRING_SLOT_SIZE - used - 1);\n\
+    }}\n\
+    return slot;\n\
+}}\n\n\
 static int rune_mode_input(void) {{ return INPUT; }}\n\
 static int rune_mode_output(void) {{ return OUTPUT; }}\n\
 static int rune_mode_input_pullup(void) {{ return INPUT_PULLUP; }}\n\
@@ -1457,10 +1560,20 @@ fn emit_arduino_uno_block(
     functions: &HashMap<String, ArduinoUnoFunctionSig>,
     structs: &HashMap<String, ArduinoUnoStructSig>,
     return_kind: ArduinoUnoReturnKind,
+    in_loop: bool,
     indent: usize,
 ) -> Result<(), CodegenError> {
     for stmt in statements {
-        emit_arduino_uno_stmt(out, stmt, scope, functions, structs, return_kind.clone(), indent)?;
+        emit_arduino_uno_stmt(
+            out,
+            stmt,
+            scope,
+            functions,
+            structs,
+            return_kind.clone(),
+            in_loop,
+            indent,
+        )?;
     }
     Ok(())
 }
@@ -1472,6 +1585,7 @@ fn emit_arduino_uno_stmt(
     functions: &HashMap<String, ArduinoUnoFunctionSig>,
     structs: &HashMap<String, ArduinoUnoStructSig>,
     return_kind: ArduinoUnoReturnKind,
+    in_loop: bool,
     indent: usize,
 ) -> Result<(), CodegenError> {
     let prefix = "    ".repeat(indent);
@@ -1485,6 +1599,7 @@ fn emit_arduino_uno_stmt(
                 functions,
                 structs,
                 return_kind,
+                in_loop,
                 indent,
             )
         }
@@ -1553,6 +1668,7 @@ fn emit_arduino_uno_stmt(
                 functions,
                 structs,
                 return_kind.clone(),
+                in_loop,
                 indent + 1,
             )?;
             out.push_str(&format!("{prefix}}}"));
@@ -1578,6 +1694,7 @@ fn emit_arduino_uno_stmt(
                     functions,
                     structs,
                     return_kind.clone(),
+                    in_loop,
                     indent + 1,
                 )?;
                 out.push_str(&format!("{prefix}}}"));
@@ -1592,6 +1709,7 @@ fn emit_arduino_uno_stmt(
                     functions,
                     structs,
                     return_kind.clone(),
+                    in_loop,
                     indent + 1,
                 )?;
                 out.push_str(&format!("{prefix}}}"));
@@ -1621,9 +1739,30 @@ fn emit_arduino_uno_stmt(
                 functions,
                 structs,
                 return_kind.clone(),
+                true,
                 indent + 1,
             )?;
             out.push_str(&format!("{prefix}}}\n"));
+            Ok(())
+        }
+        Stmt::Break(stmt) => {
+            if !in_loop {
+                return Err(CodegenError {
+                    message: "`break` is only allowed inside a loop".into(),
+                    span: stmt.span,
+                });
+            }
+            out.push_str(&format!("{prefix}break;\n"));
+            Ok(())
+        }
+        Stmt::Continue(stmt) => {
+            if !in_loop {
+                return Err(CodegenError {
+                    message: "`continue` is only allowed inside a loop".into(),
+                    span: stmt.span,
+                });
+            }
+            out.push_str(&format!("{prefix}continue;\n"));
             Ok(())
         }
         Stmt::Return(stmt) => match return_kind {
@@ -1900,6 +2039,38 @@ fn emit_arduino_uno_stmt_expr(
             ));
             Ok(())
         }
+        "interrupts_enable" | "interrupts_disable" => {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: format!("`{dispatch_name}` takes no arguments on the Arduino Uno target"),
+                    span: expr.span,
+                });
+            }
+            let runtime = if dispatch_name == "interrupts_enable" {
+                "interrupts"
+            } else {
+                "noInterrupts"
+            };
+            out.push_str(&format!("{prefix}{runtime}();\n"));
+            Ok(())
+        }
+        "random_seed" => {
+            let [CallArg::Positional(seed_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`random_seed` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let seed = emit_arduino_uno_expr(scope, functions, structs, seed_expr)?;
+            if seed.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer seed for `random_seed`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!("{prefix}randomSeed((unsigned long)({}));\n", seed.0));
+            Ok(())
+        }
         "tone" => {
             let [CallArg::Positional(pin_expr), CallArg::Positional(freq_expr), CallArg::Positional(duration_expr)] = args.as_slice() else {
                 return Err(CodegenError {
@@ -1940,6 +2111,46 @@ fn emit_arduino_uno_stmt_expr(
                 });
             }
             out.push_str(&format!("{prefix}noTone((uint8_t)({}));\n", pin.0));
+            Ok(())
+        }
+        "servo_detach" => {
+            let [CallArg::Positional(pin_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`servo_detach` expects 1 positional argument on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            };
+            let pin = emit_arduino_uno_expr(scope, functions, structs, pin_expr)?;
+            if pin.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: "Arduino Uno target requires integer pin for `servo_detach`".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!("{}rune_rt_arduino_servo_detach({});\n", prefix, pin.0));
+            Ok(())
+        }
+        "servo_write" | "servo_write_us" => {
+            let [CallArg::Positional(pin_expr), CallArg::Positional(value_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: format!("`{dispatch_name}` expects 2 positional arguments on the Arduino Uno target"),
+                    span: expr.span,
+                });
+            };
+            let pin = emit_arduino_uno_expr(scope, functions, structs, pin_expr)?;
+            let value = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
+            if pin.1 != ArduinoUnoType::I64 || value.1 != ArduinoUnoType::I64 {
+                return Err(CodegenError {
+                    message: format!("Arduino Uno target requires integer pin and integer value for `{dispatch_name}`"),
+                    span: expr.span,
+                });
+            }
+            let runtime = if dispatch_name == "servo_write" {
+                "rune_rt_arduino_servo_write"
+            } else {
+                "rune_rt_arduino_servo_write_us"
+            };
+            out.push_str(&format!("{prefix}{runtime}({}, {});\n", pin.0, value.0));
             Ok(())
         }
         "delay_ms" => {
@@ -2046,7 +2257,7 @@ fn emit_arduino_uno_stmt_expr(
             Ok(())
         }
         _ => Err(CodegenError {
-            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `tone`, `no_tone`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `send`, and `send_line` statements".into(),
+            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `interrupts_enable`, `interrupts_disable`, `random_seed`, `tone`, `no_tone`, `servo_detach`, `servo_write`, `servo_write_us`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `send`, and `send_line` statements".into(),
             span: callee.span,
         }),
     }
@@ -2077,10 +2288,13 @@ fn emit_arduino_uno_print_expr(
             out.push_str(&format!("{prefix}rune_serial_write_dynamic({});\n", rendered.0));
         }
         ArduinoUnoType::Struct(_) => {
-            return Err(CodegenError {
-                message: "Arduino Uno target does not print structs directly yet".into(),
-                span: expr.span,
-            });
+            let rendered = emit_arduino_uno_expr(
+                scope,
+                functions,
+                structs,
+                &build_str_call_expr(expr),
+            )?;
+            out.push_str(&format!("{prefix}rune_serial_write_cstr({});\n", rendered.0));
         }
     }
     if newline {
@@ -2089,19 +2303,32 @@ fn emit_arduino_uno_print_expr(
     Ok(())
 }
 
-fn arduino_uno_common_compile_args(core_dir: &Path, variant_dir: &Path) -> Vec<String> {
-    vec![
+fn arduino_uno_common_compile_args(
+    core_dir: &Path,
+    variant_dir: &Path,
+    servo_dir: Option<&Path>,
+) -> Vec<String> {
+    let mut args = vec![
         "-mmcu=atmega328p".into(),
         "-DF_CPU=16000000UL".into(),
         "-DARDUINO=10819".into(),
         "-DARDUINO_ARCH_AVR".into(),
         "-DARDUINO_AVR_UNO".into(),
         "-Os".into(),
+        "-flto".into(),
         "-ffunction-sections".into(),
         "-fdata-sections".into(),
         format!("-I{}", core_dir.display()),
         format!("-I{}", variant_dir.display()),
-    ]
+    ];
+    if let Some(servo_dir) = servo_dir {
+        args.push(format!("-I{}", servo_dir.display()));
+        let avr_dir = servo_dir.join("avr");
+        if avr_dir.is_dir() {
+            args.push(format!("-I{}", avr_dir.display()));
+        }
+    }
+    args
 }
 
 fn compile_arduino_uno_core_sources(
@@ -2110,6 +2337,8 @@ fn compile_arduino_uno_core_sources(
     gpp: &Path,
     core_dir: &Path,
     variant_dir: &Path,
+    servo_dir: Option<&Path>,
+    include_servo_sources: bool,
 ) -> Result<Vec<PathBuf>, BuildError> {
     let mut sources = fs::read_dir(core_dir)
         .map_err(|source| BuildError::Io {
@@ -2127,7 +2356,16 @@ fn compile_arduino_uno_core_sources(
         .collect::<Vec<_>>();
     sources.sort();
 
-    let common_args = arduino_uno_common_compile_args(core_dir, variant_dir);
+    if include_servo_sources {
+        if let Some(servo_dir) = servo_dir {
+        let servo_cpp = servo_dir.join("avr").join("Servo.cpp");
+        if servo_cpp.is_file() {
+            sources.push(servo_cpp);
+        }
+    }
+    }
+
+    let common_args = arduino_uno_common_compile_args(core_dir, variant_dir, servo_dir);
     let mut objects = Vec::new();
 
     for source_path in sources {
@@ -2182,6 +2420,90 @@ fn compile_arduino_uno_core_sources(
     }
 
     Ok(objects)
+}
+
+fn program_uses_arduino_servo(program: &Program) -> bool {
+    program.items.iter().any(item_uses_arduino_servo)
+}
+
+fn item_uses_arduino_servo(item: &Item) -> bool {
+    match item {
+        Item::Function(function) => block_uses_arduino_servo(&function.body),
+        Item::Struct(struct_decl) => struct_decl
+            .methods
+            .iter()
+            .any(|method| block_uses_arduino_servo(&method.body)),
+        _ => false,
+    }
+}
+
+fn block_uses_arduino_servo(block: &crate::parser::Block) -> bool {
+    block.statements.iter().any(stmt_uses_arduino_servo)
+}
+
+fn stmt_uses_arduino_servo(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Block(block) => block_uses_arduino_servo(&block.block),
+        Stmt::Let(let_stmt) => expr_uses_arduino_servo(&let_stmt.value),
+        Stmt::Assign(assign_stmt) => expr_uses_arduino_servo(&assign_stmt.value),
+        Stmt::Return(return_stmt) => return_stmt
+            .value
+            .as_ref()
+            .is_some_and(expr_uses_arduino_servo),
+        Stmt::If(if_stmt) => {
+            expr_uses_arduino_servo(&if_stmt.condition)
+                || block_uses_arduino_servo(&if_stmt.then_block)
+                || if_stmt
+                    .elif_blocks
+                    .iter()
+                    .any(|elif| {
+                        expr_uses_arduino_servo(&elif.condition)
+                            || block_uses_arduino_servo(&elif.block)
+                    })
+                || if_stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(block_uses_arduino_servo)
+        }
+        Stmt::While(while_stmt) => {
+            expr_uses_arduino_servo(&while_stmt.condition)
+                || block_uses_arduino_servo(&while_stmt.body)
+        }
+        Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::Raise(raise_stmt) => expr_uses_arduino_servo(&raise_stmt.value),
+        Stmt::Panic(panic_stmt) => expr_uses_arduino_servo(&panic_stmt.value),
+        Stmt::Expr(expr_stmt) => expr_uses_arduino_servo(&expr_stmt.expr),
+    }
+}
+
+fn expr_uses_arduino_servo(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Identifier(_) | ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) => {
+            false
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Await { expr } => expr_uses_arduino_servo(expr),
+        ExprKind::Binary { left, right, .. } => {
+            expr_uses_arduino_servo(left) || expr_uses_arduino_servo(right)
+        }
+        ExprKind::Field { base, .. } => expr_uses_arduino_servo(base),
+        ExprKind::Call { callee, args } => {
+            let is_servo_builtin = match &callee.kind {
+                ExprKind::Identifier(name) => {
+                    matches!(
+                        arduino_uno_builtin_alias(name),
+                        "servo_attach" | "servo_detach" | "servo_write" | "servo_write_us"
+                    )
+                }
+                _ => false,
+            };
+            is_servo_builtin
+                || expr_uses_arduino_servo(callee)
+                || args.iter().any(|arg| match arg {
+                    CallArg::Positional(expr) => expr_uses_arduino_servo(expr),
+                    CallArg::Keyword { value, .. } => expr_uses_arduino_servo(value),
+                })
+        }
+    }
 }
 
 fn emit_arduino_uno_expr(
@@ -2339,6 +2661,49 @@ fn emit_arduino_uno_expr(
                         ArduinoUnoType::I64,
                     ))
                 }
+                "shift_in" => {
+                    let [CallArg::Positional(data_pin_expr), CallArg::Positional(clock_pin_expr), CallArg::Positional(bit_order_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`shift_in` expects 3 positional arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let data_pin = emit_arduino_uno_expr(scope, functions, structs, data_pin_expr)?;
+                    let clock_pin = emit_arduino_uno_expr(scope, functions, structs, clock_pin_expr)?;
+                    let bit_order = emit_arduino_uno_expr(scope, functions, structs, bit_order_expr)?;
+                    if data_pin.1 != ArduinoUnoType::I64 || clock_pin.1 != ArduinoUnoType::I64 || bit_order.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer arguments for `shift_in`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((
+                        format!(
+                            "((int64_t)shiftIn((uint8_t)({}), (uint8_t)({}), (uint8_t)({})))",
+                            data_pin.0, clock_pin.0, bit_order.0
+                        ),
+                        ArduinoUnoType::I64,
+                    ))
+                }
+                "servo_attach" => {
+                    let [CallArg::Positional(pin_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`servo_attach` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let pin = emit_arduino_uno_expr(scope, functions, structs, pin_expr)?;
+                    if pin.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer pin for `servo_attach`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((
+                        format!("rune_rt_arduino_servo_attach({})", pin.0),
+                        ArduinoUnoType::Bool,
+                    ))
+                }
                 "millis" => {
                     if !args.is_empty() {
                         return Err(CodegenError {
@@ -2356,6 +2721,45 @@ fn emit_arduino_uno_expr(
                         });
                     }
                     Ok(("((int64_t)micros())".into(), ArduinoUnoType::I64))
+                }
+                "random_i64" => {
+                    let [CallArg::Positional(max_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`random_i64` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let max_value = emit_arduino_uno_expr(scope, functions, structs, max_expr)?;
+                    if max_value.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer max value for `random_i64`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((
+                        format!("((int64_t)random((long)({})))", max_value.0),
+                        ArduinoUnoType::I64,
+                    ))
+                }
+                "random_range" => {
+                    let [CallArg::Positional(min_expr), CallArg::Positional(max_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`random_range` expects 2 positional arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let min_value = emit_arduino_uno_expr(scope, functions, structs, min_expr)?;
+                    let max_value = emit_arduino_uno_expr(scope, functions, structs, max_expr)?;
+                    if min_value.1 != ArduinoUnoType::I64 || max_value.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer bounds for `random_range`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((
+                        format!("((int64_t)random((long)({}), (long)({})))", min_value.0, max_value.0),
+                        ArduinoUnoType::I64,
+                    ))
                 }
                 "pid" => {
                     if !args.is_empty() {
@@ -2470,10 +2874,49 @@ fn emit_arduino_uno_expr(
                             format!("rune_dynamic_to_string({})", rendered.0),
                             ArduinoUnoType::String,
                         )),
-                        ArduinoUnoType::Struct(_) => Err(CodegenError {
-                            message: "Arduino Uno target does not convert structs to strings yet".into(),
-                            span: expr.span,
-                        }),
+                        ArduinoUnoType::Struct(ref struct_name) => {
+                            let struct_sig = structs.get(struct_name).ok_or_else(|| CodegenError {
+                                message: format!("Arduino Uno target is missing struct layout for `{struct_name}`"),
+                                span: expr.span,
+                            })?;
+                            if let Some(method_sig) = struct_sig.methods.get("__str__") {
+                                if method_sig.params.len() != 1
+                                    || method_sig.return_type != Some(ArduinoUnoType::String)
+                                {
+                                    return Err(CodegenError {
+                                        message: format!(
+                                            "Arduino Uno target `str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String`"
+                                        ),
+                                        span: expr.span,
+                                    });
+                                }
+                                Ok((
+                                    emit_arduino_uno_method_call(
+                                        scope,
+                                        functions,
+                                        structs,
+                                        &struct_name,
+                                        "__str__",
+                                        method_sig,
+                                        &rendered,
+                                        &[],
+                                        expr.span,
+                                    )?,
+                                    ArduinoUnoType::String,
+                                ))
+                            } else {
+                                emit_arduino_uno_expr(
+                                    scope,
+                                    functions,
+                                    structs,
+                                    &build_default_struct_string_expr(
+                                        value_expr,
+                                        struct_name,
+                                        &struct_sig.fields,
+                                    ),
+                                )
+                            }
+                        }
                     }
                 }
                 "int" => {
@@ -2708,7 +3151,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `millis`, `micros`, `input`, `read_line`, `open`, `is_open`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -2794,6 +3237,14 @@ fn emit_arduino_uno_expr(
                         _ => unreachable!(),
                     };
                     Ok((rendered, ArduinoUnoType::Bool))
+                }
+                BinaryOp::Add
+                    if lhs.1 == ArduinoUnoType::String && rhs.1 == ArduinoUnoType::String =>
+                {
+                    Ok((
+                        format!("rune_string_concat({}, {})", lhs.0, rhs.0),
+                        ArduinoUnoType::String,
+                    ))
                 }
                 BinaryOp::And | BinaryOp::Or
                     if lhs.1 == ArduinoUnoType::Bool && rhs.1 == ArduinoUnoType::Bool =>
@@ -3069,6 +3520,7 @@ fn emit_arduino_uno_function_definitions(
             signatures,
             structs,
             return_kind.clone(),
+            false,
             1,
         )?;
         out.push_str("}\n\n");
@@ -3127,6 +3579,7 @@ fn emit_arduino_uno_method_definitions(
                 functions,
                 structs,
                 return_kind,
+                false,
                 1,
             )?;
             out.push_str("}\n\n");
@@ -3144,7 +3597,9 @@ fn emit_arduino_uno_function_call(
     args: &[CallArg],
     span: crate::lexer::Span,
 ) -> Result<String, CodegenError> {
-    if args.len() != sig.params.len() {
+    let resolved_args =
+        resolve_arduino_uno_call_args(&format!("function `{name}`"), &sig.params, args, span)?;
+    if resolved_args.len() != sig.params.len() {
         return Err(CodegenError {
             message: format!(
                 "Arduino Uno target function `{name}` expects {} positional arguments",
@@ -3153,16 +3608,8 @@ fn emit_arduino_uno_function_call(
             span,
         });
     }
-    let mut rendered_args = Vec::with_capacity(args.len());
-    for (arg, (_, expected_ty)) in args.iter().zip(sig.params.iter()) {
-        let CallArg::Positional(expr) = arg else {
-            return Err(CodegenError {
-                message: format!(
-                    "Arduino Uno target function `{name}` does not support keyword arguments"
-                ),
-                span,
-            });
-        };
+    let mut rendered_args = Vec::with_capacity(resolved_args.len());
+    for (expr, (_, expected_ty)) in resolved_args.iter().zip(sig.params.iter()) {
         let rendered = emit_arduino_uno_expr(scope, functions, structs, expr)?;
         let value = arduino_uno_coerce_value(rendered, expected_ty, span).map_err(|_| CodegenError {
             message: format!(
@@ -3194,7 +3641,13 @@ fn emit_arduino_uno_method_call(
             span,
         });
     }
-    if args.len() + 1 != sig.params.len() {
+    let resolved_args = resolve_arduino_uno_call_args(
+        &format!("method `{struct_name}.{method_name}`"),
+        &sig.params.iter().skip(1).cloned().collect::<Vec<_>>(),
+        args,
+        span,
+    )?;
+    if resolved_args.len() + 1 != sig.params.len() {
         return Err(CodegenError {
             message: format!(
                 "Arduino Uno target method `{struct_name}.{method_name}` expects {} positional arguments",
@@ -3204,15 +3657,7 @@ fn emit_arduino_uno_method_call(
         });
     }
     let mut rendered_args = vec![base_rendered.0.clone()];
-    for (arg, (_, expected_ty)) in args.iter().zip(sig.params.iter().skip(1)) {
-        let CallArg::Positional(expr) = arg else {
-            return Err(CodegenError {
-                message: format!(
-                    "Arduino Uno target method `{struct_name}.{method_name}` does not support keyword arguments"
-                ),
-                span,
-            });
-        };
+    for (expr, (_, expected_ty)) in resolved_args.iter().zip(sig.params.iter().skip(1)) {
         let rendered = emit_arduino_uno_expr(scope, functions, structs, expr)?;
         let value = arduino_uno_coerce_value(rendered, expected_ty, span).map_err(|_| CodegenError {
             message: format!(
@@ -3266,6 +3711,143 @@ fn emit_arduino_uno_constructor_call(
     Ok(format!("({}){{{}}}", arduino_uno_c_type(&ArduinoUnoType::Struct(name.to_string())), rendered_values.join(", ")))
 }
 
+fn resolve_arduino_uno_call_args<'a>(
+    callable_name: &str,
+    params: &[(String, ArduinoUnoType)],
+    args: &'a [CallArg],
+    span: crate::lexer::Span,
+) -> Result<Vec<&'a Expr>, CodegenError> {
+    let mut resolved: Vec<Option<&Expr>> = vec![None; params.len()];
+    let mut positional_index = 0usize;
+    let mut saw_keyword = false;
+
+    for arg in args {
+        match arg {
+            CallArg::Positional(expr) => {
+                if saw_keyword {
+                    return Err(CodegenError {
+                        message: format!(
+                            "positional arguments cannot appear after keyword arguments in {callable_name}"
+                        ),
+                        span: expr.span,
+                    });
+                }
+                if positional_index >= params.len() {
+                    return Err(CodegenError {
+                        message: format!(
+                            "{callable_name} expects {} arguments but got {}",
+                            params.len(),
+                            args.len()
+                        ),
+                        span: expr.span,
+                    });
+                }
+                resolved[positional_index] = Some(expr);
+                positional_index += 1;
+            }
+            CallArg::Keyword {
+                name,
+                value,
+                span: kw_span,
+            } => {
+                saw_keyword = true;
+                let Some(index) = params.iter().position(|(param_name, _)| param_name == name) else {
+                    return Err(CodegenError {
+                        message: format!("{callable_name} has no parameter named `{name}`"),
+                        span: *kw_span,
+                    });
+                };
+                if resolved[index].is_some() {
+                    return Err(CodegenError {
+                        message: format!("parameter `{name}` was provided more than once"),
+                        span: *kw_span,
+                    });
+                }
+                resolved[index] = Some(value);
+            }
+        }
+    }
+
+    if resolved.iter().any(|arg| arg.is_none()) {
+        return Err(CodegenError {
+            message: format!(
+                "{callable_name} expects {} arguments but got {}",
+                params.len(),
+                args.len()
+            ),
+            span,
+        });
+    }
+
+    Ok(resolved
+        .into_iter()
+        .map(|arg| arg.expect("checked above"))
+        .collect())
+}
+
+fn build_string_expr(span: crate::lexer::Span, value: impl Into<String>) -> Expr {
+    Expr {
+        kind: ExprKind::String(value.into()),
+        span,
+    }
+}
+
+fn build_identifier_expr(span: crate::lexer::Span, name: &str) -> Expr {
+    Expr {
+        kind: ExprKind::Identifier(name.to_string()),
+        span,
+    }
+}
+
+fn build_binary_add_expr(span: crate::lexer::Span, left: Expr, right: Expr) -> Expr {
+    Expr {
+        kind: ExprKind::Binary {
+            left: Box::new(left),
+            op: BinaryOp::Add,
+            right: Box::new(right),
+        },
+        span,
+    }
+}
+
+fn build_str_call_expr(expr: &Expr) -> Expr {
+    Expr {
+        kind: ExprKind::Call {
+            callee: Box::new(build_identifier_expr(expr.span, "str")),
+            args: vec![CallArg::Positional(expr.clone())],
+        },
+        span: expr.span,
+    }
+}
+
+fn build_default_struct_string_expr(
+    base: &Expr,
+    struct_name: &str,
+    fields: &[(String, ArduinoUnoType)],
+) -> Expr {
+    let span = base.span;
+    let mut rendered = build_string_expr(span, format!("{struct_name}("));
+    for (index, (field_name, _)) in fields.iter().enumerate() {
+        if index > 0 {
+            rendered = build_binary_add_expr(span, rendered, build_string_expr(span, ", "));
+        }
+        rendered = build_binary_add_expr(
+            span,
+            rendered,
+            build_string_expr(span, format!("{field_name}=")),
+        );
+        let field_expr = Expr {
+            kind: ExprKind::Field {
+                base: Box::new(base.clone()),
+                name: field_name.clone(),
+            },
+            span,
+        };
+        rendered = build_binary_add_expr(span, rendered, build_str_call_expr(&field_expr));
+    }
+    build_binary_add_expr(span, rendered, build_string_expr(span, ")"))
+}
+
 fn stmt_span(stmt: &Stmt) -> crate::lexer::Span {
     match stmt {
         Stmt::Block(stmt) => stmt.span,
@@ -3274,6 +3856,8 @@ fn stmt_span(stmt: &Stmt) -> crate::lexer::Span {
         Stmt::Return(stmt) => stmt.span,
         Stmt::If(stmt) => stmt.span,
         Stmt::While(stmt) => stmt.span,
+        Stmt::Break(stmt) => stmt.span,
+        Stmt::Continue(stmt) => stmt.span,
         Stmt::Raise(stmt) => stmt.span,
         Stmt::Panic(stmt) => stmt.span,
         Stmt::Expr(stmt) => stmt.expr.span,
@@ -3312,6 +3896,10 @@ fn arduino_uno_coerce_value(
         return Ok(expr);
     }
     match (actual, expected) {
+        (ArduinoUnoType::I64, ArduinoUnoType::String) => Ok(format!("rune_string_from_i64({expr})")),
+        (ArduinoUnoType::Bool, ArduinoUnoType::String) => {
+            Ok(format!("rune_string_from_bool({expr})"))
+        }
         (ArduinoUnoType::I64, ArduinoUnoType::Dynamic) => {
             Ok(format!("rune_dynamic_from_i64({expr})"))
         }
@@ -3421,8 +4009,13 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_arduino_analog_reference" => "analog_reference",
         "__rune_builtin_arduino_pulse_in" => "pulse_in",
         "__rune_builtin_arduino_shift_out" => "shift_out",
+        "__rune_builtin_arduino_shift_in" => "shift_in",
         "__rune_builtin_arduino_tone" => "tone",
         "__rune_builtin_arduino_no_tone" => "no_tone",
+        "__rune_builtin_arduino_servo_attach" => "servo_attach",
+        "__rune_builtin_arduino_servo_detach" => "servo_detach",
+        "__rune_builtin_arduino_servo_write" => "servo_write",
+        "__rune_builtin_arduino_servo_write_us" => "servo_write_us",
         "__rune_builtin_arduino_delay_ms" => "delay_ms",
         "__rune_builtin_arduino_delay_us" => "delay_us",
         "__rune_builtin_arduino_millis" => "millis",
@@ -3444,6 +4037,11 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_arduino_uart_read_byte" => "uart_read_byte",
         "__rune_builtin_arduino_uart_write_byte" => "uart_write_byte",
         "__rune_builtin_arduino_uart_write" => "uart_write",
+        "__rune_builtin_arduino_interrupts_enable" => "interrupts_enable",
+        "__rune_builtin_arduino_interrupts_disable" => "interrupts_disable",
+        "__rune_builtin_arduino_random_seed" => "random_seed",
+        "__rune_builtin_arduino_random_i64" => "random_i64",
+        "__rune_builtin_arduino_random_range" => "random_range",
         "__rune_builtin_serial_open" => "open",
         "__rune_builtin_serial_is_open" => "is_open",
         "__rune_builtin_serial_close" => "close",
@@ -3477,8 +4075,18 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "analog_reference"
             | "pulse_in"
             | "shift_out"
+            | "shift_in"
+            | "interrupts_enable"
+            | "interrupts_disable"
+            | "random_seed"
+            | "random_i64"
+            | "random_range"
             | "tone"
             | "no_tone"
+            | "servo_attach"
+            | "servo_detach"
+            | "servo_write"
+            | "servo_write_us"
             | "delay_ms"
             | "delay_us"
             | "millis"
@@ -4176,6 +4784,68 @@ function createHost(options = {{}}) {{
     }}
   }}
 
+  function runeStringFromI64(value) {{
+    return allocString(BigInt(value).toString());
+  }}
+
+  function runeStringFromBool(value) {{
+    return allocString((value !== 0n && value !== 0) ? "true" : "false");
+  }}
+
+  function runeStringToI64(ptr, len) {{
+    const text = readString(ptr, len).trim();
+    const parsed = Number.parseInt(text || "0", 10);
+    return Number.isFinite(parsed) ? BigInt(parsed) : 0n;
+  }}
+
+  function runeStringCompare(leftPtr, leftLen, rightPtr, rightLen) {{
+    const left = readString(leftPtr, leftLen);
+    const right = readString(rightPtr, rightLen);
+    if (left < right) {{
+      return -1;
+    }}
+    if (left > right) {{
+      return 1;
+    }}
+    return 0;
+  }}
+
+  function runeStringConcat(leftPtr, leftLen, rightPtr, rightLen) {{
+    return allocString(readString(leftPtr, leftLen) + readString(rightPtr, rightLen));
+  }}
+
+  function runeDynamicToString(tag, payload, extra) {{
+    switch (Number(tag)) {{
+      case 0:
+        return allocString("unit");
+      case 1:
+        return allocString((payload !== 0n && payload !== 0) ? "true" : "false");
+      case 2:
+      case 3:
+        return allocString(BigInt(payload).toString());
+      case 4:
+        return allocString(readString(payload, extra));
+      default:
+        return allocString(`<dynamic:${{Number(tag)}}>`);
+    }}
+  }}
+
+  function runeDynamicTruthy(tag, payload, extra) {{
+    switch (Number(tag)) {{
+      case 0:
+        return false;
+      case 1:
+        return payload !== 0n && payload !== 0;
+      case 2:
+      case 3:
+        return BigInt(payload) !== 0n;
+      case 4:
+        return Number(extra) !== 0;
+      default:
+        return false;
+    }}
+  }}
+
   function tcpConnect(host, port, timeoutMs) {{
     if (!isNode) {{
       return false;
@@ -4264,6 +4934,7 @@ function createHost(options = {{}}) {{
     return result.status === 0;
   }}
 
+
   function udpSend(host, port, payload) {{
     if (!isNode) {{
       return false;
@@ -4303,6 +4974,27 @@ function createHost(options = {{}}) {{
       rune_rt_last_string_len() {{
         return BigInt(lastStringLen);
       }},
+      rune_rt_string_compare(leftPtr, leftLen, rightPtr, rightLen) {{
+        return runeStringCompare(leftPtr, leftLen, rightPtr, rightLen);
+      }},
+      rune_rt_string_concat(leftPtr, leftLen, rightPtr, rightLen) {{
+        return runeStringConcat(leftPtr, leftLen, rightPtr, rightLen);
+      }},
+      rune_rt_string_from_i64(value) {{
+        return runeStringFromI64(value);
+      }},
+      rune_rt_string_from_bool(value) {{
+        return runeStringFromBool(value);
+      }},
+      rune_rt_string_to_i64(ptr, len) {{
+        return runeStringToI64(ptr, len);
+      }},
+      rune_rt_dynamic_to_string(tag, payload, extra) {{
+        return runeDynamicToString(tag, payload, extra);
+      }},
+      rune_rt_dynamic_truthy(tag, payload, extra) {{
+        return runeDynamicTruthy(tag, payload, extra);
+      }},
       rune_rt_panic(msgPtr, msgLen, ctxPtr, ctxLen) {{
         const message = readString(msgPtr, msgLen);
         const context = readString(ctxPtr, ctxLen);
@@ -4316,8 +5008,16 @@ function createHost(options = {{}}) {{
         const now = (perf && typeof perf.now === "function") ? perf.now() : Date.now();
         return BigInt(Math.floor(now - monotonicStart));
       }},
+      rune_rt_time_monotonic_us() {{
+        const now = (perf && typeof perf.now === "function") ? perf.now() : Date.now();
+        return BigInt(Math.floor((now - monotonicStart) * 1000));
+      }},
       rune_rt_time_sleep_ms(ms) {{
         sleepMs(ms);
+      }},
+      rune_rt_time_sleep_us(us) {{
+        const millis = Math.ceil(Number(us) / 1000);
+        sleepMs(millis);
       }},
       rune_rt_system_pid() {{
         return isNode ? (process.pid | 0) : 0;
@@ -4382,8 +5082,24 @@ function createHost(options = {{}}) {{
         }}
         return parseEnvBool(raw, !!defaultValue);
       }},
+      rune_rt_env_get_string(ptr, len, defaultPtr, defaultLen) {{
+        if (!isNode) {{
+          return allocString(readString(defaultPtr, defaultLen));
+        }}
+        const key = readString(ptr, len);
+        const raw = process.env[key];
+        if (raw == null) {{
+          return allocString(readString(defaultPtr, defaultLen));
+        }}
+        return allocString(String(raw));
+      }},
       rune_rt_env_arg_count() {{
         return hostArgv.length | 0;
+      }},
+      rune_rt_env_arg(index) {{
+        const argIndex = Number(index) | 0;
+        const value = argIndex >= 0 && argIndex < hostArgv.length ? hostArgv[argIndex] : "";
+        return allocString(value);
       }},
       rune_rt_network_tcp_connect(ptr, len, port) {{
         return tcpConnect(readString(ptr, len), Number(port), 250);
@@ -4394,6 +5110,15 @@ function createHost(options = {{}}) {{
       rune_rt_network_tcp_send(hostPtr, hostLen, port, dataPtr, dataLen) {{
         return tcpSend(readString(hostPtr, hostLen), Number(port), readString(dataPtr, dataLen));
       }},
+      rune_rt_network_tcp_recv(ptr, len, port, maxBytes) {{
+        throw new Error("Rune network receive builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_recv_timeout(ptr, len, port, maxBytes, timeoutMs) {{
+        throw new Error("Rune network receive builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_request(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
+        throw new Error("Rune network request builtins are not supported for wasm32-unknown-unknown");
+      }},
       rune_rt_network_tcp_connect_timeout(ptr, len, port, timeoutMs) {{
         return tcpConnect(readString(ptr, len), Number(port), Number(timeoutMs));
       }},
@@ -4402,6 +5127,9 @@ function createHost(options = {{}}) {{
       }},
       rune_rt_network_udp_send(hostPtr, hostLen, port, dataPtr, dataLen) {{
         return udpSend(readString(hostPtr, hostLen), Number(port), readString(dataPtr, dataLen));
+      }},
+      rune_rt_network_udp_recv(ptr, len, port, maxBytes, timeoutMs) {{
+        throw new Error("Rune network receive builtins are not supported for wasm32-unknown-unknown");
       }},
       rune_rt_fs_exists(ptr, len) {{
         if (!isNode || !fs) {{
@@ -5519,6 +6247,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::process::Command;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::thread_local;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -5528,9 +6257,12 @@ thread_local! {
     static RUNE_LAST_STRING_LEN: Cell<i64> = const { Cell::new(0) };
     static RUNE_ARDUINO_DIGITAL_PINS: RefCell<[u8; 64]> = const { RefCell::new([0; 64]) };
     static RUNE_ARDUINO_ANALOG_PINS: RefCell<[i64; 64]> = const { RefCell::new([0; 64]) };
+    static RUNE_ARDUINO_SERVO_ATTACHED: RefCell<[u8; 64]> = const { RefCell::new([0; 64]) };
+    static RUNE_ARDUINO_SERVO_ANGLE: RefCell<[i64; 64]> = const { RefCell::new([0; 64]) };
 }
 
 static RUNE_ARDUINO_START: OnceLock<Instant> = OnceLock::new();
+static RUNE_ARDUINO_RANDOM_STATE: AtomicU64 = AtomicU64::new(0);
 static RUNE_HOST_SERIAL: OnceLock<std::sync::Mutex<Option<std::fs::File>>> = OnceLock::new();
 
 fn rune_rt_store_string(value: String) -> *const u8 {
@@ -5859,6 +6591,64 @@ pub extern "C" fn rune_rt_arduino_tone(_pin: i64, _frequency_hz: i64, _duration_
 pub extern "C" fn rune_rt_arduino_no_tone(_pin: i64) {}
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_servo_attach(pin: i64) -> bool {
+    if let Ok(index) = usize::try_from(pin) {
+        return RUNE_ARDUINO_SERVO_ATTACHED.with(|pins| {
+            let mut pins = pins.borrow_mut();
+            if index < pins.len() {
+                pins[index] = 1;
+                true
+            } else {
+                false
+            }
+        });
+    }
+    false
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_servo_detach(pin: i64) {
+    if let Ok(index) = usize::try_from(pin) {
+        RUNE_ARDUINO_SERVO_ATTACHED.with(|pins| {
+            let mut pins = pins.borrow_mut();
+            if index < pins.len() {
+                pins[index] = 0;
+            }
+        });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_servo_write(pin: i64, angle: i64) {
+    if !rune_rt_arduino_servo_attach(pin) {
+        return;
+    }
+    if let Ok(index) = usize::try_from(pin) {
+        RUNE_ARDUINO_SERVO_ANGLE.with(|angles| {
+            let mut angles = angles.borrow_mut();
+            if index < angles.len() {
+                angles[index] = angle.clamp(0, 180);
+            }
+        });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_servo_write_us(pin: i64, pulse_us: i64) {
+    if !rune_rt_arduino_servo_attach(pin) {
+        return;
+    }
+    if let Ok(index) = usize::try_from(pin) {
+        RUNE_ARDUINO_SERVO_ANGLE.with(|angles| {
+            let mut angles = angles.borrow_mut();
+            if index < angles.len() {
+                angles[index] = pulse_us;
+            }
+        });
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_delay_ms(ms: i64) {
     if ms > 0 {
         std::thread::sleep(Duration::from_millis(ms as u64));
@@ -5882,6 +6672,22 @@ pub extern "C" fn rune_rt_arduino_millis() -> i64 {
 pub extern "C" fn rune_rt_arduino_micros() -> i64 {
     let start = RUNE_ARDUINO_START.get_or_init(Instant::now);
     start.elapsed().as_micros() as i64
+}
+
+fn rune_rt_arduino_random_next() -> u64 {
+    let mut state = RUNE_ARDUINO_RANDOM_STATE.load(Ordering::Relaxed);
+    if state == 0 {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(0x9e37_79b9_7f4a_7c15);
+        state = if seed == 0 { 1 } else { seed };
+    }
+    let next = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    RUNE_ARDUINO_RANDOM_STATE.store(next, Ordering::Relaxed);
+    next
 }
 
 #[unsafe(no_mangle)]
@@ -5947,6 +6753,43 @@ pub extern "C" fn rune_rt_arduino_uart_write(ptr: *const u8, len: i64) {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let _ = io::stdout().write_all(bytes);
     let _ = io::stdout().flush();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_interrupts_enable() {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_interrupts_disable() {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_shift_in(data_pin: i64, clock_pin: i64, _bit_order: i64) -> i64 {
+    let data_bit = rune_rt_arduino_digital_read(data_pin) as i64;
+    rune_rt_arduino_digital_write(clock_pin, true);
+    rune_rt_arduino_digital_write(clock_pin, false);
+    data_bit & 0xFF
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_random_seed(seed: i64) {
+    let seed = if seed == 0 { 1 } else { seed as u64 };
+    RUNE_ARDUINO_RANDOM_STATE.store(seed, Ordering::Relaxed);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_random_i64(max_value: i64) -> i64 {
+    if max_value <= 0 {
+        return 0;
+    }
+    (rune_rt_arduino_random_next() % (max_value as u64)) as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_random_range(min_value: i64, max_value: i64) -> i64 {
+    if max_value <= min_value {
+        return min_value;
+    }
+    let span = (max_value - min_value) as u64;
+    min_value + (rune_rt_arduino_random_next() % span) as i64
 }
 
 #[unsafe(no_mangle)]
@@ -7007,9 +7850,25 @@ pub extern "C" fn rune_rt_time_monotonic_ms() -> i64 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_time_monotonic_us() -> i64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_micros() as i64
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_time_sleep_ms(ms: i64) {
     if ms > 0 {
         std::thread::sleep(Duration::from_millis(ms as u64));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_time_sleep_us(us: i64) {
+    if us > 0 {
+        std::thread::sleep(Duration::from_micros(us as u64));
     }
 }
 
@@ -7099,6 +7958,40 @@ pub extern "C" fn rune_rt_env_get_bool(ptr: *const u8, len: i64, default: bool) 
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_env_get_string(
+    ptr: *const u8,
+    len: i64,
+    default_ptr: *const u8,
+    default_len: i64,
+) -> *const u8 {
+    let key = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let key = std::str::from_utf8(key).expect("environment variable name must be valid UTF-8");
+    let default = unsafe { std::slice::from_raw_parts(default_ptr, default_len as usize) };
+    let default =
+        std::str::from_utf8(default).expect("default environment value must be valid UTF-8");
+    let value = env::var(key).unwrap_or_else(|_| default.to_string());
+    rune_rt_store_string(value)
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_env_get_string(
+    ptr: *const u8,
+    len: i64,
+    default_ptr: *const u8,
+    default_len: i64,
+) -> *const u8 {
+    let key = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let key = std::str::from_utf8(key).expect("environment variable name must be valid UTF-8");
+    let default = unsafe { std::slice::from_raw_parts(default_ptr, default_len as usize) };
+    let default =
+        std::str::from_utf8(default).expect("default environment value must be valid UTF-8");
+    let value = env::var(key).unwrap_or_else(|_| default.to_string());
+    rune_rt_store_string(value)
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_env_arg_count() -> i32 {
     env::args().skip(1).count() as i32
 }
@@ -7106,7 +7999,19 @@ pub extern "C" fn rune_rt_env_arg_count() -> i32 {
 #[cfg(not(target_os = "wasi"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_env_arg_count() -> i32 {
-    env::args().count() as i32
+    env::args().skip(1).count() as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_env_arg(index: i32) -> *const u8 {
+    if index < 0 {
+        return rune_rt_store_string(String::new());
+    }
+    let value = env::args()
+        .skip(1)
+        .nth(index as usize)
+        .unwrap_or_default();
+    rune_rt_store_string(value)
 }
 
 #[cfg(target_os = "wasi")]
@@ -7131,6 +8036,43 @@ pub extern "C" fn rune_rt_network_tcp_send(
     _data_len: i64,
 ) -> bool {
     false
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_recv(
+    _ptr: *const u8,
+    _len: i64,
+    _port: i32,
+    _max_bytes: i32,
+) -> *const u8 {
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_recv_timeout(
+    _ptr: *const u8,
+    _len: i64,
+    _port: i32,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_request(
+    _host_ptr: *const u8,
+    _host_len: i64,
+    _port: i32,
+    _data_ptr: *const u8,
+    _data_len: i64,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_store_string(String::new())
 }
 
 #[cfg(target_os = "wasi")]
@@ -7176,6 +8118,98 @@ pub extern "C" fn rune_rt_network_tcp_send(
         Ok(mut stream) => std::io::Write::write_all(&mut stream, data.as_bytes()).is_ok(),
         Err(_) => false,
     }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_recv(
+    ptr: *const u8,
+    len: i64,
+    port: i32,
+    max_bytes: i32,
+) -> *const u8 {
+    rune_rt_network_tcp_recv_timeout(ptr, len, port, max_bytes, 250)
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_recv_timeout(
+    ptr: *const u8,
+    len: i64,
+    port: i32,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        return rune_rt_store_string(String::new());
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP recv host must be valid UTF-8");
+    let address = format!("{host}:{}", port as u16);
+    let resolved = match address.to_socket_addrs() {
+        Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
+        Err(_) => return rune_rt_store_string(String::new()),
+    };
+    for addr in resolved {
+        if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+            let mut buffer = vec![0u8; max_bytes as usize];
+            match std::io::Read::read(&mut stream, &mut buffer) {
+                Ok(read) => {
+                    buffer.truncate(read);
+                    let text = String::from_utf8_lossy(&buffer).to_string();
+                    return rune_rt_store_string(text);
+                }
+                Err(_) => return rune_rt_store_string(String::new()),
+            }
+        }
+    }
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_request(
+    host_ptr: *const u8,
+    host_len: i64,
+    port: i32,
+    data_ptr: *const u8,
+    data_len: i64,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        return rune_rt_store_string(String::new());
+    }
+    let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP request host must be valid UTF-8");
+    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
+    let data = std::str::from_utf8(data).expect("TCP request data must be valid UTF-8");
+    let address = format!("{host}:{}", port as u16);
+    let resolved = match address.to_socket_addrs() {
+        Ok(addrs) => addrs.collect::<Vec<SocketAddr>>(),
+        Err(_) => return rune_rt_store_string(String::new()),
+    };
+    for addr in resolved {
+        if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+            if std::io::Write::write_all(&mut stream, data.as_bytes()).is_err() {
+                return rune_rt_store_string(String::new());
+            }
+            let _ = std::net::Shutdown::Write;
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+            let mut buffer = vec![0u8; max_bytes as usize];
+            match std::io::Read::read(&mut stream, &mut buffer) {
+                Ok(read) => {
+                    buffer.truncate(read);
+                    let text = String::from_utf8_lossy(&buffer).to_string();
+                    return rune_rt_store_string(text);
+                }
+                Err(_) => return rune_rt_store_string(String::new()),
+            }
+        }
+    }
+    rune_rt_store_string(String::new())
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -7228,6 +8262,18 @@ pub extern "C" fn rune_rt_network_udp_send(
     false
 }
 
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_udp_recv(
+    _ptr: *const u8,
+    _len: i64,
+    _port: i32,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_store_string(String::new())
+}
+
 #[cfg(not(target_os = "wasi"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_udp_send(
@@ -7247,6 +8293,36 @@ pub extern "C" fn rune_rt_network_udp_send(
     match UdpSocket::bind(("0.0.0.0", 0)) {
         Ok(socket) => socket.send_to(data.as_bytes(), (host, port as u16)).is_ok(),
         Err(_) => false,
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_udp_recv(
+    ptr: *const u8,
+    len: i64,
+    port: i32,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        return rune_rt_store_string(String::new());
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("UDP recv host must be valid UTF-8");
+    match UdpSocket::bind((host, port as u16)) {
+        Ok(socket) => {
+            let _ = socket.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+            let mut buffer = vec![0u8; max_bytes as usize];
+            match socket.recv_from(&mut buffer) {
+                Ok((read, _)) => {
+                    buffer.truncate(read);
+                    rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
+                }
+                Err(_) => rune_rt_store_string(String::new()),
+            }
+        }
+        Err(_) => rune_rt_store_string(String::new()),
     }
 }
 

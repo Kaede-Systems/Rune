@@ -1066,10 +1066,50 @@ impl<'a> FunctionEmitter<'a> {
                         ));
                         format!("ptr {ptr_reg}, i64 {len_reg}")
                     }
+                    IrType::Struct(struct_name) => {
+                        let synthetic_name = struct_method_symbol(&struct_name, "__str__");
+                        if let Some(sig) = self.signatures.get(&synthetic_name) {
+                            if sig.params.len() != 1 || sig.ret != IrType::String {
+                                return Err(LlvmIrError {
+                                    message: format!(
+                                        "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String` in the current LLVM IR backend"
+                                    ),
+                                });
+                            }
+                            let value = self.resolve_value(
+                                &arg.value,
+                                &IrType::Struct(struct_name.clone()),
+                                out,
+                            )?;
+                            let aggregate_reg = self.next_reg();
+                            out.push_str(&format!(
+                                "  {aggregate_reg} = call {} @{}({} {})\n",
+                                llvm_internal_type(&IrType::String, self.struct_layouts)?,
+                                llvm_internal_symbol_name(&synthetic_name, sig),
+                                llvm_internal_type(&IrType::Struct(struct_name), self.struct_layouts)?,
+                                value
+                            ));
+                            let ptr_reg = self.next_reg();
+                            out.push_str(&format!(
+                                "  {ptr_reg} = extractvalue {} {aggregate_reg}, 0\n",
+                                llvm_internal_type(&IrType::String, self.struct_layouts)?
+                            ));
+                            let len_reg = self.next_reg();
+                            out.push_str(&format!(
+                                "  {len_reg} = extractvalue {} {aggregate_reg}, 1\n",
+                                llvm_internal_type(&IrType::String, self.struct_layouts)?
+                            ));
+                            format!("ptr {ptr_reg}, i64 {len_reg}")
+                        } else {
+                            let value =
+                                self.resolve_value(&arg.value, &IrType::Struct(struct_name.clone()), out)?;
+                            self.render_default_struct_string_value(out, &struct_name, &value)?
+                        }
+                    }
                     other => {
                         return Err(LlvmIrError {
                             message: format!(
-                                "`str` currently supports only bool, i32, i64, Json, dynamic, and String in the LLVM IR backend, found `{}`",
+                                "`str` currently supports only bool, i32, i64, Json, dynamic, String, and class/struct values in the LLVM IR backend, found `{}`",
                                 match other {
                                     IrType::Bool => "bool",
                                     IrType::Dynamic => "dynamic",
@@ -1311,6 +1351,19 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_time_monotonic_us" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_time_monotonic_us()\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_time_monotonic_us()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_time_sleep_ms" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let ms = self.resolve_value(&args[0].value, &IrType::I64, out)?;
@@ -1460,6 +1513,30 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_env_get_string" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let default_rendered = self.resolve_value(&args[1].value, &IrType::String, out)?;
+                let (default_ptr, default_len) = split_string_value(&default_rendered)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_env_get_string(ptr, i64, ptr, i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_env_get_string({ptr}, {len}, {default_ptr}, {default_len})\n"
+                ));
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             "__rune_builtin_env_arg_count" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
@@ -1468,6 +1545,36 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str(&format!("  {reg} = call i32 @rune_rt_env_arg_count()\n"));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_time_sleep_us" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let us = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_time_sleep_us(i64)\n".into());
+                out.push_str(&format!("  call void @rune_rt_time_sleep_us(i64 {us})\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_env_arg" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let index = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_env_arg(i32)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!("  {ptr_reg} = call ptr @rune_rt_env_arg(i32 {index})\n"));
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
                 }
                 return Ok(());
             }
@@ -1540,6 +1647,80 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_network_tcp_recv" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let max_bytes = self.resolve_value(&args[2].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_network_tcp_recv(ptr, i64, i32, i32)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_recv({ptr}, {len}, i32 {port}, i32 {max_bytes})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_recv_timeout" => {
+                self.expect_plain_arity(callee, args, 4)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let max_bytes = self.resolve_value(&args[2].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[3].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare ptr @rune_rt_network_tcp_recv_timeout(ptr, i64, i32, i32, i32)\n"
+                        .into(),
+                );
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_recv_timeout({ptr}, {len}, i32 {port}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_request" => {
+                self.expect_plain_arity(callee, args, 5)?;
+                let rendered_host = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (host_ptr, host_len) = split_string_value(&rendered_host)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let rendered_data = self.resolve_value(&args[2].value, &IrType::String, out)?;
+                let (data_ptr, data_len) = split_string_value(&rendered_data)?;
+                let max_bytes = self.resolve_value(&args[3].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[4].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare ptr @rune_rt_network_tcp_request(ptr, i64, i32, ptr, i64, i32, i32)\n"
+                        .into(),
+                );
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_request({host_ptr}, {host_len}, i32 {port}, {data_ptr}, {data_len}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             "__rune_builtin_network_udp_bind" => {
                 self.expect_plain_arity(callee, args, 2)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -1572,6 +1753,30 @@ impl<'a> FunctionEmitter<'a> {
                 ));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_udp_recv" => {
+                self.expect_plain_arity(callee, args, 4)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let max_bytes = self.resolve_value(&args[2].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[3].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare ptr @rune_rt_network_udp_recv(ptr, i64, i32, i32, i32)\n".into(),
+                );
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_udp_recv({ptr}, {len}, i32 {port}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
                 }
                 return Ok(());
             }
@@ -1953,6 +2158,22 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_arduino_shift_in" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let data_pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let clock_pin = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let bit_order = self.resolve_value(&args[2].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_shift_in(i64, i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_arduino_shift_in(i64 {data_pin}, i64 {clock_pin}, i64 {bit_order})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_arduino_tone" => {
                 self.expect_plain_arity(callee, args, 3)?;
                 let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
@@ -1976,6 +2197,51 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str(&format!(
                     "  call void @rune_rt_arduino_no_tone(i64 {pin})\n"
                 ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_servo_attach" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_arduino_servo_attach(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_arduino_servo_attach(i64 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_servo_detach" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_servo_detach(i64)\n".into());
+                out.push_str(&format!(
+                    "  call void @rune_rt_arduino_servo_detach(i64 {pin})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_servo_write"
+            | "__rune_builtin_arduino_servo_write_us" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let pin = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let value = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let runtime = if callee == "__rune_builtin_arduino_servo_write" {
+                    "rune_rt_arduino_servo_write"
+                } else {
+                    "rune_rt_arduino_servo_write_us"
+                };
+                self.declared_runtime
+                    .insert(format!("declare void @{runtime}(i64, i64)\n"));
+                out.push_str(&format!("  call void @{runtime}(i64 {pin}, i64 {value})\n"));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), "0".into());
                 }
@@ -2154,6 +2420,62 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_arduino_interrupts_enable"
+            | "__rune_builtin_arduino_interrupts_disable" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let runtime = if callee == "__rune_builtin_arduino_interrupts_enable" {
+                    "rune_rt_arduino_interrupts_enable"
+                } else {
+                    "rune_rt_arduino_interrupts_disable"
+                };
+                self.declared_runtime
+                    .insert(format!("declare void @{runtime}()\n"));
+                out.push_str(&format!("  call void @{runtime}()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_random_seed" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let seed = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_arduino_random_seed(i64)\n".into());
+                out.push_str(&format!("  call void @rune_rt_arduino_random_seed(i64 {seed})\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_random_i64" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let max_value = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_random_i64(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_arduino_random_i64(i64 {max_value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_arduino_random_range" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let min_value = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let max_value = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_random_range(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_arduino_random_range(i64 {min_value}, i64 {max_value})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_serial_open" => {
                 self.expect_plain_arity(callee, args, 2)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -2302,15 +2624,9 @@ impl<'a> FunctionEmitter<'a> {
                 "calls to `{callee}` are not yet supported by the current LLVM IR backend"
             ),
         })?;
-        if args.len() != sig.params.len() || args.iter().any(|arg| arg.name.is_some()) {
-            return Err(LlvmIrError {
-                message: format!(
-                    "call shape for `{callee}` is not yet supported by the current LLVM IR backend"
-                ),
-            });
-        }
+        let ordered_args = resolve_llvm_call_args(callee, &sig.params, args)?;
         let mut rendered_args = Vec::new();
-        for (arg, (_, ty)) in args.iter().zip(sig.params.iter()) {
+        for (arg, (_, ty)) in ordered_args.iter().zip(sig.params.iter()) {
             if matches!(ty, IrType::Unit) {
                 return Err(LlvmIrError {
                     message: format!(
@@ -2581,6 +2897,24 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 out.push_str(&call);
             }
+            IrType::Struct(struct_name) => {
+                let rendered = self.resolve_value(value_name, ty, out)?;
+                let string_value =
+                    self.render_default_struct_string_value(out, struct_name, &rendered)?;
+                let (ptr, len) = split_string_value(&string_value)?;
+                let decl = if stderr {
+                    "declare void @rune_rt_eprint_str(ptr, i64)\n"
+                } else {
+                    "declare void @rune_rt_print_str(ptr, i64)\n"
+                };
+                self.declared_runtime.insert(decl.into());
+                let call = if stderr {
+                    format!("  call void @rune_rt_eprint_str({ptr}, {len})\n")
+                } else {
+                    format!("  call void @rune_rt_print_str({ptr}, {len})\n")
+                };
+                out.push_str(&call);
+            }
             _ => {
                 return Err(LlvmIrError {
                     message: format!(
@@ -2603,6 +2937,220 @@ impl<'a> FunctionEmitter<'a> {
             "  {reg} = call i1 @rune_rt_dynamic_truthy({tag}, {payload}, {extra})\n"
         ));
         Ok(reg)
+    }
+
+    fn concat_string_values(
+        &mut self,
+        out: &mut String,
+        left: String,
+        right: String,
+    ) -> Result<String, LlvmIrError> {
+        let (left_ptr, left_len) = split_string_value(&left)?;
+        let (right_ptr, right_len) = split_string_value(&right)?;
+        self.declared_runtime
+            .insert("declare ptr @rune_rt_string_concat(ptr, i64, ptr, i64)\n".into());
+        self.declared_runtime
+            .insert("declare i64 @rune_rt_last_string_len()\n".into());
+        let ptr_reg = self.next_reg();
+        out.push_str(&format!(
+            "  {ptr_reg} = call ptr @rune_rt_string_concat({left_ptr}, {left_len}, {right_ptr}, {right_len})\n"
+        ));
+        let len_reg = self.next_reg();
+        out.push_str(&format!(
+            "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+        ));
+        Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+    }
+
+    fn render_ir_value_as_string(
+        &mut self,
+        out: &mut String,
+        ty: &IrType,
+        value: String,
+    ) -> Result<String, LlvmIrError> {
+        match ty {
+            IrType::String => {
+                if value.starts_with("ptr ") && value.contains(", i64 ") {
+                    Ok(value)
+                } else {
+                    let ptr_reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {ptr_reg} = extractvalue {} {value}, 0\n",
+                        llvm_internal_type(&IrType::String, self.struct_layouts)?
+                    ));
+                    let len_reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {len_reg} = extractvalue {} {value}, 1\n",
+                        llvm_internal_type(&IrType::String, self.struct_layouts)?
+                    ));
+                    Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+                }
+            }
+            IrType::Dynamic => {
+                let (tag, payload, extra): (String, String, String) =
+                    if value.starts_with("i64 ") && value.contains(", i64 ") {
+                    let (tag, payload, extra) = split_dynamic_value(&value)?;
+                    (tag.to_string(), payload.to_string(), extra.to_string())
+                } else {
+                    let tag_reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {tag_reg} = extractvalue {} {value}, 0\n",
+                        llvm_internal_type(&IrType::Dynamic, self.struct_layouts)?
+                    ));
+                    let payload_reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {payload_reg} = extractvalue {} {value}, 1\n",
+                        llvm_internal_type(&IrType::Dynamic, self.struct_layouts)?
+                    ));
+                    let extra_reg = self.next_reg();
+                    out.push_str(&format!(
+                        "  {extra_reg} = extractvalue {} {value}, 2\n",
+                        llvm_internal_type(&IrType::Dynamic, self.struct_layouts)?
+                    ));
+                    (
+                        format!("i64 {tag_reg}"),
+                        format!("i64 {payload_reg}"),
+                        format!("i64 {extra_reg}"),
+                    )
+                };
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_dynamic_to_string(i64, i64, i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_dynamic_to_string({tag}, {payload}, {extra})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+            }
+            IrType::Bool => {
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_string_from_bool(i1)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_string_from_bool(i1 {value})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+            }
+            IrType::I32 => {
+                let widened = self.next_reg();
+                out.push_str(&format!("  {widened} = sext i32 {value} to i64\n"));
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_string_from_i64(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_string_from_i64(i64 {widened})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+            }
+            IrType::I64 => {
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_string_from_i64(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_string_from_i64(i64 {value})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+            }
+            IrType::Json => {
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_json_to_string(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_json_to_string(i64 {value})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                Ok(format!("ptr {ptr_reg}, i64 {len_reg}"))
+            }
+            IrType::Struct(struct_name) => self.render_default_struct_string_value(out, struct_name, &value),
+            IrType::Unit => Err(LlvmIrError {
+                message: "unit values cannot be rendered as strings in the current LLVM IR backend".into(),
+            }),
+        }
+    }
+
+    fn render_default_struct_string_value(
+        &mut self,
+        out: &mut String,
+        struct_name: &str,
+        value: &str,
+    ) -> Result<String, LlvmIrError> {
+        if let Some(sig) = self.signatures.get(&struct_method_symbol(struct_name, "__str__")) {
+            if sig.params.len() != 1 || sig.ret != IrType::String {
+                return Err(LlvmIrError {
+                    message: format!(
+                        "`str` on `{struct_name}` requires `__str__`, when defined, to have signature `__str__(self) -> String` in the current LLVM IR backend"
+                    ),
+                });
+            }
+            let aggregate_reg = self.next_reg();
+            let synthetic_name = struct_method_symbol(struct_name, "__str__");
+            out.push_str(&format!(
+                "  {aggregate_reg} = call {} @{}({} {})\n",
+                llvm_internal_type(&IrType::String, self.struct_layouts)?,
+                llvm_internal_symbol_name(&synthetic_name, sig),
+                llvm_internal_type(&IrType::Struct(struct_name.to_string()), self.struct_layouts)?,
+                value
+            ));
+            return self.render_ir_value_as_string(out, &IrType::String, aggregate_reg);
+        }
+
+        let layout = self
+            .struct_layouts
+            .get(struct_name)
+            .cloned()
+            .ok_or_else(|| LlvmIrError {
+                message: format!("missing struct layout for `{struct_name}` in the current LLVM IR backend"),
+            })?;
+        let struct_ty = llvm_internal_type(&IrType::Struct(struct_name.to_string()), self.struct_layouts)?;
+        let mut rendered = self.intern_string_ref(&format!("{struct_name}("));
+        for (index, (field_name, field_ty)) in layout.iter().enumerate() {
+            if index > 0 {
+                let separator = self.intern_string_ref(", ");
+                rendered = self.concat_string_values(out, rendered, separator)?;
+            }
+            let label = self.intern_string_ref(&format!("{field_name}="));
+            rendered = self.concat_string_values(
+                out,
+                rendered,
+                label,
+            )?;
+            let field_reg = self.next_reg();
+            out.push_str(&format!(
+                "  {field_reg} = extractvalue {struct_ty} {value}, {index}\n"
+            ));
+            let field_rendered = self.render_ir_value_as_string(out, field_ty, field_reg)?;
+            rendered = self.concat_string_values(out, rendered, field_rendered)?;
+        }
+        let suffix = self.intern_string_ref(")");
+        self.concat_string_values(out, rendered, suffix)
     }
 
     fn emit_dynamic_binary(
@@ -2995,6 +3543,12 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "int" => Some(IrType::I64),
         "__rune_builtin_json_parse" => Some(IrType::Json),
         "__rune_builtin_json_stringify"
+        | "__rune_builtin_env_arg"
+        | "__rune_builtin_env_get_string"
+        | "__rune_builtin_network_tcp_recv"
+        | "__rune_builtin_network_tcp_recv_timeout"
+        | "__rune_builtin_network_tcp_request"
+        | "__rune_builtin_network_udp_recv"
         | "__rune_builtin_json_kind"
         | "__rune_builtin_json_to_string"
         | "__rune_builtin_system_platform"
@@ -3003,6 +3557,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_system_board" => Some(IrType::String),
         "__rune_builtin_json_is_null"
         | "__rune_builtin_json_to_bool"
+        | "__rune_builtin_arduino_servo_attach"
         | "__rune_builtin_arduino_digital_read"
         | "__rune_builtin_system_is_embedded"
         | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
@@ -3010,12 +3565,18 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_json_to_i64"
         | "__rune_builtin_arduino_analog_read"
         | "__rune_builtin_arduino_pulse_in"
+        | "__rune_builtin_arduino_shift_in"
         | "__rune_builtin_arduino_millis"
         | "__rune_builtin_arduino_micros"
+        | "__rune_builtin_arduino_random_i64"
+        | "__rune_builtin_arduino_random_range"
         | "__rune_builtin_sum_range" => Some(IrType::I64),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
-        "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
+        "__rune_builtin_time_now_unix"
+        | "__rune_builtin_time_monotonic_ms"
+        | "__rune_builtin_time_monotonic_us" => Some(IrType::I64),
         "__rune_builtin_time_sleep_ms"
+        | "__rune_builtin_time_sleep_us"
         | "__rune_builtin_system_exit"
         | "__rune_builtin_terminal_clear"
         | "__rune_builtin_terminal_move_to"
@@ -3029,11 +3590,17 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_shift_out"
         | "__rune_builtin_arduino_tone"
         | "__rune_builtin_arduino_no_tone"
+        | "__rune_builtin_arduino_servo_detach"
+        | "__rune_builtin_arduino_servo_write"
+        | "__rune_builtin_arduino_servo_write_us"
         | "__rune_builtin_arduino_delay_ms"
         | "__rune_builtin_arduino_delay_us"
         | "__rune_builtin_arduino_uart_begin"
         | "__rune_builtin_arduino_uart_write_byte"
         | "__rune_builtin_arduino_uart_write"
+        | "__rune_builtin_arduino_interrupts_enable"
+        | "__rune_builtin_arduino_interrupts_disable"
+        | "__rune_builtin_arduino_random_seed"
         | "__rune_builtin_serial_close" => Some(IrType::Unit),
         "__rune_builtin_arduino_mode_input"
         | "__rune_builtin_arduino_mode_output"
@@ -3216,6 +3783,66 @@ fn split_string_value(value: &str) -> Result<(&str, &str), LlvmIrError> {
     let ptr = &value[..index];
     let len = &value[index + 2..];
     Ok((ptr, len))
+}
+
+fn resolve_llvm_call_args<'a>(
+    callee: &str,
+    params: &[(String, IrType)],
+    args: &'a [IrArg],
+) -> Result<Vec<&'a IrArg>, LlvmIrError> {
+    let mut resolved: Vec<Option<&IrArg>> = vec![None; params.len()];
+    let mut positional_index = 0usize;
+    let mut saw_keyword = false;
+
+    for arg in args {
+        match &arg.name {
+            None => {
+                if saw_keyword {
+                    return Err(LlvmIrError {
+                        message: format!(
+                            "positional arguments cannot appear after keyword arguments in `{callee}`"
+                        ),
+                    });
+                }
+                if positional_index >= params.len() {
+                    return Err(LlvmIrError {
+                        message: format!(
+                            "call shape for `{callee}` is not yet supported by the current LLVM IR backend"
+                        ),
+                    });
+                }
+                resolved[positional_index] = Some(arg);
+                positional_index += 1;
+            }
+            Some(name) => {
+                saw_keyword = true;
+                let Some(index) = params.iter().position(|(param_name, _)| param_name == name) else {
+                    return Err(LlvmIrError {
+                        message: format!("function `{callee}` has no parameter named `{name}`"),
+                    });
+                };
+                if resolved[index].is_some() {
+                    return Err(LlvmIrError {
+                        message: format!("parameter `{name}` was provided more than once"),
+                    });
+                }
+                resolved[index] = Some(arg);
+            }
+        }
+    }
+
+    if resolved.iter().any(|arg| arg.is_none()) {
+        return Err(LlvmIrError {
+            message: format!(
+                "call shape for `{callee}` is not yet supported by the current LLVM IR backend"
+            ),
+        });
+    }
+
+    Ok(resolved
+        .into_iter()
+        .map(|arg| arg.expect("checked above"))
+        .collect())
 }
 
 fn split_dynamic_value(value: &str) -> Result<(&str, &str, &str), LlvmIrError> {

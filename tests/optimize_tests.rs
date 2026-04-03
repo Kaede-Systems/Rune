@@ -1,4 +1,4 @@
-use rune::optimize::optimize_program;
+use rune::optimize::{optimize_program, prune_program_for_executable};
 use rune::parser::{ExprKind, Item, Stmt, parse_source};
 
 #[test]
@@ -35,4 +35,30 @@ fn folds_constant_if_statements() {
         ExprKind::Integer(value) => assert_eq!(value, "7"),
         other => panic!("expected folded return, found {other:?}"),
     }
+}
+
+#[test]
+fn prunes_unreachable_functions_for_executable_roots() {
+    let mut program = parse_source(
+        "def live() -> i32:\n    return 1\n\n\
+         def dead_helper() -> i32:\n    return 7\n\n\
+         def main() -> i32:\n    return live()\n",
+    )
+    .unwrap();
+
+    optimize_program(&mut program);
+    prune_program_for_executable(&mut program);
+
+    let function_names = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Function(function) => Some(function.name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(function_names.contains(&"main"));
+    assert!(function_names.contains(&"live"));
+    assert!(!function_names.contains(&"dead_helper"));
 }

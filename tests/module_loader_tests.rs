@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rune::module_loader::load_program_from_path;
+use rune::module_loader::{load_program_bundle_from_path, load_program_from_path};
 use rune::parser::Item;
 
 fn temp_dir() -> PathBuf {
@@ -71,4 +71,29 @@ fn loads_relative_imports() {
     let program = load_program_from_path(&dir.join("pkg").join("main.rn")).unwrap();
     assert_eq!(program.items.len(), 2);
     assert!(matches!(&program.items[0], Item::Function(function) if function.name == "add"));
+}
+
+#[test]
+fn loads_builtin_env_network_serial_and_gpio_modules_from_registry() {
+    let dir = temp_dir();
+    fs::write(
+        dir.join("main.rn"),
+        "from env import get_or_empty\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    println(get_or_empty(\"RUNE_TEST\"))\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    return 0\n",
+    )
+    .unwrap();
+
+    let bundle = load_program_bundle_from_path(&dir.join("main.rn")).unwrap();
+    let env_path = PathBuf::from("<builtin>/env");
+    let network_path = PathBuf::from("<builtin>/network");
+    let serial_path = PathBuf::from("<builtin>/serial");
+    let gpio_path = PathBuf::from("<builtin>/gpio");
+    assert!(bundle.sources.contains_key(&env_path));
+    assert!(bundle.sources.contains_key(&network_path));
+    assert!(bundle.sources.contains_key(&serial_path));
+    assert!(bundle.sources.contains_key(&gpio_path));
+    assert_eq!(bundle.function_origins.get("get_or_empty"), Some(&env_path));
+    assert_eq!(bundle.function_origins.get("connect"), Some(&network_path));
+    assert_eq!(bundle.function_origins.get("tcp_client"), Some(&network_path));
+    assert_eq!(bundle.function_origins.get("serial_port"), Some(&serial_path));
+    assert_eq!(bundle.function_origins.get("gpio_pin"), Some(&gpio_path));
 }

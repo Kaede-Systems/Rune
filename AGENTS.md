@@ -152,6 +152,25 @@ A release is complete only when every feature promised in that release:
 
 If a feature is unstable, experimental, partial, or missing key safety rules, it must not be part of the release scope.
 
+## Branch Discipline Policy
+
+Normal feature development must happen on `main`.
+
+Rules:
+
+- ongoing implementation work is committed to `main`
+- `release` is not the default development branch
+- `release` should only receive changes when a feature batch is actually ready for release
+- the normal path is `main` -> review/audit -> PR/merge into `release`
+- do not continue long-running feature work directly on `release`
+- if the repository is currently on `release` during ordinary development, move back to `main` before continuing unless there is a very specific release task in progress
+
+The intended outcome is:
+
+- `main` stays the truthful active integration branch
+- `release` stays narrow and intentional
+- branch usage does not blur the line between development state and release state
+
 ## Scope Discipline Policy
 
 We design broadly, but we release narrowly and honestly.
@@ -195,6 +214,45 @@ Do not create files, modules, crates, interfaces, or abstractions solely because
 Architecture must follow implementation truth.
 
 It must not run ahead of the actual compiler.
+
+## Stdlib Architecture Policy
+
+The standard library is part of the real language implementation.
+
+It must be built with the same honesty and completeness requirements as the parser, semantics, code generation, and runtime.
+
+Rules:
+
+- built-in stdlibs must be implemented as real Rust-side modules, runtime bindings, compiler bindings, or equivalent native compiler structures
+- once a stdlib is claimed to be built-in, it must not be implemented as an embedded `.rn` source blob hidden inside Rust code
+- once a stdlib is claimed to be part of the built-in module registry, its exported surface must be defined natively in the compiler/runtime implementation
+- disk-loaded `.rn` stdlib files are allowed only for modules that are still explicitly outside the built-in scope
+- wrapper-only stdlib work does not count as progress if the underlying runtime/compiler capability is missing
+- stdlib APIs must be wired end-to-end through parsing, semantics, type checking, IR, codegen, runtime, diagnostics, and tests for every backend in the claimed scope
+
+The intended outcome is:
+
+- built-in stdlibs are real parts of the compiler/runtime
+- stdlib loading architecture is honest
+- we do not fake native stdlib implementation by smuggling Rune source strings through the loader
+
+## Stdlib Promotion Policy
+
+A stdlib module may be promoted from a source module to a built-in module only when the promotion is complete for the claimed scope.
+
+Promotion requires:
+
+- the module surface is defined natively in Rust/compiler structures
+- the module behavior is backed by real runtime/compiler functionality
+- backend parity is satisfied for the advertised scope
+- tests cover the promoted behavior
+- docs state the real implemented scope
+
+Do not promote a stdlib module halfway.
+
+Do not leave it in a mixed state where the repository presentation implies a native built-in module while the implementation still depends on hidden embedded source text.
+
+If promotion is not complete, keep the module in its honest current form until the full built-in version is ready.
 
 ## Feature Admission Policy
 

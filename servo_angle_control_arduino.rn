@@ -1,0 +1,20 @@
+from arduino import delay_ms, servo_attach, servo_write
+
+println("Rune positional servo control demo")
+println("Servo pin: D9")
+println("This example is for a normal positional servo")
+
+let servo_pin: i64 = 9
+if not servo_attach(servo_pin):
+    println("failed to attach servo")
+else:
+    while true:
+        servo_write(servo_pin, 0)
+        println("angle = 0")
+        delay_ms(1000)
+        servo_write(servo_pin, 90)
+        println("angle = 90")
+        delay_ms(1000)
+        servo_write(servo_pin, 180)
+        println("angle = 180")
+        delay_ms(1000)

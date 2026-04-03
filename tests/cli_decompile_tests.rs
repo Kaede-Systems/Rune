@@ -40,6 +40,8 @@ fn decompile_command_disassembles_built_binary() {
     let output = Command::new(env!("CARGO_BIN_EXE_rune"))
         .arg("decompile")
         .arg(&binary_path)
+        .arg("--format")
+        .arg("asm")
         .output()
         .expect("failed to run rune decompile");
 
@@ -51,4 +53,41 @@ fn decompile_command_disassembles_built_binary() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("file format"));
     assert!(stdout.contains("Disassembly of section"));
+}
+
+#[test]
+fn decompile_command_rejects_unimplemented_c_output() {
+    let dir = temp_dir();
+    let source_path = dir.join("demo.rn");
+    let binary_path = dir.join("demo.exe");
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    println(\"hello decompile\")\n    return 0\n",
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_rune"))
+        .arg("build")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&binary_path)
+        .output()
+        .expect("failed to run rune build");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rune"))
+        .arg("decompile")
+        .arg(&binary_path)
+        .arg("--format")
+        .arg("c")
+        .output()
+        .expect("failed to run rune decompile");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("generic binary-to-C decompilation is not implemented yet"));
 }

@@ -1,8 +1,10 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::{TcpListener, UdpSocket};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rune::build::build_executable_llvm;
@@ -23,6 +25,47 @@ fn temp_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir).expect("failed to create temp dir");
     dir
+}
+
+fn spawn_tcp_write_server_on_port(port: u16, payload: &'static [u8]) -> thread::JoinHandle<()> {
+    let listener =
+        TcpListener::bind(("127.0.0.1", port)).expect("failed to bind TCP listener on test port");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("failed to accept TCP client");
+        stream
+            .write_all(payload)
+            .expect("failed to write TCP payload");
+    })
+}
+
+fn spawn_tcp_request_server_on_port(
+    port: u16,
+    response: &'static [u8],
+) -> thread::JoinHandle<()> {
+    let listener =
+        TcpListener::bind(("127.0.0.1", port)).expect("failed to bind TCP listener on test port");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("failed to accept TCP client");
+        let mut request = [0u8; 256];
+        let read = stream.read(&mut request).expect("failed to read request");
+        let request_text = String::from_utf8_lossy(&request[..read]).to_string();
+        assert_eq!(request_text, "ping\n");
+        stream
+            .write_all(response)
+            .expect("failed to write TCP response");
+    })
+}
+
+fn spawn_udp_send_server_on_port(port: u16, payload: &'static [u8]) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let sender = UdpSocket::bind("127.0.0.1:0").expect("failed to bind UDP sender");
+        for _ in 0..20 {
+            thread::sleep(std::time::Duration::from_millis(100));
+            sender
+                .send_to(payload, ("127.0.0.1", port))
+                .expect("failed to send UDP payload");
+        }
+    })
 }
 
 #[test]
@@ -286,6 +329,105 @@ fn llvm_backend_builds_and_runs_class_method_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_arduino_random_and_shift_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_arduino_random_shift.rn");
+    let exe_path = dir.join("llvm_arduino_random_shift.exe");
+
+    fs::write(
+        &source_path,
+        "from arduino import bit_order_msb_first, interrupts_disable, interrupts_enable, random_i64, random_range, random_seed, shift_in\n\n\
+         def main() -> i32:\n    interrupts_disable()\n    random_seed(123)\n    let first: i64 = random_i64(10)\n    let second: i64 = random_range(5, 9)\n    interrupts_enable()\n    println(first >= 0 and first < 10)\n    println(second >= 5 and second < 9)\n    println(shift_in(8, 7, bit_order_msb_first()))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm arduino random/shift program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\ntrue\n0\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_break_continue_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_break_continue_demo.rn");
+    let exe_path = dir.join("llvm_break_continue_demo.exe");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    let value = 0\n    while value < 5:\n        value = value + 1\n        if value == 2:\n            continue\n        println(value)\n        if value == 4:\n            break\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm break/continue program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "1\n3\n4\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_class_method_program_with_keyword_args_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_method_keywords_demo.rn");
+    let exe_path = dir.join("llvm_class_method_keywords_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Mixer:\n    base: i32\n    def combine(self, left: i32, right: i32) -> i32:\n        return self.base + left + right\n\n\
+         def main() -> i32:\n    let mixer: Mixer = Mixer(base=10)\n    println(mixer.combine(right=8, left=4))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm class method keyword-arg program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built class method keyword-arg executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "22\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_inline_constructor_method_program_with_keyword_args_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_inline_method_keywords_demo.rn");
+    let exe_path = dir.join("llvm_class_inline_method_keywords_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Mixer:\n    base: i32\n    def combine(self, left: i32, right: i32) -> i32:\n        return self.base + left + right\n\n\
+         def main() -> i32:\n    println(Mixer(base=10).combine(right=8, left=4))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm inline constructor method keyword-arg program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built inline constructor method keyword-arg executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "22\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_object_method_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_class_object_method_demo.rn");
@@ -333,6 +475,134 @@ fn llvm_backend_builds_and_runs_string_returning_method_program_on_windows() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "hi Rune\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_str_magic_method_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_str_magic_demo.rn");
+    let exe_path = dir.join("llvm_class_str_magic_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n    def __str__(self) -> String:\n        return \"Counter(\" + str(self.value) + \")\"\n\n\
+         def main() -> i32:\n    println(str(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm str magic method program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built str magic method executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter(5)\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_default_object_string_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_default_str_demo.rn");
+    let exe_path = dir.join("llvm_class_default_str_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n\n\
+         def main() -> i32:\n    println(str(Counter(value=5)))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm default object string program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built default object string executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter(value=5)\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_direct_print_object_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_class_direct_print_demo.rn");
+    let exe_path = dir.join("llvm_class_direct_print_demo.exe");
+
+    fs::write(
+        &source_path,
+        "class Counter:\n    value: i32\n\n\
+         def main() -> i32:\n    println(Counter(value=5))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm direct object print program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built direct object print executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Counter(value=5)\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_cli_arg_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_cli_args_demo.rn");
+    let exe_path = dir.join("llvm_cli_args_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from env import arg, arg_count\n\n\
+         def main() -> i32:\n    println(arg_count())\n    println(arg(0))\n    println(arg(1))\n    println(arg(2))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm cli arg program should build");
+
+    let output = Command::new(&exe_path)
+        .arg("--port")
+        .arg("COM5")
+        .output()
+        .expect("failed to run llvm-built cli arg executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "2\n--port\nCOM5\n\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_env_string_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_env_string_demo.rn");
+    let exe_path = dir.join("llvm_env_string_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from env import get, get_or_empty\n\n\
+         def main() -> i32:\n    println(get(\"RUNE_LLVM_HOST\", \"fallback-host\"))\n    println(get_or_empty(\"RUNE_LLVM_EMPTY\"))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm env string program should build");
+
+    let output = Command::new(&exe_path)
+        .env("RUNE_LLVM_HOST", "llvm-host")
+        .output()
+        .expect("failed to run llvm-built env string executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "llvm-host\n\n");
 }
 
 #[test]
@@ -395,4 +665,129 @@ def main() -> i32:
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "false\ntrue\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_network_alias_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_alias_demo.rn");
+    let exe_path = dir.join("llvm_network_alias_demo.exe");
+
+    fs::write(
+        &source_path,
+        r#"from network import connect, connect_timeout, probe, probe_timeout, listen, bind, send, send_line
+
+def main() -> i32:
+    println(connect("127.0.0.1", 65535))
+    println(connect_timeout("127.0.0.1", 65535, 1))
+    println(probe("127.0.0.1", 65535))
+    println(probe_timeout("127.0.0.1", 65535, 1))
+    println(listen("127.0.0.1", 0))
+    println(bind("127.0.0.1", 0))
+    println(send("127.0.0.1", 65535, "hello"))
+    println(send_line("127.0.0.1", 65535, "world"))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm network alias program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built network alias executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\nfalse\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_network_send_text_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_send_text_demo.rn");
+    let exe_path = dir.join("llvm_network_send_text_demo.exe");
+
+    fs::write(
+        &source_path,
+        r#"from network import tcp_client, udp_endpoint
+
+def main() -> i32:
+    let tcp = tcp_client("127.0.0.1", 65535)
+    let udp = udp_endpoint("127.0.0.1", 9)
+    println(tcp.send_text("hello"))
+    println(tcp.send_line_text("world"))
+    println(udp.send_text("ping"))
+    println(udp.send_line_text("pong"))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm network send_text program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built network send_text executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "false\nfalse\ntrue\ntrue\n");
+}
+
+#[test]
+fn llvm_backend_builds_and_runs_network_receive_and_request_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_recv_request_demo.rn");
+    let exe_path = dir.join("llvm_network_recv_request_demo.exe");
+    let recv_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve TCP recv port");
+    let recv_port = recv_probe.local_addr().expect("recv probe addr").port() as i32;
+    drop(recv_probe);
+    let request_probe =
+        TcpListener::bind("127.0.0.1:0").expect("failed to reserve TCP request port");
+    let request_port = request_probe
+        .local_addr()
+        .expect("request probe addr")
+        .port() as i32;
+    drop(request_probe);
+    let udp_probe = UdpSocket::bind("127.0.0.1:0").expect("failed to reserve UDP port");
+    let udp_port = udp_probe.local_addr().expect("udp probe addr").port() as i32;
+    drop(udp_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import recv, recv_timeout, request_line, recv_udp, tcp_client, udp_endpoint
+
+def main() -> i32:
+    let tcp = tcp_client("127.0.0.1", {0})
+    let udp = udp_endpoint("127.0.0.1", {2})
+    println(recv("127.0.0.1", {0}, 64))
+    println(recv_timeout("127.0.0.1", {0}, 64, 500))
+    println(request_line("127.0.0.1", {1}, "ping", 64, 500))
+    println(tcp.recv(64))
+    println(udp.recv(64, 500))
+    return 0
+"#,
+            recv_port, request_port, udp_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm network recv/request program should build");
+
+    let _recv_server = spawn_tcp_write_server_on_port(recv_port as u16, b"hello recv");
+    let _request_server = spawn_tcp_request_server_on_port(request_port as u16, b"pong");
+    let _udp_server = spawn_udp_send_server_on_port(udp_port as u16, b"hello udp");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built network recv/request executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "hello recv\n\npong\n\nhello udp\n");
 }

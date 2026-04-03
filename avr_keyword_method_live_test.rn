@@ -1,0 +1,16 @@
+from arduino import delay_ms, digital_out, led_builtin, mode_output, pin_mode, uart_begin
+
+class Mixer:
+    base: i32
+    def combine(self, left: i32, right: i32) -> i32:
+        return self.base + left + right
+
+uart_begin(115200)
+pin_mode(led_builtin(), mode_output())
+
+while true:
+    digital_out(led_builtin(), true)
+    println(Mixer(base=10).combine(right=8, left=4))
+    delay_ms(60)
+    digital_out(led_builtin(), false)
+    delay_ms(60)

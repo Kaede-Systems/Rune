@@ -1,4 +1,5 @@
 pub mod build;
+pub mod builtin_modules;
 pub mod codegen;
 pub mod diagnostics;
 pub mod ir;
