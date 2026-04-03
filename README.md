@@ -183,6 +183,13 @@ Build and flash to a serial port:
 cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o hello_arduino.hex
 ```
 
+Arduino Uno builds now also print an Arduino-style usage summary after the ELF is linked:
+
+```text
+Program uses 4228 bytes (13.1%) of storage. Maximum is 32256 bytes.
+Global variables use 367 bytes (17.9%) of dynamic memory. Maximum is 2048 bytes.
+```
+
 Build and flash the serial calculator example:
 
 ```powershell

@@ -3059,6 +3059,25 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_serial_read_line_timeout" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let timeout = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_serial_read_line_timeout(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_serial_read_line_timeout(i64 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             "__rune_builtin_serial_write" | "__rune_builtin_serial_write_line" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -4065,7 +4084,10 @@ fn field_call_return_type(
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
-        "input" | "__rune_builtin_arduino_read_line" | "__rune_builtin_serial_read_line" => {
+        "input"
+        | "__rune_builtin_arduino_read_line"
+        | "__rune_builtin_serial_read_line"
+        | "__rune_builtin_serial_read_line_timeout" => {
             Some(IrType::String)
         }
         "panic" => Some(IrType::Unit),

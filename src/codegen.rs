@@ -3006,6 +3006,20 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_serial_read_line_timeout" {
+            let [CallArg::Positional(timeout_expr)] = args else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_serial_read_line_timeout` expects 1 positional argument"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", timeout_expr)?;
+            out.push_str("    call rune_rt_serial_read_line_timeout\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_serial_write" || name == "__rune_builtin_serial_write_line" {
             let [CallArg::Positional(text_expr)] = args else {
                 return Err(CodegenError {
@@ -4224,7 +4238,7 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
                 out.push_str("    call rune_rt_network_udp_recv\n");
                 out.push_str("    add rsp, 48\n");
-            } else {
+            } else if name == "__rune_builtin_serial_read_line" {
                 if !args.is_empty() {
                     return Err(CodegenError {
                         message:
@@ -4234,6 +4248,17 @@ impl<'a> FunctionEmitter<'a> {
                     });
                 }
                 out.push_str("    call rune_rt_serial_read_line\n");
+            } else {
+                let [CallArg::Positional(timeout_expr)] = args.as_slice() else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_serial_read_line_timeout` expects 1 positional argument in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_into_reg(out, "rcx", timeout_expr)?;
+                out.push_str("    call rune_rt_serial_read_line_timeout\n");
             }
             self.capture_runtime_string_result(out, ptr_reg, len_reg);
             return Ok(());
@@ -5528,7 +5553,10 @@ fn type_ref_to_ir_type(ty: Option<&crate::parser::TypeRef>) -> IrType {
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
-        "input" | "__rune_builtin_arduino_read_line" | "__rune_builtin_serial_read_line" => {
+        "input"
+        | "__rune_builtin_arduino_read_line"
+        | "__rune_builtin_serial_read_line"
+        | "__rune_builtin_serial_read_line_timeout" => {
             Some(IrType::String)
         }
         "panic" => Some(IrType::Unit),

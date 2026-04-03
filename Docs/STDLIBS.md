@@ -264,7 +264,8 @@ Current ADC limitations:
 
 ```rune
 from serial import begin, open, is_open, close
-from serial import available, read_byte, recv_line, write, write_line, send, send_line
+from serial import available, read_byte, recv_line, recv_line_timeout, recv_nonempty_timeout
+from serial import write, write_line, send, send_line
 from serial import send_i64, send_bool, send_line_i64, send_line_bool
 from serial import SerialPort, serial_port
 ```
@@ -278,6 +279,8 @@ Exports:
 - `available() -> i64`
 - `read_byte() -> i64`
 - `recv_line() -> String`
+- `recv_line_timeout(timeout_ms: i64) -> String`
+- `recv_nonempty_timeout(timeout_ms: i64) -> String`
 - `write(text: String) -> unit`
 - `write_line(text: String) -> unit`
 - `send(value: dynamic) -> bool`
@@ -293,7 +296,7 @@ Current implemented serial scope:
 
 - Rust-side built-in module surface for shared serial-facing Rune code
 - shared serial-facing Rune surface for embedded and host code
-- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_nonempty`, `send`, and `send_line` method names
+- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_line_timeout`, `recv_nonempty`, `recv_nonempty_timeout`, `send`, and `send_line` method names
 - typed serial helpers are also available as `send_i64`, `send_bool`, `send_line_i64`, and `send_line_bool`
 - on Arduino Uno:
   - `begin` lowers to `uart_begin`
@@ -303,7 +306,7 @@ Current implemented serial scope:
   - `recv_line` lowers to the normal embedded input surface
 - on non-embedded targets:
   - `open` opens a host serial port such as `COM5`
-  - `is_open`, `close`, `send`, `send_line`, and `recv_line` talk to the active host serial connection
+  - `is_open`, `close`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
   - `write` / `write_line` still lower to `print` / `println`
 
 Current serial limitations:
@@ -312,6 +315,7 @@ Current serial limitations:
 - text line input stays on the normal Rune `input()` surface
 - lower-level byte control remains in `arduino` via `uart_*`
 - current host serial scope is for native host builds, not browser/WASM targets
+- `recv_nonempty_timeout` returns `""` when the timeout expires instead of retrying forever
 
 ## `json`
 

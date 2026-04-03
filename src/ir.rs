@@ -968,6 +968,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_env_arg"
         | "__rune_builtin_env_get_string"
         | "__rune_builtin_gpio_analog_read"
+        | "__rune_builtin_serial_read_line"
+        | "__rune_builtin_serial_read_line_timeout"
         | "__rune_builtin_network_tcp_recv"
         | "__rune_builtin_network_tcp_recv_timeout"
         | "__rune_builtin_network_tcp_accept_once"

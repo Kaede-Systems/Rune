@@ -388,6 +388,8 @@ Current exported functions:
 - `is_open() -> bool`
 - `close() -> unit`
 - `recv_line() -> String`
+- `recv_line_timeout(timeout_ms: i64) -> String`
+- `recv_nonempty_timeout(timeout_ms: i64) -> String`
 - `send(value: dynamic) -> bool`
 - `send_line(value: dynamic) -> bool`
 - `serial_port(port: String, baud: i64) -> SerialPort`

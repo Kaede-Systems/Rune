@@ -3296,6 +3296,23 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::String)
                 }
+                "__rune_builtin_serial_read_line_timeout" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_read_line_timeout` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(timeout_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_read_line_timeout` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_integer_type(&timeout_ty, timeout_expr.span, "serial timeout")?;
+                    Ok(Type::String)
+                }
                 "__rune_builtin_serial_write" | "__rune_builtin_serial_write_line" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
@@ -3786,6 +3803,7 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_serial_is_open" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_close" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_read_line" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_read_line_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_write" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_write_line" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_terminal_clear" => Some(Type::Unknown("builtin".to_string())),

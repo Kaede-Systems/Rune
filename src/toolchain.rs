@@ -125,6 +125,10 @@ pub fn find_arduino_avr_objcopy() -> Option<PathBuf> {
     find_arduino_avr_tool(&["objcopy.exe", "avr-objcopy.exe", "objcopy", "avr-objcopy"])
 }
 
+pub fn find_arduino_avr_size() -> Option<PathBuf> {
+    find_arduino_avr_tool(&["avr-size.exe", "avr-size", "size.exe", "size"])
+}
+
 pub fn find_arduino_avrdude() -> Option<PathBuf> {
     for root in bundled_arduino_avr_roots() {
         for file_name in ["avrdude.exe", "avrdude"] {

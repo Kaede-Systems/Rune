@@ -1204,10 +1204,28 @@ fn serial_program() -> Program {
             vec![return_stmt(call_name("recv_line", vec![]))],
         ),
         function(
+            "recv_line_timeout",
+            vec![param("self", "dynamic"), param("timeout_ms", "i64")],
+            "String",
+            vec![return_stmt(call_name(
+                "recv_line_timeout",
+                vec![pos(ident("timeout_ms"))],
+            ))],
+        ),
+        function(
             "recv_nonempty",
             vec![param("self", "dynamic")],
             "String",
             vec![return_stmt(call_name("recv_nonempty", vec![]))],
+        ),
+        function(
+            "recv_nonempty_timeout",
+            vec![param("self", "dynamic"), param("timeout_ms", "i64")],
+            "String",
+            vec![return_stmt(call_name(
+                "recv_nonempty_timeout",
+                vec![pos(ident("timeout_ms"))],
+            ))],
         ),
         function(
             "send",
@@ -1356,6 +1374,22 @@ fn serial_program() -> Program {
                 ],
             )),
             Item::Function(function(
+                "recv_line_timeout",
+                vec![param("timeout_ms", "i64")],
+                "String",
+                vec![
+                    if_stmt(
+                        call_name("__rune_builtin_system_is_embedded", vec![]),
+                        vec![return_stmt(call_name("recv_line", vec![]))],
+                        None,
+                    ),
+                    return_stmt(call_name(
+                        "__rune_builtin_serial_read_line_timeout",
+                        vec![pos(ident("timeout_ms"))],
+                    )),
+                ],
+            )),
+            Item::Function(function(
                 "recv_nonempty",
                 vec![],
                 "String",
@@ -1377,6 +1411,25 @@ fn serial_program() -> Program {
                         },
                         span: s(),
                     }),
+                    return_stmt(ident("line")),
+                ],
+            )),
+            Item::Function(function(
+                "recv_nonempty_timeout",
+                vec![param("timeout_ms", "i64")],
+                "String",
+                vec![
+                    Stmt::Let(crate::parser::LetStmt {
+                        name: "line".to_string(),
+                        ty: Some(ty("String")),
+                        value: call_name("recv_line_timeout", vec![pos(ident("timeout_ms"))]),
+                        span: s(),
+                    }),
+                    if_stmt(
+                        binary(ident("line"), BinaryOp::EqualEqual, string_lit("")),
+                        vec![return_stmt(string_lit(""))],
+                        None,
+                    ),
                     return_stmt(ident("line")),
                 ],
             )),

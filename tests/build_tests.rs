@@ -669,10 +669,6 @@ fn builds_arduino_uno_with_serial_class_wrapper() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_serial_class.rn");
     let output_path = dir.join("arduino_uno_serial_class.hex");
-    let stdlib_serial = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("stdlib")
-        .join("serial.rn");
-    fs::copy(&stdlib_serial, dir.join("serial.rn")).expect("failed to stage serial stdlib");
 
     fs::write(
         &source_path,
@@ -893,8 +889,8 @@ fn builds_arduino_uno_stdlib_wrappers_without_recursive_calls() {
     fs::write(
         &source_path,
         "import arduino\n\n\
-         def setup() -> unit:\n    uart_begin(115200)\n    println(\"Rune AVR started\")\n    return\n\n\
-         def loop() -> unit:\n    println(\"tick\")\n    delay_ms(1000)\n    return\n",
+         def setup() -> unit:\n    arduino.uart_begin(115200)\n    println(\"Rune AVR started\")\n    return\n\n\
+         def loop() -> unit:\n    println(\"tick\")\n    arduino.delay_ms(1000)\n    return\n",
     )
     .expect("failed to write source");
 

@@ -16,7 +16,7 @@ use crate::parser::{BinaryOp, CallArg, Expr, ExprKind, Item, Program, Stmt, Type
 use crate::semantic::check_program;
 use crate::toolchain::{
     find_arduino_avr_avrdude_conf, find_arduino_avrdude, find_arduino_avr_core_root,
-    find_arduino_avr_gcc, find_arduino_avr_gpp, find_arduino_avr_objcopy,
+    find_arduino_avr_gcc, find_arduino_avr_gpp, find_arduino_avr_objcopy, find_arduino_avr_size,
     find_arduino_avr_runtime_header, find_arduino_avr_servo_library_root,
     find_packaged_llvm_cbe, find_packaged_llvm_tool, find_packaged_wasm_ld,
 };
@@ -598,6 +598,7 @@ fn build_arduino_uno_hex(
 
     let elf_output = output_path.with_extension("elf");
     let _ = fs::copy(&elf_path, &elf_output);
+    report_arduino_uno_size(&elf_path);
     if options.flash_after_build {
         flash_arduino_uno_hex(output_path, options.flash_port.as_deref())?;
     }
@@ -852,6 +853,7 @@ fn build_arduino_uno_hex_via_llvm_cbe(
 
     let elf_output = output_path.with_extension("elf");
     let _ = fs::copy(&elf_path, &elf_output);
+    report_arduino_uno_size(&elf_path);
     if options.flash_after_build {
         flash_arduino_uno_hex(output_path, options.flash_port.as_deref())?;
     }
@@ -1034,6 +1036,49 @@ fn emit_arduino_uno_cbe_runtime_cpp_with_features(
         defines.push("#define RUNE_ARDUINO_ENABLE_SERVO 1");
     }
     format!("{}\n#include \"rune_arduino_runtime.hpp\"\n", defines.join("\n"))
+}
+
+fn report_arduino_uno_size(elf_path: &Path) {
+    let Some(size_tool) = find_arduino_avr_size() else {
+        return;
+    };
+    let Ok(output) = Command::new(size_tool).arg(elf_path).output() else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut lines = text.lines();
+    let _header = lines.next();
+    let Some(values) = lines.next() else {
+        return;
+    };
+    let cols = values.split_whitespace().collect::<Vec<_>>();
+    if cols.len() < 4 {
+        return;
+    }
+    let Ok(text_bytes) = cols[0].parse::<u64>() else {
+        return;
+    };
+    let Ok(data_bytes) = cols[1].parse::<u64>() else {
+        return;
+    };
+    let Ok(bss_bytes) = cols[2].parse::<u64>() else {
+        return;
+    };
+    let flash_used = text_bytes + data_bytes;
+    let ram_used = data_bytes + bss_bytes;
+    let flash_total = 32_256u64;
+    let ram_total = 2_048u64;
+    let flash_pct = (flash_used as f64 / flash_total as f64) * 100.0;
+    let ram_pct = (ram_used as f64 / ram_total as f64) * 100.0;
+    println!(
+        "Program uses {flash_used} bytes ({flash_pct:.1}%) of storage. Maximum is {flash_total} bytes."
+    );
+    println!(
+        "Global variables use {ram_used} bytes ({ram_pct:.1}%) of dynamic memory. Maximum is {ram_total} bytes."
+    );
 }
 
 fn flash_arduino_uno_hex(hex_path: &Path, port: Option<&str>) -> Result<(), BuildError> {
@@ -2918,6 +2963,22 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
                 }
+                "recv_line_timeout" => {
+                    let [CallArg::Positional(timeout_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`recv_line_timeout` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let timeout = emit_arduino_uno_expr(scope, functions, structs, timeout_expr)?;
+                    if timeout.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer timeout for `recv_line_timeout`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
+                }
                 "send" => {
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -4426,6 +4487,7 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_serial_is_open" => "is_open",
         "__rune_builtin_serial_close" => "close",
         "__rune_builtin_serial_read_line" => "recv_line",
+        "__rune_builtin_serial_read_line_timeout" => "recv_line_timeout",
         "__rune_builtin_serial_write" => "send",
         "__rune_builtin_serial_write_line" => "send_line",
         "__rune_builtin_sum_range" => "sum_range",
@@ -4477,6 +4539,7 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "is_open"
             | "close"
             | "recv_line"
+            | "recv_line_timeout"
             | "send"
             | "send_line"
             | "str"
@@ -7556,6 +7619,11 @@ pub extern "C" fn rune_rt_serial_write_line(ptr: *const u8, len: i64) -> bool {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_serial_read_line() -> *const u8 {
+    rune_rt_serial_read_line_timeout(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_read_line_timeout(timeout_ms: i64) -> *const u8 {
     let mut guard = rune_rt_serial_handle()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
@@ -7565,7 +7633,18 @@ pub extern "C" fn rune_rt_serial_read_line() -> *const u8 {
 
     let mut bytes = Vec::new();
     let mut byte = [0u8; 1];
+    let deadline = if timeout_ms >= 0 {
+        Some(std::time::Instant::now() + Duration::from_millis(timeout_ms as u64))
+    } else {
+        None
+    };
     loop {
+        if let Some(deadline) = deadline
+            && std::time::Instant::now() >= deadline
+            && bytes.is_empty()
+        {
+            return rune_rt_store_string(String::new());
+        }
         match port.read(&mut byte) {
             Ok(0) => {
                 std::thread::sleep(Duration::from_millis(10));
@@ -7583,6 +7662,12 @@ pub extern "C" fn rune_rt_serial_read_line() -> *const u8 {
                 if !bytes.is_empty() {
                     break;
                 }
+                if let Some(deadline) = deadline
+                    && std::time::Instant::now() >= deadline
+                {
+                    return rune_rt_store_string(String::new());
+                }
+                std::thread::sleep(Duration::from_millis(10));
             }
             Err(_) => return rune_rt_store_string(String::new()),
         }

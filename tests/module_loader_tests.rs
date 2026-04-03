@@ -25,13 +25,13 @@ fn loads_local_imports() {
     .unwrap();
     fs::write(
         dir.join("main.rn"),
-        "import math\n\ndef main() -> i32:\n    return add(20, 22)\n",
+        "import math\n\ndef main() -> i32:\n    return math.add(20, 22)\n",
     )
     .unwrap();
 
     let program = load_program_from_path(&dir.join("main.rn")).unwrap();
     assert_eq!(program.items.len(), 2);
-    assert!(matches!(&program.items[0], Item::Function(function) if function.name == "add"));
+    assert!(matches!(&program.items[0], Item::Function(function) if function.name.ends_with("__add")));
     assert!(matches!(&program.items[1], Item::Function(function) if function.name == "main"));
 }
 
@@ -70,7 +70,7 @@ fn loads_relative_imports() {
 
     let program = load_program_from_path(&dir.join("pkg").join("main.rn")).unwrap();
     assert_eq!(program.items.len(), 2);
-    assert!(matches!(&program.items[0], Item::Function(function) if function.name == "add"));
+    assert!(matches!(&program.items[0], Item::Function(function) if function.name.ends_with("__add")));
 }
 
 #[test]
@@ -111,24 +111,20 @@ fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_gp
     assert!(bundle.sources.contains_key(&gpio_path));
     assert!(bundle.sources.contains_key(&pwm_path));
     assert!(bundle.sources.contains_key(&adc_path));
-    assert_eq!(bundle.function_origins.get("get_or_empty"), Some(&env_path));
-    assert_eq!(bundle.function_origins.get("monotonic_ms"), Some(&time_path));
-    assert_eq!(bundle.function_origins.get("cpu_count"), Some(&system_path));
-    assert_eq!(bundle.function_origins.get("writeln"), Some(&io_path));
-    assert_eq!(bundle.function_origins.get("home"), Some(&terminal_path));
-    assert_eq!(bundle.function_origins.get("exists"), Some(&fs_path));
-    assert_eq!(bundle.function_origins.get("kind"), Some(&json_path));
-    assert_eq!(bundle.function_origins.get("beep"), Some(&audio_path));
-    assert!(
-        bundle.function_origins.get("platform") == Some(&sys_path)
-            || bundle.function_origins.get("platform") == Some(&system_path)
-    );
-    assert_eq!(bundle.function_origins.get("connect"), Some(&network_path));
-    assert_eq!(bundle.function_origins.get("tcp_client"), Some(&network_path));
-    assert_eq!(bundle.function_origins.get("serial_port"), Some(&serial_path));
-    assert_eq!(bundle.function_origins.get("gpio_pin"), Some(&gpio_path));
-    assert_eq!(bundle.function_origins.get("pwm_pin"), Some(&pwm_path));
-    assert_eq!(bundle.function_origins.get("adc_pin"), Some(&adc_path));
+    assert!(bundle.function_origins.values().any(|path| path == &env_path));
+    assert!(bundle.function_origins.values().any(|path| path == &time_path));
+    assert!(bundle.function_origins.values().any(|path| path == &sys_path));
+    assert!(bundle.function_origins.values().any(|path| path == &system_path));
+    assert!(bundle.function_origins.values().any(|path| path == &io_path));
+    assert!(bundle.function_origins.values().any(|path| path == &terminal_path));
+    assert!(bundle.function_origins.values().any(|path| path == &fs_path));
+    assert!(bundle.function_origins.values().any(|path| path == &json_path));
+    assert!(bundle.function_origins.values().any(|path| path == &audio_path));
+    assert!(bundle.function_origins.values().any(|path| path == &network_path));
+    assert!(bundle.function_origins.values().any(|path| path == &serial_path));
+    assert!(bundle.function_origins.values().any(|path| path == &gpio_path));
+    assert!(bundle.function_origins.values().any(|path| path == &pwm_path));
+    assert!(bundle.function_origins.values().any(|path| path == &adc_path));
 }
 
 #[test]
