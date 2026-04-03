@@ -368,6 +368,44 @@ struct FunctionEmitter<'a> {
 }
 
 impl<'a> FunctionEmitter<'a> {
+    fn next_label(&mut self, prefix: &str) -> String {
+        let label = format!("{}.{}.{}", self.function_name, prefix, self.next_reg);
+        self.next_reg += 1;
+        label
+    }
+
+    fn emit_zero_division_panic(
+        &mut self,
+        out: &mut String,
+        divisor: &str,
+        divisor_ty: &IrType,
+        operation: &str,
+    ) -> Result<(), LlvmIrError> {
+        let cmp = self.next_reg();
+        let trap_label = self.next_label("divzero");
+        let ok_label = self.next_label("divok");
+        out.push_str(&format!(
+            "  {cmp} = icmp eq {} {divisor}, 0\n",
+            llvm_scalar_type(divisor_ty)?
+        ));
+        out.push_str(&format!(
+            "  br i1 {cmp}, label %{trap_label}, label %{ok_label}\n"
+        ));
+        out.push_str(&format!("{trap_label}:\n"));
+        let message = self.intern_string_ref(&format!("{operation} by zero"));
+        let (msg_ptr, msg_len) = split_string_value(&message)?;
+        let context = self.intern_string_ref(&format!("ZeroDivisionError in {}", self.function_name));
+        let (ctx_ptr, ctx_len) = split_string_value(&context)?;
+        self.declared_runtime
+            .insert("declare void @rune_rt_panic(ptr, i64, ptr, i64)\n".into());
+        out.push_str(&format!(
+            "  call void @rune_rt_panic({msg_ptr}, {msg_len}, {ctx_ptr}, {ctx_len})\n"
+        ));
+        out.push_str("  unreachable\n");
+        out.push_str(&format!("{ok_label}:\n"));
+        Ok(())
+    }
+
     fn emit_inst(
         &mut self,
         out: &mut String,
@@ -762,14 +800,20 @@ impl<'a> FunctionEmitter<'a> {
                 "  {reg} = mul {} {left_val}, {right_val}\n",
                 llvm_scalar_type(&op_ty)?
             ),
-            BinaryOp::Divide => format!(
-                "  {reg} = sdiv {} {left_val}, {right_val}\n",
-                llvm_scalar_type(&op_ty)?
-            ),
-            BinaryOp::Modulo => format!(
-                "  {reg} = srem {} {left_val}, {right_val}\n",
-                llvm_scalar_type(&op_ty)?
-            ),
+            BinaryOp::Divide => {
+                self.emit_zero_division_panic(out, &right_val, &op_ty, "division")?;
+                format!(
+                    "  {reg} = sdiv {} {left_val}, {right_val}\n",
+                    llvm_scalar_type(&op_ty)?
+                )
+            }
+            BinaryOp::Modulo => {
+                self.emit_zero_division_panic(out, &right_val, &op_ty, "modulo")?;
+                format!(
+                    "  {reg} = srem {} {left_val}, {right_val}\n",
+                    llvm_scalar_type(&op_ty)?
+                )
+            }
             BinaryOp::EqualEqual => format!(
                 "  {reg} = icmp eq {} {left_val}, {right_val}\n",
                 llvm_scalar_type(&op_ty)?

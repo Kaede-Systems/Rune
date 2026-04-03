@@ -1133,6 +1133,18 @@ impl<'a> Analyzer<'a> {
             ExprKind::Binary { left, op, right } => {
                 let left_ty = self.check_expr(left, scope, in_async)?;
                 let right_ty = self.check_expr(right, scope, in_async)?;
+                if matches!(op, BinaryOp::Divide | BinaryOp::Modulo)
+                    && matches!(&right.kind, ExprKind::Integer(value) if value == "0")
+                {
+                    return Err(SemanticError {
+                        message: if matches!(op, BinaryOp::Divide) {
+                            "division by zero is not allowed".to_string()
+                        } else {
+                            "modulo by zero is not allowed".to_string()
+                        },
+                        span: right.span,
+                    });
+                }
                 self.check_binary(op, &left_ty, &right_ty, expr.span)
             }
             ExprKind::Call { callee, args } => {

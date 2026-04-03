@@ -181,6 +181,31 @@ fn builds_and_runs_panic_program() {
 }
 
 #[test]
+fn builds_and_runs_zero_division_error_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("zero_division_demo.rn");
+    let exe_path = dir.join("zero_division_demo.exe");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    let value: i64 = 10\n    let zero: i64 = 0\n    println(value / zero)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("zero division program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run zero division executable");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Rune panic: division by zero"));
+    assert!(stderr.contains("ZeroDivisionError in main"));
+}
+
+#[test]
 fn builds_and_runs_input_program() {
     let dir = temp_dir();
     let source_path = dir.join("input_demo.rn");

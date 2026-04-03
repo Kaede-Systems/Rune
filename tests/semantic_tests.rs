@@ -276,6 +276,20 @@ fn accepts_modulo_for_static_and_dynamic_values() {
 }
 
 #[test]
+fn rejects_division_by_zero_literal() {
+    let error = check_source("def main() -> unit:\n    println(10 / 0)\n    return\n")
+        .expect_err("division by zero literal should fail");
+    assert!(error.message.contains("division by zero"));
+}
+
+#[test]
+fn rejects_modulo_by_zero_literal() {
+    let error = check_source("def main() -> unit:\n    println(10 % 0)\n    return\n")
+        .expect_err("modulo by zero literal should fail");
+    assert!(error.message.contains("modulo by zero"));
+}
+
+#[test]
 fn rejects_bad_string_concat_types() {
     let error =
         check_source("def main() -> unit:\n    let value: String = \"x\" + 1\n    return\n")

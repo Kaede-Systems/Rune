@@ -1427,6 +1427,29 @@ static void rune_serial_newline(void) {{\n\
     Serial.write('\\r');\n\
     Serial.write('\\n');\n\
 }}\n\n\
+static void rune_zero_division_error(const char* operation) {{\n\
+    Serial.begin(115200);\n\
+    Serial.print(\"ZeroDivisionError: \");\n\
+    Serial.print(operation);\n\
+    Serial.println(\" by zero\");\n\
+    for (;;) {{\n\
+        delay(1000);\n\
+    }}\n\
+}}\n\n\
+static int64_t rune_checked_div_i64(int64_t left, int64_t right) {{\n\
+    if (right == 0) {{\n\
+        rune_zero_division_error(\"division\");\n\
+        return 0;\n\
+    }}\n\
+    return left / right;\n\
+}}\n\n\
+static int64_t rune_checked_mod_i64(int64_t left, int64_t right) {{\n\
+    if (right == 0) {{\n\
+        rune_zero_division_error(\"modulo\");\n\
+        return 0;\n\
+    }}\n\
+    return left % right;\n\
+}}\n\n\
 {serial_read_functions}\
 static int64_t rune_parse_i64(const char* text) {{\n\
     if (text == nullptr) {{\n\
@@ -1545,9 +1568,9 @@ static rune_dynamic_value rune_dynamic_binary(rune_dynamic_value left, rune_dyna
         case 2:\n\
             return rune_dynamic_from_i64(left_number * right_number);\n\
         case 3:\n\
-            return rune_dynamic_from_i64(right_number == 0 ? 0 : (left_number / right_number));\n\
+            return rune_dynamic_from_i64(rune_checked_div_i64(left_number, right_number));\n\
         case 4:\n\
-            return rune_dynamic_from_i64(right_number == 0 ? 0 : (left_number % right_number));\n\
+            return rune_dynamic_from_i64(rune_checked_mod_i64(left_number, right_number));\n\
         default:\n\
             return rune_dynamic_from_i64(0);\n\
     }}\n\
@@ -3433,10 +3456,19 @@ fn emit_arduino_uno_expr(
                 BinaryOp::Add
                 | BinaryOp::Subtract
                 | BinaryOp::Multiply
-                | BinaryOp::Divide
-                | BinaryOp::Modulo if lhs.1 == ArduinoUnoType::I64 && rhs.1 == ArduinoUnoType::I64 => {
-                    Ok((
+                    if lhs.1 == ArduinoUnoType::I64 && rhs.1 == ArduinoUnoType::I64 => Ok((
                         format!("({} {} {})", lhs.0, arduino_uno_binary_op(*op), rhs.0),
+                        ArduinoUnoType::I64,
+                    )),
+                BinaryOp::Divide if lhs.1 == ArduinoUnoType::I64 && rhs.1 == ArduinoUnoType::I64 => {
+                    Ok((
+                        format!("rune_checked_div_i64({}, {})", lhs.0, rhs.0),
+                        ArduinoUnoType::I64,
+                    ))
+                }
+                BinaryOp::Modulo if lhs.1 == ArduinoUnoType::I64 && rhs.1 == ArduinoUnoType::I64 => {
+                    Ok((
+                        format!("rune_checked_mod_i64({}, {})", lhs.0, rhs.0),
                         ArduinoUnoType::I64,
                     ))
                 }

@@ -983,6 +983,28 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
+    fn emit_zero_division_panic(
+        &mut self,
+        out: &mut String,
+        span: Span,
+        operation: &str,
+    ) {
+        let message = format!("{operation} by zero");
+        let message_label = self.intern_string(&message);
+        let context = format!("ZeroDivisionError in {} at line {}", self.function_name, span.line);
+        let context_label = self.intern_string(&context);
+        out.push_str(&format!("    lea rcx, {message_label}[rip]\n"));
+        out.push_str(&format!("    mov rdx, {}\n", message.len()));
+        out.push_str(&format!("    lea r8, {context_label}[rip]\n"));
+        out.push_str(&format!("    mov r9, {}\n", context.len()));
+        out.push_str("    call rune_rt_panic\n");
+        out.push_str("    mov eax, 101\n");
+        out.push_str(&format!(
+            "    jmp {}.return\n",
+            native_internal_symbol_name(self.function_name)
+        ));
+    }
+
     fn emit_expr_stmt(&mut self, out: &mut String, expr: &Expr) -> Result<(), CodegenError> {
         if let ExprKind::Call { callee, args } = &expr.kind
             && let ExprKind::Identifier(name) = &callee.kind
@@ -1220,10 +1242,20 @@ impl<'a> FunctionEmitter<'a> {
                     BinaryOp::Subtract => out.push_str("    sub rax, rcx\n"),
                     BinaryOp::Multiply => out.push_str("    imul rax, rcx\n"),
                     BinaryOp::Divide => {
+                        let ok_label = self.next_label("div_ok");
+                        out.push_str("    cmp rcx, 0\n");
+                        out.push_str(&format!("    jne {ok_label}\n"));
+                        self.emit_zero_division_panic(out, expr.span, "division");
+                        out.push_str(&format!("{ok_label}:\n"));
                         out.push_str("    cqo\n");
                         out.push_str("    idiv rcx\n");
                     }
                     BinaryOp::Modulo => {
+                        let ok_label = self.next_label("mod_ok");
+                        out.push_str("    cmp rcx, 0\n");
+                        out.push_str(&format!("    jne {ok_label}\n"));
+                        self.emit_zero_division_panic(out, expr.span, "modulo");
+                        out.push_str(&format!("{ok_label}:\n"));
                         out.push_str("    cqo\n");
                         out.push_str("    idiv rcx\n");
                         out.push_str("    mov rax, rdx\n");
