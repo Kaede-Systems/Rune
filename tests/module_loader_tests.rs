@@ -74,11 +74,11 @@ fn loads_relative_imports() {
 }
 
 #[test]
-fn loads_builtin_env_time_sys_system_io_terminal_network_serial_and_gpio_modules_from_registry() {
+fn loads_builtin_env_time_sys_system_io_terminal_fs_network_serial_and_gpio_modules_from_registry() {
     let dir = temp_dir();
     fs::write(
         dir.join("main.rn"),
-        "from env import get_or_empty\nfrom time import monotonic_ms\nfrom sys import platform\nfrom system import cpu_count\nfrom io import writeln\nfrom terminal import home\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    home()\n    writeln(get_or_empty(\"RUNE_TEST\"))\n    println(monotonic_ms())\n    println(platform())\n    println(cpu_count())\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    return 0\n",
+        "from env import get_or_empty\nfrom time import monotonic_ms\nfrom sys import platform\nfrom system import cpu_count\nfrom io import writeln\nfrom terminal import home\nfrom fs import exists\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    home()\n    writeln(get_or_empty(\"RUNE_TEST\"))\n    println(monotonic_ms())\n    println(platform())\n    println(cpu_count())\n    println(exists(\"main.rn\"))\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    return 0\n",
     )
     .unwrap();
 
@@ -89,6 +89,7 @@ fn loads_builtin_env_time_sys_system_io_terminal_network_serial_and_gpio_modules
     let system_path = PathBuf::from("<builtin>/system");
     let io_path = PathBuf::from("<builtin>/io");
     let terminal_path = PathBuf::from("<builtin>/terminal");
+    let fs_path = PathBuf::from("<builtin>/fs");
     let network_path = PathBuf::from("<builtin>/network");
     let serial_path = PathBuf::from("<builtin>/serial");
     let gpio_path = PathBuf::from("<builtin>/gpio");
@@ -98,6 +99,7 @@ fn loads_builtin_env_time_sys_system_io_terminal_network_serial_and_gpio_modules
     assert!(bundle.sources.contains_key(&system_path));
     assert!(bundle.sources.contains_key(&io_path));
     assert!(bundle.sources.contains_key(&terminal_path));
+    assert!(bundle.sources.contains_key(&fs_path));
     assert!(bundle.sources.contains_key(&network_path));
     assert!(bundle.sources.contains_key(&serial_path));
     assert!(bundle.sources.contains_key(&gpio_path));
@@ -106,6 +108,7 @@ fn loads_builtin_env_time_sys_system_io_terminal_network_serial_and_gpio_modules
     assert_eq!(bundle.function_origins.get("cpu_count"), Some(&system_path));
     assert_eq!(bundle.function_origins.get("writeln"), Some(&io_path));
     assert_eq!(bundle.function_origins.get("home"), Some(&terminal_path));
+    assert_eq!(bundle.function_origins.get("exists"), Some(&fs_path));
     assert!(
         bundle.function_origins.get("platform") == Some(&sys_path)
             || bundle.function_origins.get("platform") == Some(&system_path)

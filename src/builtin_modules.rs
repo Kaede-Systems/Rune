@@ -751,6 +751,160 @@ fn terminal_program() -> Program {
     }
 }
 
+fn fs_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "exists",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_exists",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "read",
+                vec![param("path", "String")],
+                "String",
+                vec![return_stmt(call_name("read_string", vec![pos(ident("path"))]))],
+            )),
+            Item::Function(function(
+                "read_string",
+                vec![param("path", "String")],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_read_string",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "read_text",
+                vec![param("path", "String")],
+                "String",
+                vec![return_stmt(call_name("read_string", vec![pos(ident("path"))]))],
+            )),
+            Item::Function(function(
+                "write_string",
+                vec![param("path", "String"), param("content", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_write_string",
+                    vec![pos(ident("path")), pos(ident("content"))],
+                ))],
+            )),
+            Item::Function(function(
+                "write",
+                vec![param("path", "String"), param("content", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "write_string",
+                    vec![pos(ident("path")), pos(ident("content"))],
+                ))],
+            )),
+            Item::Function(function(
+                "write_text",
+                vec![param("path", "String"), param("content", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "write_string",
+                    vec![pos(ident("path")), pos(ident("content"))],
+                ))],
+            )),
+            Item::Function(function(
+                "remove",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_remove",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "delete",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name("remove", vec![pos(ident("path"))]))],
+            )),
+            Item::Function(function(
+                "remove_file",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name("remove", vec![pos(ident("path"))]))],
+            )),
+            Item::Function(function(
+                "rename",
+                vec![param("from_path", "String"), param("to_path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_rename",
+                    vec![pos(ident("from_path")), pos(ident("to_path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "move",
+                vec![param("from_path", "String"), param("to_path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "rename",
+                    vec![pos(ident("from_path")), pos(ident("to_path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "copy",
+                vec![param("from_path", "String"), param("to_path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_copy",
+                    vec![pos(ident("from_path")), pos(ident("to_path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "create_dir",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_create_dir",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "mkdir",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name("create_dir", vec![pos(ident("path"))]))],
+            )),
+            Item::Function(function(
+                "create_dir_all",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_fs_create_dir_all",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "mkdir_p",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "create_dir_all",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+            Item::Function(function(
+                "mkdirs",
+                vec![param("path", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "create_dir_all",
+                    vec![pos(ident("path"))],
+                ))],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -2985,6 +3139,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "terminal" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/terminal"),
             body: BuiltinModuleBody::Program(terminal_program()),
+        }),
+        [name] if name == "fs" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/fs"),
+            body: BuiltinModuleBody::Program(fs_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),
