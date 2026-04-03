@@ -1772,6 +1772,32 @@ fn builds_arduino_uno_with_builtin_pwm_and_adc_modules() {
 }
 
 #[test]
+fn builds_arduino_uno_with_namespaced_builtin_pwm_and_adc_modules() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_namespaced_builtin_pwm_adc.rn");
+    let output_path = dir.join("arduino_uno_namespaced_builtin_pwm_adc.hex");
+
+    fs::write(
+        &source_path,
+        "import pwm\nimport adc\n\n\
+         def main() -> i32:\n    let out = pwm.pin(9)\n    let sensor = adc.pin(0)\n    out.output()\n    out.write(64)\n    println(sensor.read())\n    println(sensor.read_percent())\n    println(out.max_duty())\n    println(adc.max())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno namespaced built-in pwm/adc modules should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read namespaced built-in pwm/adc hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_servo_serial_control_example() {
     let dir = temp_dir();
     let source_path = dir.join("servo_serial_control_arduino.rn");

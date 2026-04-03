@@ -721,6 +721,59 @@ def main() -> i32:\n    let pwm = pwm_pin(9)\n    let sensor = adc_pin(9)\n    p
 }
 
 #[test]
+fn builds_and_runs_namespaced_builtin_pwm_and_adc_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("namespaced_builtin_pwm_adc_demo.rn");
+    let exe_path = dir.join("namespaced_builtin_pwm_adc_demo.exe");
+
+    fs::write(
+        &source_path,
+        "import pwm\nimport adc\n\n\
+def main() -> i32:\n    let out = pwm.pin(9)\n    let sensor = adc.pin(9)\n    out.output()\n    out.write(64)\n    println(sensor.read())\n    println(sensor.read_percent())\n    println(out.max_duty())\n    println(adc.max())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("namespaced builtin pwm/adc program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run namespaced builtin pwm/adc executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "64\n6\n255\n1023\n");
+}
+
+#[test]
+fn builds_and_runs_namespaced_local_modules_with_overlapping_exports() {
+    let dir = temp_dir();
+    let source_path = dir.join("main.rn");
+    let exe_path = dir.join("namespaced_local_modules.exe");
+
+    fs::write(dir.join("left.rn"), "def pin() -> i32:\n    return 10\n")
+        .expect("failed to write left module");
+    fs::write(dir.join("right.rn"), "def pin() -> i32:\n    return 20\n")
+        .expect("failed to write right module");
+    fs::write(
+        &source_path,
+        "import left\nimport right\n\ndef main() -> i32:\n    println(left.pin())\n    println(right.pin())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("namespaced local module program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run namespaced local module executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "10\n20\n");
+}
+
+#[test]
 fn builds_and_runs_stdlib_network_persistent_server_program() {
     let dir = temp_dir();
     let source_path = dir.join("stdlib_network_persistent_server.rn");

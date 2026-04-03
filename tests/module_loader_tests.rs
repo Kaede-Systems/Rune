@@ -130,3 +130,31 @@ fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_gp
     assert_eq!(bundle.function_origins.get("pwm_pin"), Some(&pwm_path));
     assert_eq!(bundle.function_origins.get("adc_pin"), Some(&adc_path));
 }
+
+#[test]
+fn loads_namespaced_modules_with_overlapping_exports() {
+    let dir = temp_dir();
+    fs::write(
+        dir.join("left.rn"),
+        "def pin() -> i32:\n    return 10\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("right.rn"),
+        "def pin() -> i32:\n    return 20\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.rn"),
+        "import left\nimport right\n\ndef main() -> i32:\n    println(left.pin())\n    println(right.pin())\n    return 0\n",
+    )
+    .unwrap();
+
+    let bundle = load_program_bundle_from_path(&dir.join("main.rn")).unwrap();
+    assert!(
+        bundle
+            .function_origins
+            .keys()
+            .any(|name| name.contains("__mod_") && name.ends_with("__pin"))
+    );
+}

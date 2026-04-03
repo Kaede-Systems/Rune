@@ -81,6 +81,12 @@ Current stdlib modules are available through Rune's default stdlib registry. Man
 
 Core ergonomics are available through `io`, `terminal`, `env`, and `sys` aliases such as `prompt(...)`, `flush_stdout()`, `cursor_hide()`, `arg_or(...)`, and `is_host()`.
 
+Current import note:
+
+- `from module import name` imports exported names directly
+- `import module` supports module-qualified calls like `module.name(...)`
+- import aliases such as `import module as alias` are not implemented yet
+
 The `fs` and `json` modules include convenience aliases on top of the current runtime-backed operations, but they do not add capabilities beyond what is documented in [Docs/STDLIBS.md](Docs/STDLIBS.md).
 
 Current class-style stdlib wrappers include:

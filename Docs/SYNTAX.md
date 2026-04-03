@@ -199,6 +199,13 @@ import math
 from math import add
 ```
 
+Current import behavior:
+
+- `from module import name` imports exported names directly
+- `import module` now supports namespace-qualified access like `module.name(...)`
+- this makes it possible for different imported modules to export the same short name safely when accessed through their module namespace
+- import aliases such as `import module as alias` are not implemented yet
+
 Relative imports:
 
 ```rune
@@ -213,6 +220,16 @@ from time import unix_now
 from system import pid
 from env import has
 from network import tcp_connect
+```
+
+Module-qualified stdlib access is also supported:
+
+```rune
+import pwm
+import adc
+
+let out = pwm.pin(9)
+let sensor = adc.pin(0)
 ```
 
 Parenthesized multiline imports are also supported:
@@ -283,13 +300,15 @@ Language-level builtins currently recognized:
 These top-level stdlib modules are available through Rune's default stdlib loader.
 
 Current implementation detail:
-- `env`, `network`, `serial`, and `gpio` are loaded from the Rust-side built-in module registry.
+- `env`, `time`, `sys`, `system`, `io`, `terminal`, `fs`, `json`, `audio`, `network`, `serial`, `gpio`, `pwm`, and `adc` are loaded from the Rust-side built-in module registry.
 - the remaining stdlib modules currently still load from [`stdlib/`](C:\Users\kaededevkentohinode\KUROX\stdlib) until they are migrated.
 
 Current stdlib surface:
 
 - `arduino`
 - `gpio`
+- `pwm`
+- `adc`
 - `serial`
 - `json`
 - `time`
@@ -350,6 +369,18 @@ Current exported functions:
 - `pwm(pin: i64) -> GpioPwm`
 - `analog_pin(pin: i64) -> GpioAnalogIn`
 - `analog(pin: i64) -> GpioAnalogIn`
+
+`pwm`
+- `pwm_pin(pin: i64) -> PwmPin`
+- `write(pin: i64, duty: i64) -> unit`
+- `max_duty() -> i64`
+
+`adc`
+- `adc_pin(pin: i64) -> AdcPin`
+- `read(pin: i64) -> i64`
+- `read_percent(pin: i64) -> i64`
+- `read_voltage_mv(pin: i64, reference_mv: i64) -> i64`
+- `max() -> i64`
 
 `serial`
 - `begin(baud: i64) -> unit`

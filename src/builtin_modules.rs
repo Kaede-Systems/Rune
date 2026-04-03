@@ -2151,6 +2151,12 @@ fn pwm_program() -> Program {
                     vec![kw("pin", ident("pin"))],
                 ))],
             )),
+            Item::Function(function(
+                "pin",
+                vec![param("pin", "i64")],
+                "PwmPin",
+                vec![return_stmt(call_name("pwm_pin", vec![pos(ident("pin"))]))],
+            )),
         ],
     }
 }
@@ -2267,6 +2273,12 @@ fn adc_program() -> Program {
                     ident("AdcPin"),
                     vec![kw("pin", ident("pin"))],
                 ))],
+            )),
+            Item::Function(function(
+                "pin",
+                vec![param("pin", "i64")],
+                "AdcPin",
+                vec![return_stmt(call_name("adc_pin", vec![pos(ident("pin"))]))],
             )),
         ],
     }

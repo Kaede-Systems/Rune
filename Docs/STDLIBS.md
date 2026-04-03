@@ -9,6 +9,13 @@ Current loading model:
 - the remaining stdlib modules are still loaded from [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib) while they are migrated.
 - this keeps the migration honest: each module is moved only when its real registry-backed path is working end to end.
 
+Current namespace note:
+
+- `from module import name` imports exported names directly
+- `import module` supports namespace-qualified access like `module.name(...)`
+- namespace-qualified access is the preferred way to use overlapping short names such as `pwm.pin(...)` and `adc.pin(...)`
+- import aliases such as `import module as alias` are not implemented yet
+
 ## `arduino`
 
 ```rune
@@ -187,12 +194,14 @@ Current GPIO limitations:
 
 ```rune
 from pwm import pwm_pin, write, max_duty
+import pwm
 ```
 
 Exports:
 
 - `PwmPin`
 - `pwm_pin(pin: i64) -> PwmPin`
+- `pin(pin: i64) -> PwmPin`
 - `write(pin: i64, duty: i64) -> unit`
 - `max_duty() -> i64`
 - `pin_mode(pin: i64, mode: i64) -> unit`
@@ -220,12 +229,14 @@ Current PWM limitations:
 
 ```rune
 from adc import adc_pin, read, read_percent, read_voltage_mv, max
+import adc
 ```
 
 Exports:
 
 - `AdcPin`
 - `adc_pin(pin: i64) -> AdcPin`
+- `pin(pin: i64) -> AdcPin`
 - `read(pin: i64) -> i64`
 - `read_percent(pin: i64) -> i64`
 - `read_voltage_mv(pin: i64, reference_mv: i64) -> i64`
