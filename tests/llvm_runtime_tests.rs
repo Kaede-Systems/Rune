@@ -939,3 +939,53 @@ def main() -> i32:
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "false\n5\ntrue\n0\ntrue\ntrue\n0\n");
 }
+
+#[test]
+fn llvm_backend_builds_and_runs_network_persistent_server_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_network_persistent_server_demo.rn");
+    let exe_path = dir.join("llvm_network_persistent_server_demo.exe");
+    let server_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve server port");
+    let server_port = server_probe.local_addr().expect("server probe addr").port() as i32;
+    drop(server_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import tcp_server_accept, tcp_server_close, tcp_server_open, tcp_server_reply
+
+def main() -> i32:
+    let handle: i32 = tcp_server_open("127.0.0.1", {0})
+    println(tcp_server_accept(handle, 64, 1000))
+    println(tcp_server_reply(handle, "pong\n", 64, 1000))
+    println(tcp_server_close(handle))
+    return 0
+"#,
+            server_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm persistent network server program should build");
+
+    let child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run llvm persistent network server program");
+
+    let client_a = spawn_tcp_client_send_on_port(server_port as u16, b"alpha");
+    let client_b = spawn_tcp_client_request_on_port(server_port as u16, b"beta\n", "pong\n");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for llvm persistent network server program");
+
+    client_a.join().expect("accept client should finish");
+    client_b.join().expect("reply client should finish");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "alpha\nbeta\n\ntrue\n");
+}

@@ -5122,6 +5122,18 @@ function createHost(options = {{}}) {{
       rune_rt_network_tcp_reply_once(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
         throw new Error("Rune network server builtins are not supported for wasm32-unknown-unknown");
       }},
+      rune_rt_network_tcp_server_open(ptr, len, port) {{
+        throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_server_accept(handle, maxBytes, timeoutMs) {{
+        throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_server_reply(handle, dataPtr, dataLen, maxBytes, timeoutMs) {{
+        throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_server_close(handle) {{
+        throw new Error("Rune persistent network server builtins are not supported for wasm32-unknown-unknown");
+      }},
       rune_rt_network_last_error_code() {{
         return 0;
       }},
@@ -6254,6 +6266,7 @@ fn rename_functions_for_library(program: &Program, asm: &str) -> String {
 
 fn rust_runtime_support_body() -> &'static str {
     r#"use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -6280,6 +6293,10 @@ static RUNE_ARDUINO_START: OnceLock<Instant> = OnceLock::new();
 static RUNE_ARDUINO_RANDOM_STATE: AtomicU64 = AtomicU64::new(0);
 static RUNE_HOST_SERIAL: OnceLock<std::sync::Mutex<Option<std::fs::File>>> = OnceLock::new();
 static RUNE_NETWORK_ERROR: OnceLock<Mutex<(i32, String)>> = OnceLock::new();
+#[cfg(not(target_os = "wasi"))]
+static RUNE_NETWORK_SERVER_HANDLES: OnceLock<Mutex<HashMap<i32, TcpListener>>> = OnceLock::new();
+#[cfg(not(target_os = "wasi"))]
+static RUNE_NETWORK_SERVER_NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 const RUNE_NETWORK_OK: i32 = 0;
 const RUNE_NETWORK_ERR_INVALID_ARGUMENT: i32 = 1;
@@ -6313,6 +6330,11 @@ fn rune_rt_serial_handle() -> &'static std::sync::Mutex<Option<std::fs::File>> {
 
 fn rune_rt_network_error_state() -> &'static Mutex<(i32, String)> {
     RUNE_NETWORK_ERROR.get_or_init(|| Mutex::new((RUNE_NETWORK_OK, String::new())))
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn rune_rt_network_server_handles() -> &'static Mutex<HashMap<i32, TcpListener>> {
+    RUNE_NETWORK_SERVER_HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn rune_rt_network_clear_error_state() {
@@ -8188,6 +8210,56 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_open(_ptr: *const u8, _len: i64, _port: i32) -> i32 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    0
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_accept(
+    _handle: i32,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_reply(
+    _handle: i32,
+    _data_ptr: *const u8,
+    _data_len: i64,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_close(_handle: i32) -> bool {
+    rune_rt_network_set_error(
+        RUNE_NETWORK_ERR_UNSUPPORTED_TARGET,
+        "network is not supported on this target",
+    );
+    false
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_request(
     _host_ptr: *const u8,
     _host_len: i64,
@@ -8531,6 +8603,255 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
                 return rune_rt_store_string(String::new());
             }
         }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_open(ptr: *const u8, len: i64, port: i32) -> i32 {
+    if port < 0 || port > u16::MAX as i32 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP port `{port}`"),
+        );
+        return 0;
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP server host must be valid UTF-8");
+    let listener = match TcpListener::bind((host, port as u16)) {
+        Ok(listener) => listener,
+        Err(error) => {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_BIND,
+                format!("failed to bind TCP server on {host}:{port}: {error}"),
+            );
+            return 0;
+        }
+    };
+    if let Err(error) = listener.set_nonblocking(true) {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_SOCKET_OPTION,
+            format!("failed to configure TCP server on {host}:{port}: {error}"),
+        );
+        return 0;
+    }
+    let handle = RUNE_NETWORK_SERVER_NEXT_HANDLE.fetch_add(1, Ordering::Relaxed) as i32;
+    rune_rt_network_server_handles()
+        .lock()
+        .expect("network server handle mutex poisoned")
+        .insert(handle, listener);
+    rune_rt_network_clear_error_state();
+    handle
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_accept(
+    handle: i32,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if handle <= 0 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_server_accept requires a positive handle and non-negative max_bytes/timeout_ms",
+        );
+        return rune_rt_store_string(String::new());
+    }
+    let listener: TcpListener = {
+        let handles = rune_rt_network_server_handles()
+            .lock()
+            .expect("network server handle mutex poisoned");
+        let Some(listener) = handles.get(&handle) else {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+                format!("unknown TCP server handle `{handle}`"),
+            );
+            return rune_rt_store_string(String::new());
+        };
+        match listener.try_clone() {
+            Ok(listener) => listener,
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_ACCEPT,
+                    format!("failed to clone TCP listener for handle `{handle}`: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
+        }
+    };
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Err(error) =
+                    stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+                {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_SOCKET_OPTION,
+                        format!("failed to set TCP read timeout for handle `{handle}`: {error}"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
+                let mut buffer = vec![0u8; max_bytes as usize];
+                match std::io::Read::read(&mut stream, &mut buffer) {
+                    Ok(read) => {
+                        buffer.truncate(read);
+                        rune_rt_network_clear_error_state();
+                        return rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string());
+                    }
+                    Err(error) => {
+                        rune_rt_network_set_error(
+                            RUNE_NETWORK_ERR_READ,
+                            format!("failed to read from TCP server handle `{handle}`: {error}"),
+                        );
+                        return rune_rt_store_string(String::new());
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_ACCEPT_TIMEOUT,
+                        format!("timed out waiting for TCP client on handle `{handle}`"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_ACCEPT,
+                    format!("failed to accept TCP client on handle `{handle}`: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_reply(
+    handle: i32,
+    data_ptr: *const u8,
+    data_len: i64,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if handle <= 0 || max_bytes < 0 || timeout_ms < 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            "tcp_server_reply requires a positive handle and non-negative max_bytes/timeout_ms",
+        );
+        return rune_rt_store_string(String::new());
+    }
+    let listener: TcpListener = {
+        let handles = rune_rt_network_server_handles()
+            .lock()
+            .expect("network server handle mutex poisoned");
+        let Some(listener) = handles.get(&handle) else {
+            rune_rt_network_set_error(
+                RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+                format!("unknown TCP server handle `{handle}`"),
+            );
+            return rune_rt_store_string(String::new());
+        };
+        match listener.try_clone() {
+            Ok(listener) => listener,
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_ACCEPT,
+                    format!("failed to clone TCP listener for handle `{handle}`: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
+        }
+    };
+    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
+    let data = std::str::from_utf8(data).expect("TCP server reply data must be valid UTF-8");
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Err(error) =
+                    stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+                {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_SOCKET_OPTION,
+                        format!("failed to set TCP read timeout for handle `{handle}`: {error}"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
+                let mut buffer = vec![0u8; max_bytes as usize];
+                let request = match std::io::Read::read(&mut stream, &mut buffer) {
+                    Ok(read) => {
+                        buffer.truncate(read);
+                        String::from_utf8_lossy(&buffer).to_string()
+                    }
+                    Err(error) => {
+                        rune_rt_network_set_error(
+                            RUNE_NETWORK_ERR_READ,
+                            format!("failed to read from TCP server handle `{handle}`: {error}"),
+                        );
+                        return rune_rt_store_string(String::new());
+                    }
+                };
+                if let Err(error) = std::io::Write::write_all(&mut stream, data.as_bytes()) {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_WRITE,
+                        format!("failed to write reply on TCP server handle `{handle}`: {error}"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
+                rune_rt_network_clear_error_state();
+                return rune_rt_store_string(request);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    rune_rt_network_set_error(
+                        RUNE_NETWORK_ERR_ACCEPT_TIMEOUT,
+                        format!("timed out waiting for TCP client on handle `{handle}`"),
+                    );
+                    return rune_rt_store_string(String::new());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => {
+                rune_rt_network_set_error(
+                    RUNE_NETWORK_ERR_ACCEPT,
+                    format!("failed to accept TCP client on handle `{handle}`: {error}"),
+                );
+                return rune_rt_store_string(String::new());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_server_close(handle: i32) -> bool {
+    if handle <= 0 {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("invalid TCP server handle `{handle}`"),
+        );
+        return false;
+    }
+    let removed = rune_rt_network_server_handles()
+        .lock()
+        .expect("network server handle mutex poisoned")
+        .remove(&handle)
+        .is_some();
+    if removed {
+        rune_rt_network_clear_error_state();
+        true
+    } else {
+        rune_rt_network_set_error(
+            RUNE_NETWORK_ERR_INVALID_ARGUMENT,
+            format!("unknown TCP server handle `{handle}`"),
+        );
+        false
     }
 }
 

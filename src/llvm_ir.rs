@@ -1746,6 +1746,82 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_network_tcp_server_open" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i32 @rune_rt_network_tcp_server_open(ptr, i64, i32)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i32 @rune_rt_network_tcp_server_open({ptr}, {len}, i32 {port})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_server_accept" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let handle = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let max_bytes = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[2].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_network_tcp_server_accept(i32, i32, i32)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_server_accept(i32 {handle}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_server_reply" => {
+                self.expect_plain_arity(callee, args, 4)?;
+                let handle = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let rendered_data = self.resolve_value(&args[1].value, &IrType::String, out)?;
+                let (data_ptr, data_len) = split_string_value(&rendered_data)?;
+                let max_bytes = self.resolve_value(&args[2].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[3].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare ptr @rune_rt_network_tcp_server_reply(i32, ptr, i64, i32, i32)\n"
+                        .into(),
+                );
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_server_reply(i32 {handle}, {data_ptr}, {data_len}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_server_close" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let handle = self.resolve_value(&args[0].value, &IrType::I32, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_network_tcp_server_close(i32)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_network_tcp_server_close(i32 {handle})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_network_last_error_code" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
@@ -3639,6 +3715,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_recv_timeout"
         | "__rune_builtin_network_tcp_accept_once"
         | "__rune_builtin_network_tcp_reply_once"
+        | "__rune_builtin_network_tcp_server_accept"
+        | "__rune_builtin_network_tcp_server_reply"
         | "__rune_builtin_network_last_error_message"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv"
@@ -3716,13 +3794,15 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"
         | "__rune_builtin_env_arg_count"
-        | "__rune_builtin_network_last_error_code" => Some(IrType::I32),
+        | "__rune_builtin_network_last_error_code"
+        | "__rune_builtin_network_tcp_server_open" => Some(IrType::I32),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
         | "__rune_builtin_network_tcp_connect"
         | "__rune_builtin_network_tcp_listen"
         | "__rune_builtin_network_tcp_send"
         | "__rune_builtin_network_tcp_connect_timeout"
+        | "__rune_builtin_network_tcp_server_close"
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"

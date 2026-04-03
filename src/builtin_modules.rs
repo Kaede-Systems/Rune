@@ -1649,6 +1649,60 @@ fn network_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "tcp_server_open",
+                vec![param("host", "String"), param("port", "i32")],
+                "i32",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_server_open",
+                    vec![pos(ident("host")), pos(ident("port"))],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_server_accept",
+                vec![
+                    param("handle", "i32"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_server_accept",
+                    vec![
+                        pos(ident("handle")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_server_reply",
+                vec![
+                    param("handle", "i32"),
+                    param("data", "String"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_server_reply",
+                    vec![
+                        pos(ident("handle")),
+                        pos(ident("data")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_server_close",
+                vec![param("handle", "i32")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_server_close",
+                    vec![pos(ident("handle"))],
+                ))],
+            )),
+            Item::Function(function(
                 "accept_once",
                 vec![
                     param("host", "String"),

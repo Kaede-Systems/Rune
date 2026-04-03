@@ -620,6 +620,56 @@ def main() -> i32:
     assert_eq!(stdout, "false\n5\ntrue\n0\ntrue\ntrue\n0\n");
 }
 
+#[test]
+fn builds_and_runs_stdlib_network_persistent_server_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("stdlib_network_persistent_server.rn");
+    let exe_path = dir.join("stdlib_network_persistent_server.exe");
+    let server_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve server port");
+    let server_port = server_probe.local_addr().expect("server probe addr").port() as i32;
+    drop(server_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import tcp_server_accept, tcp_server_close, tcp_server_open, tcp_server_reply
+
+def main() -> i32:
+    let handle: i32 = tcp_server_open("127.0.0.1", {0})
+    println(tcp_server_accept(handle, 64, 1000))
+    println(tcp_server_reply(handle, "pong\n", 64, 1000))
+    println(tcp_server_close(handle))
+    return 0
+"#,
+            server_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("persistent network server program should build");
+
+    let child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run persistent network server program");
+
+    let client_a = spawn_tcp_client_send_on_port(server_port as u16, b"alpha");
+    let client_b = spawn_tcp_client_request_on_port(server_port as u16, b"beta\n", "pong\n");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for persistent network server program");
+
+    client_a.join().expect("accept client should finish");
+    client_b.join().expect("reply client should finish");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "alpha\nbeta\n\ntrue\n");
+}
+
 
 #[test]
 fn builds_and_runs_stdlib_io_program() {

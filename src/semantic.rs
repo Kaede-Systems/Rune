@@ -2042,6 +2042,109 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
                     Ok(Type::String)
                 }
+                "__rune_builtin_network_tcp_server_open" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_server_open` expects 2 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(host_expr), CallArg::Positional(port_expr)] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_server_open` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "TCP host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "TCP port")?;
+                    Ok(Type::I32)
+                }
+                "__rune_builtin_network_tcp_server_accept" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_network_tcp_server_accept` expects 3 arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(handle_expr),
+                        CallArg::Positional(max_expr),
+                        CallArg::Positional(timeout_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_server_accept` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let handle_ty = self.check_expr(handle_expr, scope, in_async)?;
+                    self.expect_type(&handle_ty, &Type::I32, handle_expr.span, "TCP server handle")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "TCP receive size")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_network_tcp_server_reply" => {
+                    if args.len() != 4 {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_network_tcp_server_reply` expects 4 arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(handle_expr),
+                        CallArg::Positional(data_expr),
+                        CallArg::Positional(max_expr),
+                        CallArg::Positional(timeout_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_server_reply` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let handle_ty = self.check_expr(handle_expr, scope, in_async)?;
+                    self.expect_type(&handle_ty, &Type::I32, handle_expr.span, "TCP server handle")?;
+                    let data_ty = self.check_expr(data_expr, scope, in_async)?;
+                    self.expect_type(&data_ty, &Type::String, data_expr.span, "TCP reply data")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "TCP receive size")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_network_tcp_server_close" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_network_tcp_server_close` expects 1 argument"
+                                    .to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(handle_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_server_close` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let handle_ty = self.check_expr(handle_expr, scope, in_async)?;
+                    self.expect_type(&handle_ty, &Type::I32, handle_expr.span, "TCP server handle")?;
+                    Ok(Type::Bool)
+                }
                 "__rune_builtin_network_last_error_code" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -3330,6 +3433,16 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_network_tcp_recv_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_accept_once" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_reply_once" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_server_open" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_server_accept" => {
+            Some(Type::Unknown("builtin".to_string()))
+        }
+        "__rune_builtin_network_tcp_server_reply" => {
+            Some(Type::Unknown("builtin".to_string()))
+        }
+        "__rune_builtin_network_tcp_server_close" => {
+            Some(Type::Unknown("builtin".to_string()))
+        }
         "__rune_builtin_network_last_error_code" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_last_error_message" => {
             Some(Type::Unknown("builtin".to_string()))

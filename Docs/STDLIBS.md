@@ -401,6 +401,7 @@ from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 from network import tcp_send_line, udp_send_line, tcp_recv, tcp_recv_timeout, udp_recv
 from network import tcp_request, request, request_line, recv, recv_timeout, recv_udp
 from network import tcp_accept_once, accept_once, tcp_reply_once, reply_once, reply_once_line
+from network import tcp_server_open, tcp_server_accept, tcp_server_reply, tcp_server_close
 from network import last_error_code, last_error, clear_error
 from network import connect, connect_timeout, probe, probe_timeout
 from network import listen, bind, send, send_line, send_udp, send_line_udp
@@ -431,6 +432,10 @@ Exports:
 - `tcp_reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 - `reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 - `reply_once_line(host: String, port: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_server_open(host: String, port: i32) -> i32`
+- `tcp_server_accept(handle: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_server_reply(handle: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_server_close(handle: i32) -> bool`
 - `last_error_code() -> i32`
 - `last_error() -> String`
 - `clear_error() -> unit`
@@ -463,6 +468,7 @@ Current implemented network scope:
 - TCP request/response helpers returning `String`
 - TCP one-shot server accept helpers returning the received payload as `String`
 - TCP one-shot reply helpers that return the received request body as `String`
+- low-level persistent TCP server handles through `tcp_server_open`, `tcp_server_accept`, `tcp_server_reply`, and `tcp_server_close`
 - UDP receive helpers returning `String`
 - last network error inspection through `last_error_code()` and `last_error()`
 - explicit error-state reset through `clear_error()`
@@ -472,6 +478,7 @@ Current implemented network scope:
 - class-style client/endpoint wrappers also expose `send_text` and `send_line_text` for callers that prefer explicit text payloads
 - the current receive/request slice is verified on native and LLVM executable paths
 - the current one-shot server accept/reply slice is also verified on native and LLVM executable paths
+- the current low-level persistent TCP server-handle slice is also verified on native and LLVM executable paths
 - the current error-state slice is verified on native and LLVM executable paths
 - Uno-class Arduino targets do not claim direct `network` support without a real backing network stack
 
