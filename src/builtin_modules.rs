@@ -1032,6 +1032,25 @@ fn json_program() -> Program {
     }
 }
 
+fn audio_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "bell",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name("__rune_builtin_audio_bell", vec![]))],
+            )),
+            Item::Function(function(
+                "beep",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name("bell", vec![]))],
+            )),
+        ],
+    }
+}
+
 fn serial_program() -> Program {
     let serial_port_methods = vec![
         function(
@@ -3274,6 +3293,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "json" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/json"),
             body: BuiltinModuleBody::Program(json_program()),
+        }),
+        [name] if name == "audio" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/audio"),
+            body: BuiltinModuleBody::Program(audio_program()),
         }),
         [name] if name == "network" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/network"),
