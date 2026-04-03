@@ -671,6 +671,31 @@ def main() -> i32:\n    let pwm = pwm_pin(9)\n    let sensor = analog_pin(9)\n  
 }
 
 #[test]
+fn builds_and_runs_builtin_gpio_function_surface_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("builtin_gpio_function_surface_demo.rn");
+    let exe_path = dir.join("builtin_gpio_function_surface_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from gpio import analog_in, analog_in_percent, analog_in_voltage_mv, digital_in, digital_out, pwm_duty_max, pwm_write\n\n\
+def main() -> i32:\n    digital_out(7, true)\n    println(digital_in(7))\n    pwm_write(9, 128)\n    println(analog_in(9))\n    println(analog_in_percent(9))\n    println(analog_in_voltage_mv(9, 5000))\n    println(pwm_duty_max())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("builtin gpio function-surface program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run builtin gpio function-surface executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\n128\n12\n625\n255\n");
+}
+
+#[test]
 fn builds_and_runs_stdlib_network_persistent_server_program() {
     let dir = temp_dir();
     let source_path = dir.join("stdlib_network_persistent_server.rn");

@@ -1720,6 +1720,32 @@ fn builds_arduino_uno_with_gpio_alias_factories() {
 }
 
 #[test]
+fn builds_arduino_uno_with_builtin_gpio_function_surface() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_builtin_gpio_functions.rn");
+    let output_path = dir.join("arduino_uno_builtin_gpio_functions.hex");
+
+    fs::write(
+        &source_path,
+        "from gpio import analog_in, analog_in_percent, digital_in, digital_in_pullup, digital_out, pwm_duty_max, pwm_write\n\n\
+         def main() -> i32:\n    digital_out(7, false)\n    println(digital_in(7))\n    println(digital_in_pullup(8))\n    pwm_write(9, pwm_duty_max() / 2)\n    println(analog_in(0))\n    println(analog_in_percent(0))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno built-in gpio function surface should build");
+
+    let bytes = fs::read(&output_path).expect("failed to read built-in gpio function hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_servo_serial_control_example() {
     let dir = temp_dir();
     let source_path = dir.join("servo_serial_control_arduino.rn");

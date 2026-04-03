@@ -941,6 +941,186 @@ fn gpio_program() -> Program {
                 span: s(),
             }),
             Item::Function(function(
+                "pin_mode",
+                vec![param("pin", "i64"), param("mode", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_gpio_pin_mode",
+                    vec![pos(ident("pin")), pos(ident("mode"))],
+                ))],
+            )),
+            Item::Function(function(
+                "mode_input",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_gpio_mode_input", vec![]))],
+            )),
+            Item::Function(function(
+                "mode_output",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_gpio_mode_output", vec![]))],
+            )),
+            Item::Function(function(
+                "mode_input_pullup",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_gpio_mode_input_pullup",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "digital_write",
+                vec![param("pin", "i64"), param("value", "bool")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_gpio_digital_write",
+                    vec![pos(ident("pin")), pos(ident("value"))],
+                ))],
+            )),
+            Item::Function(function(
+                "digital_read",
+                vec![param("pin", "i64")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_gpio_digital_read",
+                    vec![pos(ident("pin"))],
+                ))],
+            )),
+            Item::Function(function(
+                "digital_out",
+                vec![param("pin", "i64"), param("value", "bool")],
+                "unit",
+                vec![
+                    expr_stmt(call_name(
+                        "__rune_builtin_gpio_pin_mode",
+                        vec![
+                            pos(ident("pin")),
+                            pos(call_name("__rune_builtin_gpio_mode_output", vec![])),
+                        ],
+                    )),
+                    expr_stmt(call_name(
+                        "__rune_builtin_gpio_digital_write",
+                        vec![pos(ident("pin")), pos(ident("value"))],
+                    )),
+                ],
+            )),
+            Item::Function(function(
+                "digital_in",
+                vec![param("pin", "i64")],
+                "bool",
+                vec![
+                    expr_stmt(call_name(
+                        "__rune_builtin_gpio_pin_mode",
+                        vec![
+                            pos(ident("pin")),
+                            pos(call_name("__rune_builtin_gpio_mode_input", vec![])),
+                        ],
+                    )),
+                    return_stmt(call_name(
+                        "__rune_builtin_gpio_digital_read",
+                        vec![pos(ident("pin"))],
+                    )),
+                ],
+            )),
+            Item::Function(function(
+                "digital_in_pullup",
+                vec![param("pin", "i64")],
+                "bool",
+                vec![
+                    expr_stmt(call_name(
+                        "__rune_builtin_gpio_pin_mode",
+                        vec![
+                            pos(ident("pin")),
+                            pos(call_name("__rune_builtin_gpio_mode_input_pullup", vec![])),
+                        ],
+                    )),
+                    return_stmt(call_name(
+                        "__rune_builtin_gpio_digital_read",
+                        vec![pos(ident("pin"))],
+                    )),
+                ],
+            )),
+            Item::Function(function(
+                "pwm_write",
+                vec![param("pin", "i64"), param("duty", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_gpio_pwm_write",
+                    vec![pos(ident("pin")), pos(ident("duty"))],
+                ))],
+            )),
+            Item::Function(function(
+                "pwm_duty_max",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_gpio_pwm_duty_max", vec![]))],
+            )),
+            Item::Function(function(
+                "analog_read",
+                vec![param("pin", "i64")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_gpio_analog_read",
+                    vec![pos(ident("pin"))],
+                ))],
+            )),
+            Item::Function(function(
+                "analog_in",
+                vec![param("pin", "i64")],
+                "i64",
+                vec![return_stmt(call_name("analog_read", vec![pos(ident("pin"))]))],
+            )),
+            Item::Function(function(
+                "analog_max",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_gpio_analog_max", vec![]))],
+            )),
+            Item::Function(function(
+                "analog_read_percent",
+                vec![param("pin", "i64")],
+                "i64",
+                vec![return_stmt(binary(
+                    binary(call_name("analog_read", vec![pos(ident("pin"))]), BinaryOp::Multiply, int_lit(100)),
+                    BinaryOp::Divide,
+                    call_name("analog_max", vec![]),
+                ))],
+            )),
+            Item::Function(function(
+                "analog_in_percent",
+                vec![param("pin", "i64")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "analog_read_percent",
+                    vec![pos(ident("pin"))],
+                ))],
+            )),
+            Item::Function(function(
+                "analog_read_voltage_mv",
+                vec![param("pin", "i64"), param("reference_mv", "i64")],
+                "i64",
+                vec![return_stmt(binary(
+                    binary(
+                        call_name("analog_read", vec![pos(ident("pin"))]),
+                        BinaryOp::Multiply,
+                        ident("reference_mv"),
+                    ),
+                    BinaryOp::Divide,
+                    call_name("analog_max", vec![]),
+                ))],
+            )),
+            Item::Function(function(
+                "analog_in_voltage_mv",
+                vec![param("pin", "i64"), param("reference_mv", "i64")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "analog_read_voltage_mv",
+                    vec![pos(ident("pin")), pos(ident("reference_mv"))],
+                ))],
+            )),
+            Item::Function(function(
                 "gpio_pin",
                 vec![param("pin", "i64")],
                 "GpioPin",
