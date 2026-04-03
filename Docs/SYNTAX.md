@@ -336,6 +336,8 @@ Current exported functions:
 - `tcp_recv_timeout(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
 - `udp_recv(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
 - `tcp_request(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_accept_once(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 
 `gpio`
 - `gpio_pin(pin: i64) -> GpioPin`

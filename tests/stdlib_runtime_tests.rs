@@ -69,6 +69,48 @@ fn spawn_udp_send_server_on_port(port: u16, payload: &'static [u8]) -> thread::J
     })
 }
 
+fn spawn_tcp_client_send_on_port(port: u16, payload: &'static [u8]) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for _ in 0..40 {
+            match std::net::TcpStream::connect(("127.0.0.1", port)) {
+                Ok(mut stream) => {
+                    stream
+                        .write_all(payload)
+                        .expect("failed to write TCP client payload");
+                    return;
+                }
+                Err(_) => thread::sleep(std::time::Duration::from_millis(25)),
+            }
+        }
+        panic!("failed to connect TCP client to test server");
+    })
+}
+
+fn spawn_tcp_client_request_on_port(
+    port: u16,
+    payload: &'static [u8],
+    expected_response: &'static str,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for _ in 0..40 {
+            match std::net::TcpStream::connect(("127.0.0.1", port)) {
+                Ok(mut stream) => {
+                    stream
+                        .write_all(payload)
+                        .expect("failed to write TCP request payload");
+                    let mut response = [0u8; 128];
+                    let read = stream.read(&mut response).expect("failed to read reply");
+                    let text = String::from_utf8_lossy(&response[..read]).to_string();
+                    assert_eq!(text, expected_response);
+                    return;
+                }
+                Err(_) => thread::sleep(std::time::Duration::from_millis(25)),
+            }
+        }
+        panic!("failed to connect TCP client to reply server");
+    })
+}
+
 #[test]
 fn builds_and_runs_stdlib_env_fs_system_time_program() {
     let dir = temp_dir();
@@ -470,6 +512,64 @@ def main() -> i32:
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "hello recv\n\npong\n\nhello udp\n");
+}
+
+#[test]
+fn builds_and_runs_stdlib_network_server_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("stdlib_network_server.rn");
+    let exe_path = dir.join("stdlib_network_server.exe");
+    let accept_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve accept port");
+    let accept_port = accept_probe.local_addr().expect("accept probe addr").port() as i32;
+    drop(accept_probe);
+    let reply_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve reply port");
+    let reply_port = reply_probe.local_addr().expect("reply probe addr").port() as i32;
+    drop(reply_probe);
+    let method_probe = TcpListener::bind("127.0.0.1:0").expect("failed to reserve method port");
+    let method_port = method_probe.local_addr().expect("method probe addr").port() as i32;
+    drop(method_probe);
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"from network import accept_once, reply_once_line, tcp_server
+
+def main() -> i32:
+    let server = tcp_server("127.0.0.1", {2})
+    println(accept_once("127.0.0.1", {0}, 64, 1000))
+    println(reply_once_line("127.0.0.1", {1}, "pong", 64, 1000))
+    println(server.reply_once_line("hi", 64, 1000))
+    return 0
+"#,
+            accept_port, reply_port, method_port
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("network server program should build");
+
+    let child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run network server program");
+
+    let client_a = spawn_tcp_client_send_on_port(accept_port as u16, b"hello server");
+    let client_b = spawn_tcp_client_request_on_port(reply_port as u16, b"ping\n", "pong\n");
+    let client_c = spawn_tcp_client_request_on_port(method_port as u16, b"yo\n", "hi\n");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for network server program");
+
+    client_a.join().expect("accept client should finish");
+    client_b.join().expect("reply client should finish");
+    client_c.join().expect("method reply client should finish");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "hello server\nping\n\nyo\n\n");
 }
 
 

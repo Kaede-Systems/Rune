@@ -5116,6 +5116,12 @@ function createHost(options = {{}}) {{
       rune_rt_network_tcp_recv_timeout(ptr, len, port, maxBytes, timeoutMs) {{
         throw new Error("Rune network receive builtins are not supported for wasm32-unknown-unknown");
       }},
+      rune_rt_network_tcp_accept_once(ptr, len, port, maxBytes, timeoutMs) {{
+        throw new Error("Rune network server builtins are not supported for wasm32-unknown-unknown");
+      }},
+      rune_rt_network_tcp_reply_once(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
+        throw new Error("Rune network server builtins are not supported for wasm32-unknown-unknown");
+      }},
       rune_rt_network_tcp_request(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
         throw new Error("Rune network request builtins are not supported for wasm32-unknown-unknown");
       }},
@@ -8063,6 +8069,32 @@ pub extern "C" fn rune_rt_network_tcp_recv_timeout(
 
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_accept_once(
+    _ptr: *const u8,
+    _len: i64,
+    _port: i32,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_reply_once(
+    _host_ptr: *const u8,
+    _host_len: i64,
+    _port: i32,
+    _data_ptr: *const u8,
+    _data_len: i64,
+    _max_bytes: i32,
+    _timeout_ms: i32,
+) -> *const u8 {
+    rune_rt_store_string(String::new())
+}
+
+#[cfg(target_os = "wasi")]
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_request(
     _host_ptr: *const u8,
     _host_len: i64,
@@ -8165,6 +8197,106 @@ pub extern "C" fn rune_rt_network_tcp_recv_timeout(
         }
     }
     rune_rt_store_string(String::new())
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_accept_once(
+    ptr: *const u8,
+    len: i64,
+    port: i32,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        return rune_rt_store_string(String::new());
+    }
+    let host = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP accept host must be valid UTF-8");
+    let listener = match TcpListener::bind((host, port as u16)) {
+        Ok(listener) => listener,
+        Err(_) => return rune_rt_store_string(String::new()),
+    };
+    if listener.set_nonblocking(true).is_err() {
+        return rune_rt_store_string(String::new());
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+                let mut buffer = vec![0u8; max_bytes as usize];
+                return match std::io::Read::read(&mut stream, &mut buffer) {
+                    Ok(read) => {
+                        buffer.truncate(read);
+                        rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
+                    }
+                    Err(_) => rune_rt_store_string(String::new()),
+                };
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return rune_rt_store_string(String::new());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => return rune_rt_store_string(String::new()),
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_tcp_reply_once(
+    host_ptr: *const u8,
+    host_len: i64,
+    port: i32,
+    data_ptr: *const u8,
+    data_len: i64,
+    max_bytes: i32,
+    timeout_ms: i32,
+) -> *const u8 {
+    if port < 0 || port > u16::MAX as i32 || max_bytes < 0 || timeout_ms < 0 {
+        return rune_rt_store_string(String::new());
+    }
+    let host = unsafe { std::slice::from_raw_parts(host_ptr, host_len as usize) };
+    let host = std::str::from_utf8(host).expect("TCP reply host must be valid UTF-8");
+    let data = unsafe { std::slice::from_raw_parts(data_ptr, data_len as usize) };
+    let data = std::str::from_utf8(data).expect("TCP reply data must be valid UTF-8");
+    let listener = match TcpListener::bind((host, port as u16)) {
+        Ok(listener) => listener,
+        Err(_) => return rune_rt_store_string(String::new()),
+    };
+    if listener.set_nonblocking(true).is_err() {
+        return rune_rt_store_string(String::new());
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)));
+                let mut buffer = vec![0u8; max_bytes as usize];
+                let request = match std::io::Read::read(&mut stream, &mut buffer) {
+                    Ok(read) => {
+                        buffer.truncate(read);
+                        String::from_utf8_lossy(&buffer).to_string()
+                    }
+                    Err(_) => return rune_rt_store_string(String::new()),
+                };
+                if std::io::Write::write_all(&mut stream, data.as_bytes()).is_err() {
+                    return rune_rt_store_string(String::new());
+                }
+                return rune_rt_store_string(request);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return rune_rt_store_string(String::new());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => return rune_rt_store_string(String::new()),
+        }
+    }
 }
 
 #[cfg(not(target_os = "wasi"))]

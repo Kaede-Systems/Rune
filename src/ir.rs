@@ -961,6 +961,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_env_get_string"
         | "__rune_builtin_network_tcp_recv"
         | "__rune_builtin_network_tcp_recv_timeout"
+        | "__rune_builtin_network_tcp_accept_once"
+        | "__rune_builtin_network_tcp_reply_once"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv" => Some(IrType::String),
         "__rune_builtin_env_exists"

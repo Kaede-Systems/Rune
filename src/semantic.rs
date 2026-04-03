@@ -2011,6 +2011,71 @@ impl<'a> Analyzer<'a> {
                     self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
                     Ok(Type::String)
                 }
+                "__rune_builtin_network_tcp_accept_once" => {
+                    if args.len() != 4 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_accept_once` expects 4 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                        CallArg::Positional(max_expr),
+                        CallArg::Positional(timeout_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_accept_once` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "TCP host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "TCP port")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "TCP receive size")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
+                    Ok(Type::String)
+                }
+                "__rune_builtin_network_tcp_reply_once" => {
+                    if args.len() != 5 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_reply_once` expects 5 arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    let [
+                        CallArg::Positional(host_expr),
+                        CallArg::Positional(port_expr),
+                        CallArg::Positional(data_expr),
+                        CallArg::Positional(max_expr),
+                        CallArg::Positional(timeout_expr),
+                    ] = args
+                    else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_network_tcp_reply_once` does not accept keyword arguments"
+                                .to_string(),
+                            span,
+                        });
+                    };
+                    let host_ty = self.check_expr(host_expr, scope, in_async)?;
+                    self.expect_type(&host_ty, &Type::String, host_expr.span, "TCP host")?;
+                    let port_ty = self.check_expr(port_expr, scope, in_async)?;
+                    self.expect_type(&port_ty, &Type::I32, port_expr.span, "TCP port")?;
+                    let data_ty = self.check_expr(data_expr, scope, in_async)?;
+                    self.expect_type(&data_ty, &Type::String, data_expr.span, "TCP reply data")?;
+                    let max_ty = self.check_expr(max_expr, scope, in_async)?;
+                    self.expect_type(&max_ty, &Type::I32, max_expr.span, "TCP receive size")?;
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_type(&timeout_ty, &Type::I32, timeout_expr.span, "TCP timeout")?;
+                    Ok(Type::String)
+                }
                 "__rune_builtin_fs_exists" => {
                     if args.len() != 1 {
                         return Err(SemanticError {
@@ -3230,6 +3295,8 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_network_tcp_connect_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_recv" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_recv_timeout" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_accept_once" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_network_tcp_reply_once" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_request" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_bind" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_send" => Some(Type::Unknown("builtin".to_string())),

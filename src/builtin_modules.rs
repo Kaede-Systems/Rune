@@ -1138,6 +1138,105 @@ fn network_program() -> Program {
         ),
     ];
 
+    let tcp_server_methods = vec![
+        function(
+            "listen",
+            vec![param("self", "dynamic")],
+            "bool",
+            vec![return_stmt(call_name(
+                "tcp_listen",
+                vec![pos(field(ident("self"), "host")), pos(field(ident("self"), "port"))],
+            ))],
+        ),
+        function(
+            "bind",
+            vec![param("self", "dynamic")],
+            "bool",
+            vec![return_stmt(call_name(
+                "tcp_bind",
+                vec![pos(field(ident("self"), "host")), pos(field(ident("self"), "port"))],
+            ))],
+        ),
+        function(
+            "accept_once",
+            vec![
+                param("self", "dynamic"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_accept_once",
+                vec![
+                    pos(field(ident("self"), "host")),
+                    pos(field(ident("self"), "port")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "reply_once",
+            vec![
+                param("self", "dynamic"),
+                param("value", "dynamic"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_reply_once",
+                vec![
+                    pos(field(ident("self"), "host")),
+                    pos(field(ident("self"), "port")),
+                    pos(call_name("str", vec![pos(ident("value"))])),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "reply_once_line",
+            vec![
+                param("self", "dynamic"),
+                param("value", "dynamic"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "reply_once_line",
+                vec![
+                    pos(field(ident("self"), "host")),
+                    pos(field(ident("self"), "port")),
+                    pos(ident("value")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+        function(
+            "reply_once_text",
+            vec![
+                param("self", "dynamic"),
+                param("value", "String"),
+                param("max_bytes", "i32"),
+                param("timeout_ms", "i32"),
+            ],
+            "String",
+            vec![return_stmt(call_name(
+                "tcp_reply_once",
+                vec![
+                    pos(field(ident("self"), "host")),
+                    pos(field(ident("self"), "port")),
+                    pos(ident("value")),
+                    pos(ident("max_bytes")),
+                    pos(ident("timeout_ms")),
+                ],
+            ))],
+        ),
+    ];
+
     let udp_endpoint_methods = vec![
         function(
             "bind",
@@ -1531,6 +1630,111 @@ fn network_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "tcp_accept_once",
+                vec![
+                    param("host", "String"),
+                    param("port", "i32"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_accept_once",
+                    vec![
+                        pos(ident("host")),
+                        pos(ident("port")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "accept_once",
+                vec![
+                    param("host", "String"),
+                    param("port", "i32"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "tcp_accept_once",
+                    vec![
+                        pos(ident("host")),
+                        pos(ident("port")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_reply_once",
+                vec![
+                    param("host", "String"),
+                    param("port", "i32"),
+                    param("data", "String"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_network_tcp_reply_once",
+                    vec![
+                        pos(ident("host")),
+                        pos(ident("port")),
+                        pos(ident("data")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "reply_once",
+                vec![
+                    param("host", "String"),
+                    param("port", "i32"),
+                    param("data", "String"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "tcp_reply_once",
+                    vec![
+                        pos(ident("host")),
+                        pos(ident("port")),
+                        pos(ident("data")),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
+                "reply_once_line",
+                vec![
+                    param("host", "String"),
+                    param("port", "i32"),
+                    param("value", "dynamic"),
+                    param("max_bytes", "i32"),
+                    param("timeout_ms", "i32"),
+                ],
+                "String",
+                vec![return_stmt(call_name(
+                    "tcp_reply_once",
+                    vec![
+                        pos(ident("host")),
+                        pos(ident("port")),
+                        pos(binary(
+                            call_name("str", vec![pos(ident("value"))]),
+                            BinaryOp::Add,
+                            string_lit("\n"),
+                        )),
+                        pos(ident("max_bytes")),
+                        pos(ident("timeout_ms")),
+                    ],
+                ))],
+            )),
+            Item::Function(function(
                 "request",
                 vec![
                     param("host", "String"),
@@ -1678,12 +1882,38 @@ fn network_program() -> Program {
                 methods: udp_endpoint_methods,
                 span: s(),
             }),
+            Item::Struct(StructDecl {
+                name: "TcpServer".to_string(),
+                fields: vec![
+                    StructField {
+                        name: "host".to_string(),
+                        ty: ty("String"),
+                        span: s(),
+                    },
+                    StructField {
+                        name: "port".to_string(),
+                        ty: ty("i32"),
+                        span: s(),
+                    },
+                ],
+                methods: tcp_server_methods,
+                span: s(),
+            }),
             Item::Function(function(
                 "tcp_client",
                 vec![param("host", "String"), param("port", "i32")],
                 "TcpClient",
                 vec![return_stmt(call_expr(
                     ident("TcpClient"),
+                    vec![kw("host", ident("host")), kw("port", ident("port"))],
+                ))],
+            )),
+            Item::Function(function(
+                "tcp_server",
+                vec![param("host", "String"), param("port", "i32")],
+                "TcpServer",
+                vec![return_stmt(call_expr(
+                    ident("TcpServer"),
                     vec![kw("host", ident("host")), kw("port", ident("port"))],
                 ))],
             )),

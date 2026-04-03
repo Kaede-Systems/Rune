@@ -400,9 +400,10 @@ from network import tcp_probe, tcp_probe_timeout
 from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 from network import tcp_send_line, udp_send_line, tcp_recv, tcp_recv_timeout, udp_recv
 from network import tcp_request, request, request_line, recv, recv_timeout, recv_udp
+from network import tcp_accept_once, accept_once, tcp_reply_once, reply_once, reply_once_line
 from network import connect, connect_timeout, probe, probe_timeout
 from network import listen, bind, send, send_line, send_udp, send_line_udp
-from network import TcpClient, UdpEndpoint, tcp_client, udp_endpoint
+from network import TcpClient, TcpServer, UdpEndpoint, tcp_client, tcp_server, udp_endpoint
 ```
 
 Exports:
@@ -424,6 +425,11 @@ Exports:
 - `tcp_request(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 - `request(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
 - `request_line(host: String, port: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_accept_once(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `accept_once(host: String, port: i32, max_bytes: i32, timeout_ms: i32) -> String`
+- `tcp_reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `reply_once(host: String, port: i32, data: String, max_bytes: i32, timeout_ms: i32) -> String`
+- `reply_once_line(host: String, port: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
 - `connect(host: String, port: i32) -> bool`
 - `connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
 - `probe(host: String, port: i32) -> bool`
@@ -435,8 +441,10 @@ Exports:
 - `send_udp(host: String, port: i32, data: String) -> bool`
 - `send_line_udp(host: String, port: i32, value: dynamic) -> bool`
 - `TcpClient`
+- `TcpServer`
 - `UdpEndpoint`
 - `tcp_client(host: String, port: i32) -> TcpClient`
+- `tcp_server(host: String, port: i32) -> TcpServer`
 - `udp_endpoint(host: String, port: i32) -> UdpEndpoint`
 
 Current implemented network scope:
@@ -449,16 +457,20 @@ Current implemented network scope:
 - TCP receive helpers returning `String`
 - timeout-aware TCP receive
 - TCP request/response helpers returning `String`
+- TCP one-shot server accept helpers returning the received payload as `String`
+- TCP one-shot reply helpers that return the received request body as `String`
 - UDP receive helpers returning `String`
 - class-style client/endpoint wrappers using the same `connect`, `probe`, `send`, and `send_line` names
 - class-style client/endpoint wrappers using the same `connect`, `bind`, `probe`, `send`, `send_line`, `recv`, `recv_timeout`, `request`, `request_line`, `send_text`, and `send_line_text` names
+- `TcpServer` exposes `listen`, `bind`, `accept_once`, `reply_once`, `reply_once_line`, and `reply_once_text`
 - class-style client/endpoint wrappers also expose `send_text` and `send_line_text` for callers that prefer explicit text payloads
 - the current receive/request slice is verified on native and LLVM executable paths
+- the current one-shot server accept/reply slice is also verified on native and LLVM executable paths
 - Uno-class Arduino targets do not claim direct `network` support without a real backing network stack
 
 Not implemented in this module yet:
 
-- TCP server accept/send/receive
+- persistent TCP server socket lifecycle and multi-client accept loops
 - HTTP
 - WebSocket
 

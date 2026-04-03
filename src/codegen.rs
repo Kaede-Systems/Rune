@@ -1873,6 +1873,62 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_network_tcp_accept_once" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(max_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_accept_once` expects 4 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP accept host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_into_reg(out, "r9d", max_expr)?;
+            out.push_str("    sub rsp, 48\n");
+            self.emit_into_reg(out, "r10d", timeout_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
+            out.push_str("    call rune_rt_network_tcp_accept_once\n");
+            out.push_str("    add rsp, 48\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_network_tcp_reply_once" {
+            let [
+                CallArg::Positional(host_expr),
+                CallArg::Positional(port_expr),
+                CallArg::Positional(data_expr),
+                CallArg::Positional(max_expr),
+                CallArg::Positional(timeout_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_network_tcp_reply_once` expects 5 positional arguments"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP reply host")?;
+            self.emit_into_reg(out, "r8d", port_expr)?;
+            self.emit_string_arg(out, data_expr, "r9", "r10", "TCP reply data")?;
+            out.push_str("    sub rsp, 64\n");
+            out.push_str("    mov QWORD PTR [rsp+32], r10\n");
+            self.emit_into_reg(out, "r10d", max_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+40], r10d\n");
+            self.emit_into_reg(out, "r10d", timeout_expr)?;
+            out.push_str("    mov DWORD PTR [rsp+48], r10d\n");
+            out.push_str("    call rune_rt_network_tcp_reply_once\n");
+            out.push_str("    add rsp, 64\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_network_udp_bind" {
             let [
                 CallArg::Positional(host_expr),
@@ -3593,6 +3649,56 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str("    mov DWORD PTR [rsp+48], r10d\n");
                 out.push_str("    call rune_rt_network_tcp_request\n");
                 out.push_str("    add rsp, 64\n");
+            } else if name == "__rune_builtin_network_tcp_accept_once" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(max_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_accept_once` expects 4 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP accept host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_into_reg(out, "r9d", max_expr)?;
+                out.push_str("    sub rsp, 48\n");
+                self.emit_into_reg(out, "r10d", timeout_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+32], r10d\n");
+                out.push_str("    call rune_rt_network_tcp_accept_once\n");
+                out.push_str("    add rsp, 48\n");
+            } else if name == "__rune_builtin_network_tcp_reply_once" {
+                let [
+                    CallArg::Positional(host_expr),
+                    CallArg::Positional(port_expr),
+                    CallArg::Positional(data_expr),
+                    CallArg::Positional(max_expr),
+                    CallArg::Positional(timeout_expr),
+                ] = args.as_slice()
+                else {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_tcp_reply_once` expects 5 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                };
+                self.emit_string_arg(out, host_expr, "rcx", "rdx", "TCP reply host")?;
+                self.emit_into_reg(out, "r8d", port_expr)?;
+                self.emit_string_arg(out, data_expr, "r9", "r10", "TCP reply data")?;
+                out.push_str("    sub rsp, 64\n");
+                out.push_str("    mov QWORD PTR [rsp+32], r10\n");
+                self.emit_into_reg(out, "r10d", max_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+40], r10d\n");
+                self.emit_into_reg(out, "r10d", timeout_expr)?;
+                out.push_str("    mov DWORD PTR [rsp+48], r10d\n");
+                out.push_str("    call rune_rt_network_tcp_reply_once\n");
+                out.push_str("    add rsp, 64\n");
             } else if name == "__rune_builtin_network_udp_recv" {
                 let [
                     CallArg::Positional(host_expr),
@@ -4979,6 +5085,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_env_get_string"
         | "__rune_builtin_network_tcp_recv"
         | "__rune_builtin_network_tcp_recv_timeout"
+        | "__rune_builtin_network_tcp_accept_once"
+        | "__rune_builtin_network_tcp_reply_once"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv"
         | "__rune_builtin_fs_read_string" => Some(IrType::String),

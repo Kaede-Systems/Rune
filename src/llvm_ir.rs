@@ -1721,6 +1721,58 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_network_tcp_accept_once" => {
+                self.expect_plain_arity(callee, args, 4)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let max_bytes = self.resolve_value(&args[2].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[3].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare ptr @rune_rt_network_tcp_accept_once(ptr, i64, i32, i32, i32)\n"
+                        .into(),
+                );
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_accept_once({ptr}, {len}, i32 {port}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "__rune_builtin_network_tcp_reply_once" => {
+                self.expect_plain_arity(callee, args, 5)?;
+                let rendered_host = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (host_ptr, host_len) = split_string_value(&rendered_host)?;
+                let port = self.resolve_value(&args[1].value, &IrType::I32, out)?;
+                let rendered_data = self.resolve_value(&args[2].value, &IrType::String, out)?;
+                let (data_ptr, data_len) = split_string_value(&rendered_data)?;
+                let max_bytes = self.resolve_value(&args[3].value, &IrType::I32, out)?;
+                let timeout = self.resolve_value(&args[4].value, &IrType::I32, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime.insert(
+                    "declare ptr @rune_rt_network_tcp_reply_once(ptr, i64, i32, ptr, i64, i32, i32)\n"
+                        .into(),
+                );
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_network_tcp_reply_once({host_ptr}, {host_len}, i32 {port}, {data_ptr}, {data_len}, i32 {max_bytes}, i32 {timeout})\n"
+                ));
+                out.push_str(&format!("  {len_reg} = call i64 @rune_rt_last_string_len()\n"));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             "__rune_builtin_network_udp_bind" => {
                 self.expect_plain_arity(callee, args, 2)?;
                 let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -3547,6 +3599,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_env_get_string"
         | "__rune_builtin_network_tcp_recv"
         | "__rune_builtin_network_tcp_recv_timeout"
+        | "__rune_builtin_network_tcp_accept_once"
+        | "__rune_builtin_network_tcp_reply_once"
         | "__rune_builtin_network_tcp_request"
         | "__rune_builtin_network_udp_recv"
         | "__rune_builtin_json_kind"
