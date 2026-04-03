@@ -2057,6 +2057,221 @@ fn gpio_program() -> Program {
     }
 }
 
+fn pwm_program() -> Program {
+    let pwm_methods = vec![
+        function(
+            "output",
+            vec![param("self", "dynamic")],
+            "unit",
+            vec![expr_stmt(call_name("pin_mode", vec![
+                pos(field(ident("self"), "pin")),
+                pos(call_name("mode_output", vec![])),
+            ]))],
+        ),
+        function(
+            "write",
+            vec![param("self", "dynamic"), param("duty", "i64")],
+            "unit",
+            vec![expr_stmt(call_name(
+                "__rune_builtin_gpio_pwm_write",
+                vec![pos(field(ident("self"), "pin")), pos(ident("duty"))],
+            ))],
+        ),
+        function(
+            "max_duty",
+            vec![param("self", "dynamic")],
+            "i64",
+            vec![return_stmt(call_name(
+                "__rune_builtin_gpio_pwm_duty_max",
+                vec![],
+            ))],
+        ),
+        function(
+            "off",
+            vec![param("self", "dynamic")],
+            "unit",
+            vec![expr_stmt(call_name(
+                "__rune_builtin_gpio_pwm_write",
+                vec![pos(field(ident("self"), "pin")), pos(int_lit(0))],
+            ))],
+        ),
+    ];
+
+    Program {
+        items: vec![
+            Item::Struct(StructDecl {
+                name: "PwmPin".to_string(),
+                fields: vec![StructField {
+                    name: "pin".to_string(),
+                    ty: ty("i64"),
+                    span: s(),
+                }],
+                methods: pwm_methods,
+                span: s(),
+            }),
+            Item::Function(function(
+                "pin_mode",
+                vec![param("pin", "i64"), param("mode", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_gpio_pin_mode",
+                    vec![pos(ident("pin")), pos(ident("mode"))],
+                ))],
+            )),
+            Item::Function(function(
+                "mode_output",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_gpio_mode_output", vec![]))],
+            )),
+            Item::Function(function(
+                "write",
+                vec![param("pin", "i64"), param("duty", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_gpio_pwm_write",
+                    vec![pos(ident("pin")), pos(ident("duty"))],
+                ))],
+            )),
+            Item::Function(function(
+                "max_duty",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_gpio_pwm_duty_max",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "pwm_pin",
+                vec![param("pin", "i64")],
+                "PwmPin",
+                vec![return_stmt(call_expr(
+                    ident("PwmPin"),
+                    vec![kw("pin", ident("pin"))],
+                ))],
+            )),
+        ],
+    }
+}
+
+fn adc_program() -> Program {
+    let analog_methods = vec![
+        function(
+            "read",
+            vec![param("self", "dynamic")],
+            "i64",
+            vec![return_stmt(call_name(
+                "__rune_builtin_gpio_analog_read",
+                vec![pos(field(ident("self"), "pin"))],
+            ))],
+        ),
+        function(
+            "max",
+            vec![param("self", "dynamic")],
+            "i64",
+            vec![return_stmt(call_name("__rune_builtin_gpio_analog_max", vec![]))],
+        ),
+        function(
+            "read_percent",
+            vec![param("self", "dynamic")],
+            "i64",
+            vec![return_stmt(binary(
+                binary(
+                    call_name(
+                        "__rune_builtin_gpio_analog_read",
+                        vec![pos(field(ident("self"), "pin"))],
+                    ),
+                    BinaryOp::Multiply,
+                    int_lit(100),
+                ),
+                BinaryOp::Divide,
+                call_name("__rune_builtin_gpio_analog_max", vec![]),
+            ))],
+        ),
+        function(
+            "read_voltage_mv",
+            vec![param("self", "dynamic"), param("reference_mv", "i64")],
+            "i64",
+            vec![return_stmt(binary(
+                binary(
+                    call_name(
+                        "__rune_builtin_gpio_analog_read",
+                        vec![pos(field(ident("self"), "pin"))],
+                    ),
+                    BinaryOp::Multiply,
+                    ident("reference_mv"),
+                ),
+                BinaryOp::Divide,
+                call_name("__rune_builtin_gpio_analog_max", vec![]),
+            ))],
+        ),
+    ];
+
+    Program {
+        items: vec![
+            Item::Struct(StructDecl {
+                name: "AdcPin".to_string(),
+                fields: vec![StructField {
+                    name: "pin".to_string(),
+                    ty: ty("i64"),
+                    span: s(),
+                }],
+                methods: analog_methods,
+                span: s(),
+            }),
+            Item::Function(function(
+                "read",
+                vec![param("pin", "i64")],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_gpio_analog_read",
+                    vec![pos(ident("pin"))],
+                ))],
+            )),
+            Item::Function(function(
+                "max",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("__rune_builtin_gpio_analog_max", vec![]))],
+            )),
+            Item::Function(function(
+                "read_percent",
+                vec![param("pin", "i64")],
+                "i64",
+                vec![return_stmt(binary(
+                    binary(call_name("read", vec![pos(ident("pin"))]), BinaryOp::Multiply, int_lit(100)),
+                    BinaryOp::Divide,
+                    call_name("max", vec![]),
+                ))],
+            )),
+            Item::Function(function(
+                "read_voltage_mv",
+                vec![param("pin", "i64"), param("reference_mv", "i64")],
+                "i64",
+                vec![return_stmt(binary(
+                    binary(
+                        call_name("read", vec![pos(ident("pin"))]),
+                        BinaryOp::Multiply,
+                        ident("reference_mv"),
+                    ),
+                    BinaryOp::Divide,
+                    call_name("max", vec![]),
+                ))],
+            )),
+            Item::Function(function(
+                "adc_pin",
+                vec![param("pin", "i64")],
+                "AdcPin",
+                vec![return_stmt(call_expr(
+                    ident("AdcPin"),
+                    vec![kw("pin", ident("pin"))],
+                ))],
+            )),
+        ],
+    }
+}
+
 fn network_program() -> Program {
     let tcp_client_methods = vec![
         function(
@@ -3420,6 +3635,14 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "gpio" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/gpio"),
             body: BuiltinModuleBody::Program(gpio_program()),
+        }),
+        [name] if name == "pwm" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/pwm"),
+            body: BuiltinModuleBody::Program(pwm_program()),
+        }),
+        [name] if name == "adc" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/adc"),
+            body: BuiltinModuleBody::Program(adc_program()),
         }),
         _ => None,
     }

@@ -74,11 +74,11 @@ fn loads_relative_imports() {
 }
 
 #[test]
-fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_and_gpio_modules_from_registry() {
+fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_gpio_pwm_and_adc_modules_from_registry() {
     let dir = temp_dir();
     fs::write(
         dir.join("main.rn"),
-        "from env import get_or_empty\nfrom time import monotonic_ms\nfrom sys import platform\nfrom system import cpu_count\nfrom io import writeln\nfrom terminal import home\nfrom fs import exists\nfrom json import parse, kind\nfrom audio import beep\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    home()\n    writeln(get_or_empty(\"RUNE_TEST\"))\n    println(monotonic_ms())\n    println(platform())\n    println(cpu_count())\n    println(exists(\"main.rn\"))\n    println(kind(parse(\"1\")))\n    println(str(beep()))\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    return 0\n",
+        "from env import get_or_empty\nfrom time import monotonic_ms\nfrom sys import platform\nfrom system import cpu_count\nfrom io import writeln\nfrom terminal import home\nfrom fs import exists\nfrom json import parse, kind\nfrom audio import beep\nfrom network import connect\nfrom serial import serial_port\nfrom gpio import gpio_pin\nfrom pwm import pwm_pin\nfrom adc import adc_pin\n\ndef main() -> i32:\n    let serial = serial_port(\"COM5\", 115200)\n    let pin = gpio_pin(13)\n    let pwm = pwm_pin(9)\n    let adc = adc_pin(0)\n    home()\n    writeln(get_or_empty(\"RUNE_TEST\"))\n    println(monotonic_ms())\n    println(platform())\n    println(cpu_count())\n    println(exists(\"main.rn\"))\n    println(kind(parse(\"1\")))\n    println(str(beep()))\n    println(connect(\"127.0.0.1\", 65535))\n    println(str(serial))\n    println(str(pin))\n    println(str(pwm))\n    println(str(adc))\n    return 0\n",
     )
     .unwrap();
 
@@ -95,6 +95,8 @@ fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_an
     let network_path = PathBuf::from("<builtin>/network");
     let serial_path = PathBuf::from("<builtin>/serial");
     let gpio_path = PathBuf::from("<builtin>/gpio");
+    let pwm_path = PathBuf::from("<builtin>/pwm");
+    let adc_path = PathBuf::from("<builtin>/adc");
     assert!(bundle.sources.contains_key(&env_path));
     assert!(bundle.sources.contains_key(&time_path));
     assert!(bundle.sources.contains_key(&sys_path));
@@ -107,6 +109,8 @@ fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_an
     assert!(bundle.sources.contains_key(&network_path));
     assert!(bundle.sources.contains_key(&serial_path));
     assert!(bundle.sources.contains_key(&gpio_path));
+    assert!(bundle.sources.contains_key(&pwm_path));
+    assert!(bundle.sources.contains_key(&adc_path));
     assert_eq!(bundle.function_origins.get("get_or_empty"), Some(&env_path));
     assert_eq!(bundle.function_origins.get("monotonic_ms"), Some(&time_path));
     assert_eq!(bundle.function_origins.get("cpu_count"), Some(&system_path));
@@ -123,4 +127,6 @@ fn loads_builtin_env_time_sys_system_io_terminal_fs_json_audio_network_serial_an
     assert_eq!(bundle.function_origins.get("tcp_client"), Some(&network_path));
     assert_eq!(bundle.function_origins.get("serial_port"), Some(&serial_path));
     assert_eq!(bundle.function_origins.get("gpio_pin"), Some(&gpio_path));
+    assert_eq!(bundle.function_origins.get("pwm_pin"), Some(&pwm_path));
+    assert_eq!(bundle.function_origins.get("adc_pin"), Some(&adc_path));
 }

@@ -62,7 +62,7 @@ Rune is aiming at:
 
 ### Standard Library Surface
 
-Current stdlib modules live under [stdlib](stdlib):
+Current stdlib modules are available through Rune's default stdlib registry. Many are now native built-in modules; lower-level source-backed modules remain under [stdlib](stdlib) while they are migrated:
 
 - `env`
 - `fs`
@@ -70,6 +70,8 @@ Current stdlib modules live under [stdlib](stdlib):
 - `json`
 - `network`
 - `gpio`
+- `pwm`
+- `adc`
 - `serial`
 - `system`
 - `terminal`
@@ -86,6 +88,8 @@ Current class-style stdlib wrappers include:
 - `gpio.GpioPin`
 - `gpio.GpioPwm`
 - `gpio.GpioAnalogIn`
+- `pwm.PwmPin`
+- `adc.AdcPin`
 - `serial.SerialPort`
 - `network.TcpClient`
 - `network.UdpEndpoint`

@@ -5,7 +5,7 @@ This document lists the Rune standard library modules that are implemented today
 These modules are part of Rune's default stdlib registry.
 
 Current loading model:
-- `env`, `network`, `serial`, and `gpio` are now registered directly in Rust and loaded from the built-in module registry.
+- `env`, `time`, `sys`, `system`, `io`, `terminal`, `fs`, `json`, `audio`, `network`, `serial`, `gpio`, `pwm`, and `adc` are now registered directly in Rust and loaded from the built-in module registry.
 - the remaining stdlib modules are still loaded from [`stdlib/`](/C:/Users/kaededevkentohinode/KUROX/stdlib) while they are migrated.
 - this keeps the migration honest: each module is moved only when its real registry-backed path is working end to end.
 
@@ -182,6 +182,72 @@ Current GPIO limitations:
 - today this module is backed by the Arduino Uno target only
 - it exists to give Rune a common GPIO-facing surface that can later gain Raspberry Pi and ESP32 backends honestly
 - Raspberry Pi and ESP32 are not implemented yet, so `gpio` is not a claim that those targets already work
+
+## `pwm`
+
+```rune
+from pwm import pwm_pin, write, max_duty
+```
+
+Exports:
+
+- `PwmPin`
+- `pwm_pin(pin: i64) -> PwmPin`
+- `write(pin: i64, duty: i64) -> unit`
+- `max_duty() -> i64`
+- `pin_mode(pin: i64, mode: i64) -> unit`
+- `mode_output() -> i64`
+
+`PwmPin` methods:
+
+- `.output()`
+- `.write(duty: i64)`
+- `.max_duty() -> i64`
+- `.off()`
+
+Current implemented PWM scope:
+
+- Rust-side built-in module on top of the current shared GPIO runtime hooks
+- works on the current native, LLVM, and Arduino Uno paths
+- today this is still backed by the current Uno-style PWM behavior under the hood
+
+Current PWM limitations:
+
+- Raspberry Pi and ESP32 PWM backends are not implemented yet
+- this module is a shared surface, not a claim of finished non-Uno embedded support
+
+## `adc`
+
+```rune
+from adc import adc_pin, read, read_percent, read_voltage_mv, max
+```
+
+Exports:
+
+- `AdcPin`
+- `adc_pin(pin: i64) -> AdcPin`
+- `read(pin: i64) -> i64`
+- `read_percent(pin: i64) -> i64`
+- `read_voltage_mv(pin: i64, reference_mv: i64) -> i64`
+- `max() -> i64`
+
+`AdcPin` methods:
+
+- `.read() -> i64`
+- `.read_percent() -> i64`
+- `.read_voltage_mv(reference_mv: i64) -> i64`
+- `.max() -> i64`
+
+Current implemented ADC scope:
+
+- Rust-side built-in module on top of the current shared GPIO runtime hooks
+- works on the current native, LLVM, and Arduino Uno paths
+- voltage conversion is derived from raw ADC value and the supplied reference millivolts
+
+Current ADC limitations:
+
+- Raspberry Pi and ESP32 ADC backends are not implemented yet
+- this module is a shared surface, not a claim of finished non-Uno embedded support
 
 ## `serial`
 
