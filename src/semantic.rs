@@ -2064,6 +2064,17 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::String)
                 }
+                "__rune_builtin_network_clear_error" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message:
+                                "`__rune_builtin_network_clear_error` expects 0 arguments"
+                                    .to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::Unit)
+                }
                 "__rune_builtin_network_tcp_reply_once" => {
                     if args.len() != 5 {
                         return Err(SemanticError {
@@ -3323,6 +3334,7 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_network_last_error_message" => {
             Some(Type::Unknown("builtin".to_string()))
         }
+        "__rune_builtin_network_clear_error" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_tcp_request" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_bind" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_network_udp_send" => Some(Type::Unknown("builtin".to_string())),

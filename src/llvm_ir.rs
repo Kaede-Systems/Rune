@@ -1777,6 +1777,13 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_network_clear_error" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_network_clear_error()\n".into());
+                out.push_str("  call void @rune_rt_network_clear_error()\n");
+                return Ok(());
+            }
             "__rune_builtin_network_tcp_reply_once" => {
                 self.expect_plain_arity(callee, args, 5)?;
                 let rendered_host = self.resolve_value(&args[0].value, &IrType::String, out)?;
@@ -3718,6 +3725,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_connect_timeout"
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
+        | "__rune_builtin_network_clear_error"
         | "__rune_builtin_fs_exists"
         | "__rune_builtin_fs_write_string"
         | "__rune_builtin_fs_remove"

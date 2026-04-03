@@ -401,7 +401,7 @@ from network import tcp_listen, tcp_bind, udp_bind, tcp_send, udp_send
 from network import tcp_send_line, udp_send_line, tcp_recv, tcp_recv_timeout, udp_recv
 from network import tcp_request, request, request_line, recv, recv_timeout, recv_udp
 from network import tcp_accept_once, accept_once, tcp_reply_once, reply_once, reply_once_line
-from network import last_error_code, last_error
+from network import last_error_code, last_error, clear_error
 from network import connect, connect_timeout, probe, probe_timeout
 from network import listen, bind, send, send_line, send_udp, send_line_udp
 from network import TcpClient, TcpServer, UdpEndpoint, tcp_client, tcp_server, udp_endpoint
@@ -433,6 +433,7 @@ Exports:
 - `reply_once_line(host: String, port: i32, value: dynamic, max_bytes: i32, timeout_ms: i32) -> String`
 - `last_error_code() -> i32`
 - `last_error() -> String`
+- `clear_error() -> unit`
 - `connect(host: String, port: i32) -> bool`
 - `connect_timeout(host: String, port: i32, timeout_ms: i32) -> bool`
 - `probe(host: String, port: i32) -> bool`
@@ -464,6 +465,7 @@ Current implemented network scope:
 - TCP one-shot reply helpers that return the received request body as `String`
 - UDP receive helpers returning `String`
 - last network error inspection through `last_error_code()` and `last_error()`
+- explicit error-state reset through `clear_error()`
 - class-style client/endpoint wrappers using the same `connect`, `probe`, `send`, and `send_line` names
 - class-style client/endpoint wrappers using the same `connect`, `bind`, `probe`, `send`, `send_line`, `recv`, `recv_timeout`, `request`, `request_line`, `send_text`, and `send_line_text` names
 - `TcpServer` exposes `listen`, `bind`, `accept_once`, `reply_once`, `reply_once_line`, and `reply_once_text`

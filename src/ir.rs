@@ -975,6 +975,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_connect_timeout"
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
+        | "__rune_builtin_network_clear_error"
         | "__rune_builtin_fs_exists"
         | "__rune_builtin_fs_write_string"
         | "__rune_builtin_fs_remove"

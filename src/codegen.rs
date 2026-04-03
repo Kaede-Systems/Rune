@@ -1954,6 +1954,18 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_network_clear_error" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_network_clear_error` expects 0 positional arguments"
+                        .to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_network_clear_error\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_network_udp_bind" {
             let [
                 CallArg::Positional(host_expr),
@@ -3755,6 +3767,16 @@ impl<'a> FunctionEmitter<'a> {
                     });
                 }
                 out.push_str("    call rune_rt_network_last_error_message\n");
+            } else if name == "__rune_builtin_network_clear_error" {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message:
+                            "`__rune_builtin_network_clear_error` expects 0 positional arguments in the native backend"
+                                .into(),
+                        span: expr.span,
+                    });
+                }
+                out.push_str("    call rune_rt_network_clear_error\n");
             } else if name == "__rune_builtin_network_udp_recv" {
                 let [
                     CallArg::Positional(host_expr),
@@ -5129,6 +5151,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_tcp_connect_timeout"
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
+        | "__rune_builtin_network_clear_error"
         | "__rune_builtin_fs_exists"
         | "__rune_builtin_fs_write_string"
         | "__rune_builtin_fs_remove"

@@ -1774,6 +1774,15 @@ fn network_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "clear_error",
+                vec![],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_network_clear_error",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
                 "request_line",
                 vec![
                     param("host", "String"),

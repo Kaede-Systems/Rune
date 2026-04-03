@@ -5128,6 +5128,9 @@ function createHost(options = {{}}) {{
       rune_rt_network_last_error_message() {{
         return allocString("");
       }},
+      rune_rt_network_clear_error_state() {{
+        return;
+      }},
       rune_rt_network_tcp_request(hostPtr, hostLen, port, dataPtr, dataLen, maxBytes, timeoutMs) {{
         throw new Error("Rune network request builtins are not supported for wasm32-unknown-unknown");
       }},
@@ -6312,7 +6315,7 @@ fn rune_rt_network_error_state() -> &'static Mutex<(i32, String)> {
     RUNE_NETWORK_ERROR.get_or_init(|| Mutex::new((RUNE_NETWORK_OK, String::new())))
 }
 
-fn rune_rt_network_clear_error() {
+fn rune_rt_network_clear_error_state() {
     let mut state = rune_rt_network_error_state()
         .lock()
         .expect("network error mutex poisoned");
@@ -8077,6 +8080,11 @@ pub extern "C" fn rune_rt_network_last_error_message() -> *const u8 {
     rune_rt_store_string(message)
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_network_clear_error() {
+    rune_rt_network_clear_error_state();
+}
+
 #[cfg(target_os = "wasi")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_network_tcp_connect(_ptr: *const u8, _len: i64, _port: i32) -> bool {
@@ -8226,7 +8234,7 @@ pub extern "C" fn rune_rt_network_tcp_listen(ptr: *const u8, len: i64, port: i32
     let host = std::str::from_utf8(host).expect("TCP listen host must be valid UTF-8");
     match TcpListener::bind((host, port as u16)) {
         Ok(_) => {
-            rune_rt_network_clear_error();
+            rune_rt_network_clear_error_state();
             true
         }
         Err(error) => {
@@ -8262,7 +8270,7 @@ pub extern "C" fn rune_rt_network_tcp_send(
     match TcpStream::connect((host, port as u16)) {
         Ok(mut stream) => match std::io::Write::write_all(&mut stream, data.as_bytes()) {
             Ok(_) => {
-                rune_rt_network_clear_error();
+                rune_rt_network_clear_error_state();
                 true
             }
             Err(error) => {
@@ -8340,7 +8348,7 @@ pub extern "C" fn rune_rt_network_tcp_recv_timeout(
                 Ok(read) => {
                     buffer.truncate(read);
                     let text = String::from_utf8_lossy(&buffer).to_string();
-                    rune_rt_network_clear_error();
+                    rune_rt_network_clear_error_state();
                     return rune_rt_store_string(text);
                 }
                 Err(error) => {
@@ -8404,7 +8412,7 @@ pub extern "C" fn rune_rt_network_tcp_accept_once(
                 return match std::io::Read::read(&mut stream, &mut buffer) {
                     Ok(read) => {
                         buffer.truncate(read);
-                        rune_rt_network_clear_error();
+                        rune_rt_network_clear_error_state();
                         rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
                     }
                     Err(error) => {
@@ -8502,7 +8510,7 @@ pub extern "C" fn rune_rt_network_tcp_reply_once(
                     );
                     return rune_rt_store_string(String::new());
                 }
-                rune_rt_network_clear_error();
+                rune_rt_network_clear_error_state();
                 return rune_rt_store_string(request);
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -8585,7 +8593,7 @@ pub extern "C" fn rune_rt_network_tcp_request(
                 Ok(read) => {
                     buffer.truncate(read);
                     let text = String::from_utf8_lossy(&buffer).to_string();
-                    rune_rt_network_clear_error();
+                    rune_rt_network_clear_error_state();
                     return rune_rt_store_string(text);
                 }
                 Err(error) => {
@@ -8638,7 +8646,7 @@ pub extern "C" fn rune_rt_network_tcp_connect_timeout(ptr: *const u8, len: i64, 
     if resolved.into_iter().any(|addr| {
         TcpStream::connect_timeout(&addr, Duration::from_millis(timeout_ms as u64)).is_ok()
     }) {
-        rune_rt_network_clear_error();
+        rune_rt_network_clear_error_state();
         true
     } else {
         rune_rt_network_set_error(
@@ -8673,7 +8681,7 @@ pub extern "C" fn rune_rt_network_udp_bind(ptr: *const u8, len: i64, port: i32) 
     let host = std::str::from_utf8(host).expect("UDP bind host must be valid UTF-8");
     match UdpSocket::bind((host, port as u16)) {
         Ok(_) => {
-            rune_rt_network_clear_error();
+            rune_rt_network_clear_error_state();
             true
         }
         Err(error) => {
@@ -8741,7 +8749,7 @@ pub extern "C" fn rune_rt_network_udp_send(
     match UdpSocket::bind(("0.0.0.0", 0)) {
         Ok(socket) => match socket.send_to(data.as_bytes(), (host, port as u16)) {
             Ok(_) => {
-                rune_rt_network_clear_error();
+                rune_rt_network_clear_error_state();
                 true
             }
             Err(error) => {
@@ -8793,7 +8801,7 @@ pub extern "C" fn rune_rt_network_udp_recv(
             match socket.recv_from(&mut buffer) {
                 Ok((read, _)) => {
                     buffer.truncate(read);
-                    rune_rt_network_clear_error();
+                    rune_rt_network_clear_error_state();
                     rune_rt_store_string(String::from_utf8_lossy(&buffer).to_string())
                 }
                 Err(error) => {

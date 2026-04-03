@@ -910,12 +910,15 @@ fn llvm_backend_builds_and_runs_network_error_state_program_on_windows() {
     fs::write(
         &source_path,
         format!(
-            r#"from network import connect_timeout, last_error, last_error_code
+            r#"from network import clear_error, connect_timeout, last_error, last_error_code
 
 def main() -> i32:
     println(connect_timeout("127.0.0.1", {0}, 25))
     println(last_error_code())
     println(last_error() != "")
+    clear_error()
+    println(last_error_code())
+    println(last_error() == "")
     println(connect_timeout("127.0.0.1", {1}, 100))
     println(last_error_code())
     return 0
@@ -934,5 +937,5 @@ def main() -> i32:
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    assert_eq!(stdout, "false\n5\ntrue\ntrue\n0\n");
+    assert_eq!(stdout, "false\n5\ntrue\n0\ntrue\ntrue\n0\n");
 }
