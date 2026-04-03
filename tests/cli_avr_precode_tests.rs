@@ -90,6 +90,32 @@ fn emit_avr_precode_omits_serial_read_runtime_when_unused() {
 }
 
 #[test]
+fn emit_avr_precode_omits_serial_startup_when_unused() {
+    let dir = temp_dir();
+    let source_path = dir.join("uno_no_serial_startup_precode.rn");
+
+    fs::write(
+        &source_path,
+        "from arduino import digital_write, led_builtin, mode_output, pin_mode\n\n\
+pin_mode(led_builtin(), mode_output())\n\
+digital_write(led_builtin(), true)\n",
+    )
+    .expect("failed to write rune source");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rune"))
+        .arg("emit-avr-precode")
+        .arg(&source_path)
+        .output()
+        .expect("failed to run rune emit-avr-precode");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    if !stdout.contains("// --- rune_arduino_uno_runtime.cpp ---") {
+        assert!(!stdout.contains("Serial.begin(115200);"));
+    }
+}
+
+#[test]
 fn emit_avr_precode_enables_servo_runtime_when_used() {
     let dir = temp_dir();
     let source_path = dir.join("uno_servo_precode.rn");

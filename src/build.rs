@@ -1109,6 +1109,7 @@ enum ArduinoUnoReturnKind {
 fn emit_arduino_uno_cpp(program: &Program) -> Result<String, CodegenError> {
     let include_servo_sources = program_uses_arduino_servo(program);
     let include_serial_read_sources = program_uses_arduino_serial_read(program);
+    let include_serial_runtime = program_uses_arduino_serial(program);
     let main = program.items.iter().find_map(|item| match item {
         Item::Function(function) if function.name == "main" => Some(function),
         _ => None,
@@ -1322,6 +1323,11 @@ static void rune_rt_arduino_servo_write_us(int64_t pin, int64_t pulse_us) {\n\
     return rune_input_buffer;\n\
 }\n\n\
 "
+    } else {
+        ""
+    };
+    let setup_serial_begin = if include_serial_runtime {
+        "    Serial.begin(115200);\n"
     } else {
         ""
     };
@@ -1576,7 +1582,7 @@ static int rune_analog_ref_external(void) {{ return EXTERNAL; }}\n\n\
 {helper_definitions}\
 {method_definitions}\
 void setup() {{\n\
-    Serial.begin(115200);\n\
+{setup_serial_begin}\
 {setup_source}\
 }}\n\n\
 void loop() {{\n\
@@ -2482,6 +2488,10 @@ fn program_uses_arduino_serial_read(program: &Program) -> bool {
     program.items.iter().any(item_uses_arduino_serial_read)
 }
 
+fn program_uses_arduino_serial(program: &Program) -> bool {
+    program.items.iter().any(item_uses_arduino_serial)
+}
+
 fn item_uses_arduino_servo(item: &Item) -> bool {
     match item {
         Item::Function(function) => block_uses_arduino_servo(&function.body),
@@ -2504,12 +2514,27 @@ fn item_uses_arduino_serial_read(item: &Item) -> bool {
     }
 }
 
+fn item_uses_arduino_serial(item: &Item) -> bool {
+    match item {
+        Item::Function(function) => block_uses_arduino_serial(&function.body),
+        Item::Struct(struct_decl) => struct_decl
+            .methods
+            .iter()
+            .any(|method| block_uses_arduino_serial(&method.body)),
+        _ => false,
+    }
+}
+
 fn block_uses_arduino_servo(block: &crate::parser::Block) -> bool {
     block.statements.iter().any(stmt_uses_arduino_servo)
 }
 
 fn block_uses_arduino_serial_read(block: &crate::parser::Block) -> bool {
     block.statements.iter().any(stmt_uses_arduino_serial_read)
+}
+
+fn block_uses_arduino_serial(block: &crate::parser::Block) -> bool {
+    block.statements.iter().any(stmt_uses_arduino_serial)
 }
 
 fn stmt_uses_arduino_servo(stmt: &Stmt) -> bool {
@@ -3937,6 +3962,44 @@ fn expr_uses_arduino_serial_read(expr: &Expr) -> bool {
     }
 }
 
+fn expr_uses_arduino_serial(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Identifier(_) | ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) => {
+            false
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Await { expr } => expr_uses_arduino_serial(expr),
+        ExprKind::Binary { left, right, .. } => {
+            expr_uses_arduino_serial(left) || expr_uses_arduino_serial(right)
+        }
+        ExprKind::Field { base, .. } => expr_uses_arduino_serial(base),
+        ExprKind::Call { callee, args } => {
+            let is_serial_builtin = match &callee.kind {
+                ExprKind::Identifier(name) => {
+                    matches!(
+                        arduino_uno_builtin_alias(name),
+                        "input"
+                            | "read_line"
+                            | "recv_line"
+                            | "send"
+                            | "send_line"
+                            | "open"
+                            | "is_open"
+                            | "uart_available"
+                            | "uart_read_byte"
+                    )
+                }
+                _ => false,
+            };
+            is_serial_builtin
+                || expr_uses_arduino_serial(callee)
+                || args.iter().any(|arg| match arg {
+                    CallArg::Positional(expr) => expr_uses_arduino_serial(expr),
+                    CallArg::Keyword { value, .. } => expr_uses_arduino_serial(value),
+                })
+        }
+    }
+}
+
 fn stmt_uses_arduino_serial_read(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Block(block) => block_uses_arduino_serial_read(&block.block),
@@ -3969,6 +4032,62 @@ fn stmt_uses_arduino_serial_read(stmt: &Stmt) -> bool {
         Stmt::Raise(raise_stmt) => expr_uses_arduino_serial_read(&raise_stmt.value),
         Stmt::Panic(panic_stmt) => expr_uses_arduino_serial_read(&panic_stmt.value),
         Stmt::Expr(expr_stmt) => expr_uses_arduino_serial_read(&expr_stmt.expr),
+    }
+}
+
+fn stmt_uses_arduino_serial(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Block(block) => block_uses_arduino_serial(&block.block),
+        Stmt::Let(let_stmt) => expr_uses_arduino_serial(&let_stmt.value),
+        Stmt::Assign(assign_stmt) => expr_uses_arduino_serial(&assign_stmt.value),
+        Stmt::Return(return_stmt) => return_stmt
+            .value
+            .as_ref()
+            .is_some_and(expr_uses_arduino_serial),
+        Stmt::If(if_stmt) => {
+            expr_uses_arduino_serial(&if_stmt.condition)
+                || block_uses_arduino_serial(&if_stmt.then_block)
+                || if_stmt
+                    .elif_blocks
+                    .iter()
+                    .any(|elif| {
+                        expr_uses_arduino_serial(&elif.condition)
+                            || block_uses_arduino_serial(&elif.block)
+                    })
+                || if_stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(block_uses_arduino_serial)
+        }
+        Stmt::While(while_stmt) => {
+            expr_uses_arduino_serial(&while_stmt.condition)
+                || block_uses_arduino_serial(&while_stmt.body)
+        }
+        Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::Raise(raise_stmt) => expr_uses_arduino_serial(&raise_stmt.value),
+        Stmt::Panic(_) => true,
+        Stmt::Expr(expr_stmt) => {
+            let uses_serial_stmt_builtin = matches!(
+                &expr_stmt.expr.kind,
+                ExprKind::Call { callee, .. }
+                    if matches!(
+                        &callee.kind,
+                        ExprKind::Identifier(name)
+                            if matches!(
+                                arduino_uno_builtin_alias(name),
+                                "print"
+                                    | "println"
+                                    | "uart_begin"
+                                    | "uart_write_byte"
+                                    | "uart_write"
+                                    | "send"
+                                    | "send_line"
+                                    | "close"
+                            )
+                    )
+            );
+            uses_serial_stmt_builtin || expr_uses_arduino_serial(&expr_stmt.expr)
+        }
     }
 }
 
