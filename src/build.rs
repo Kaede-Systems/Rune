@@ -526,6 +526,8 @@ fn build_arduino_uno_hex(
         .arg("-std=gnu++11")
         .arg("-fno-exceptions")
         .arg("-fno-threadsafe-statics")
+        .arg("-fno-rtti")
+        .arg("-fno-rtti")
         .arg("-c")
         .arg(&cpp_path)
         .arg("-o")
@@ -558,6 +560,7 @@ fn build_arduino_uno_hex(
     link.arg("-mmcu=atmega328p")
         .arg("-Os")
         .arg("-flto")
+        .arg("-Wl,--relax")
         .arg("-Wl,--gc-sections")
         .arg("-o")
         .arg(&elf_path);
@@ -813,6 +816,7 @@ fn build_arduino_uno_hex_via_llvm_cbe(
     link.arg("-mmcu=atmega328p")
         .arg("-Os")
         .arg("-flto")
+        .arg("-Wl,--relax")
         .arg("-Wl,--gc-sections")
         .arg("-o")
         .arg(&elf_path);
@@ -2580,6 +2584,7 @@ fn arduino_uno_common_compile_args(
         "-DARDUINO_ARCH_AVR".into(),
         "-DARDUINO_AVR_UNO".into(),
         "-Os".into(),
+        "-mrelax".into(),
         "-flto".into(),
         "-ffunction-sections".into(),
         "-fdata-sections".into(),
@@ -2657,7 +2662,8 @@ fn compile_arduino_uno_core_sources(
             cmd.args(&common_args)
                 .arg("-std=gnu++11")
                 .arg("-fno-exceptions")
-                .arg("-fno-threadsafe-statics");
+                .arg("-fno-threadsafe-statics")
+                .arg("-fno-rtti");
             cmd
         } else {
             let mut cmd = Command::new(gcc);
