@@ -26,6 +26,7 @@ jobs:
             archive: zip
             host_bundle: windows-x64
             llvm_url: https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.7/LLVM-21.1.7-win64.exe
+            llvm_source_url: https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-21.1.7.tar.gz
           - id: linux-x64
             runner: ubuntu-latest
             binary: target/release/rune
@@ -33,6 +34,7 @@ jobs:
             archive: tar
             host_bundle: linux-x64
             llvm_url: https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.7/LLVM-21.1.7-Linux-X64.tar.xz
+            llvm_source_url: https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-21.1.7.tar.gz
           - id: linux-arm64
             runner: ubuntu-24.04-arm
             binary: target/release/rune
@@ -40,6 +42,7 @@ jobs:
             archive: tar
             host_bundle: linux-arm64
             llvm_url: https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.7/LLVM-21.1.7-Linux-ARM64.tar.xz
+            llvm_source_url: https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-21.1.7.tar.gz
           - id: macos-x64
             runner: macos-15-intel
             binary: target/release/rune
@@ -47,6 +50,7 @@ jobs:
             archive: tar
             host_bundle: macos-x64
             llvm_url: https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.7/LLVM-21.1.7-macOS-X64.tar.xz
+            llvm_source_url: https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-21.1.7.tar.gz
           - id: macos-arm64
             runner: macos-15
             binary: target/release/rune
@@ -54,6 +58,7 @@ jobs:
             archive: tar
             host_bundle: macos-arm64
             llvm_url: https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.7/LLVM-21.1.7-macOS-ARM64.tar.xz
+            llvm_source_url: https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-21.1.7.tar.gz
 
     runs-on: ${{ matrix.runner }}
 
@@ -94,6 +99,26 @@ PY
           cmake -S tools/llvm-cbe -B .toolchain/llvm-cbe-build -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" -DCMAKE_BUILD_TYPE=Release
           cmake --build .toolchain/llvm-cbe-build --config Release --target llvm-cbe -j2
 
+      - name: Build llvm-avr (Unix)
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p .toolchain/llvm-avr-src .toolchain/llvm-avr-build
+          curl -fL "${{ matrix.llvm_source_url }}" -o .toolchain/llvm-avr-src.tar.gz
+          tar -xf .toolchain/llvm-avr-src.tar.gz -C .toolchain/llvm-avr-src
+          LLVM_AVR_SRC="$(find .toolchain/llvm-avr-src -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$LLVM_AVR_SRC"
+          cmake -S "$LLVM_AVR_SRC/llvm" -B .toolchain/llvm-avr-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS=clang \
+            -DLLVM_TARGETS_TO_BUILD="AVR;X86;AArch64" \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_UTILS=OFF
+          cmake --build .toolchain/llvm-avr-build --config Release --target llc clang opt -j2
+
       - name: Build llvm-cbe (Windows)
         if: matrix.archive == 'zip'
         shell: pwsh
@@ -106,18 +131,43 @@ PY
           cmake -S tools/llvm-cbe -B .toolchain\llvm-cbe-build -G "Visual Studio 17 2022" -A x64 -DLLVM_DIR="$llvmRoot\lib\cmake\llvm"
           cmake --build .toolchain\llvm-cbe-build --config Release --target llvm-cbe
 
+      - name: Build llvm-avr (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .toolchain\llvm-avr-src -Force | Out-Null
+          $archive = Join-Path (Resolve-Path .toolchain).Path "llvm-avr-src.tar.gz"
+          Invoke-WebRequest -Uri "${{ matrix.llvm_source_url }}" -OutFile $archive
+          tar -xf $archive -C .toolchain\llvm-avr-src
+          $srcRoot = Get-ChildItem .toolchain\llvm-avr-src | Where-Object { $_.PSIsContainer } | Select-Object -First 1 -ExpandProperty FullName
+          cmake -S "$srcRoot\llvm" -B .toolchain\llvm-avr-build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DLLVM_ENABLE_PROJECTS=clang `
+            -DLLVM_TARGETS_TO_BUILD="AVR;X86;AArch64" `
+            -DLLVM_INCLUDE_TESTS=OFF `
+            -DLLVM_INCLUDE_EXAMPLES=OFF `
+            -DLLVM_INCLUDE_BENCHMARKS=OFF `
+            -DLLVM_INCLUDE_UTILS=OFF
+          cmake --build .toolchain\llvm-avr-build --config Release --target llc clang opt
+
       - name: Stage Unix bundle
         if: matrix.archive == 'tar'
         shell: bash
         run: |
           set -eux
-          mkdir -p bundle/bin bundle/share/rune/tools/llvm-cbe/${{ matrix.host_bundle }}/bin bundle/installers
+          mkdir -p bundle/bin bundle/share/rune/tools/llvm-cbe/${{ matrix.host_bundle }}/bin bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin bundle/installers
           cp "${{ matrix.binary }}" bundle/bin/rune
           chmod 755 bundle/bin/rune
           printf '%s\n' "$RUNE_VERSION" > bundle/share/rune/VERSION
           cp -R tools/llvm-cbe bundle/share/rune/tools/llvm-cbe
           cp .toolchain/llvm-cbe-build/tools/llvm-cbe/llvm-cbe bundle/share/rune/tools/llvm-cbe/${{ matrix.host_bundle }}/bin/llvm-cbe
           chmod 755 bundle/share/rune/tools/llvm-cbe/${{ matrix.host_bundle }}/bin/llvm-cbe
+          cp .toolchain/llvm-avr-build/bin/llc bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin/llc
+          cp .toolchain/llvm-avr-build/bin/clang bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin/clang
+          cp .toolchain/llvm-avr-build/bin/opt bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin/opt
+          chmod 755 bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin/llc
+          chmod 755 bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin/clang
+          chmod 755 bundle/share/rune/tools/llvm-avr/${{ matrix.host_bundle }}/bin/opt
           cp installers/install-unix.sh bundle/installers/install-unix.sh
           cp installers/README.md bundle/installers/README.md
           tar -czf "$LATEST_BUNDLE" -C bundle .
@@ -129,11 +179,15 @@ PY
         run: |
           New-Item -ItemType Directory -Path bundle\bin -Force | Out-Null
           New-Item -ItemType Directory -Path bundle\share\rune\tools\llvm-cbe\${{ matrix.host_bundle }}\bin -Force | Out-Null
+          New-Item -ItemType Directory -Path bundle\share\rune\tools\llvm-avr\${{ matrix.host_bundle }}\bin -Force | Out-Null
           New-Item -ItemType Directory -Path bundle\installers -Force | Out-Null
           Copy-Item "${{ matrix.binary }}" bundle\bin\rune.exe -Force
           Set-Content -Path bundle\share\rune\VERSION -Value $env:RUNE_VERSION -NoNewline
           Copy-Item tools\llvm-cbe bundle\share\rune\tools\llvm-cbe -Recurse -Force
           Copy-Item .toolchain\llvm-cbe-build\tools\llvm-cbe\Release\llvm-cbe.exe bundle\share\rune\tools\llvm-cbe\${{ matrix.host_bundle }}\bin\llvm-cbe.exe -Force
+          Copy-Item .toolchain\llvm-avr-build\bin\Release\llc.exe bundle\share\rune\tools\llvm-avr\${{ matrix.host_bundle }}\bin\llc.exe -Force
+          Copy-Item .toolchain\llvm-avr-build\bin\Release\clang.exe bundle\share\rune\tools\llvm-avr\${{ matrix.host_bundle }}\bin\clang.exe -Force
+          Copy-Item .toolchain\llvm-avr-build\bin\Release\opt.exe bundle\share\rune\tools\llvm-avr\${{ matrix.host_bundle }}\bin\opt.exe -Force
           Copy-Item installers\install-windows.ps1 bundle\installers\install-windows.ps1 -Force
           Copy-Item installers\README.md bundle\installers\README.md -Force
           Compress-Archive -Path bundle\* -DestinationPath $env:LATEST_BUNDLE -Force
