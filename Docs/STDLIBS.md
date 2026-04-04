@@ -37,7 +37,7 @@ from arduino import (
     uart_flush,
     interrupts_enable, interrupts_disable,
     random_seed, random_i64, random_range,
-    uart_port, ultrasonic_sensor, spi_bus, i2c_bus,
+    uart_port, ultrasonic_sensor, pulse_input, spi_bus, i2c_bus,
 )
 ```
 
@@ -109,6 +109,7 @@ Exports:
 - `uart_write_line(text: String) -> unit`
 - `uart_flush() -> unit`
 - `uart_port(baud: i64) -> UartPort`
+- `pulse_input(pin: i64, state: bool) -> PulseInput`
 - `interrupts_enable() -> unit`
 - `interrupts_disable() -> unit`
 - `random_seed(seed: i64) -> unit`
@@ -134,6 +135,7 @@ Current implemented Arduino scope:
 - software-style SPI bus helpers on top of the current GPIO/timing runtime
 - software-style I2C bus helpers on top of the current GPIO/timing runtime
 - higher-level pulse/sensor helper through `UltrasonicSensor`
+- reusable pulse timing helper through `PulseInput`
 - shift register input, interrupt enable/disable control, and Arduino random helpers
 - Servo control through the packaged Arduino Servo library
 - `servo_write(pin, angle)` is the normal positional-servo API using the Arduino Servo library defaults
@@ -198,6 +200,10 @@ High-level Arduino helper classes:
   - `.measure_pulse_us(timeout_us)`
   - `.distance_cm(timeout_us)`
   - `.distance_mm(timeout_us)`
+- `PulseInput(pin=..., state=...)`
+  - `.measure_us(timeout_us)`
+  - `.measure_ms(timeout_us)`
+  - `.frequency_hz(timeout_us)`
 
 Current Arduino limitations:
 

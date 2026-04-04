@@ -216,7 +216,7 @@ Current import behavior:
 
 Current embedded-stdlib note:
 
-- higher-level helper objects such as `serial.SerialPort`, `arduino.UartPort`, `arduino.TonePin`, `arduino.ShiftBus`, `arduino.SpiBus`, `arduino.I2cBus`, and `arduino.UltrasonicSensor` are ordinary Rune class surfaces layered on top of the real runtime/compiler hooks
+- higher-level helper objects such as `serial.SerialPort`, `arduino.UartPort`, `arduino.TonePin`, `arduino.ShiftBus`, `arduino.SpiBus`, `arduino.I2cBus`, `arduino.UltrasonicSensor`, and `arduino.PulseInput` are ordinary Rune class surfaces layered on top of the real runtime/compiler hooks
 - that means they compile through the same semantics, IR, native, LLVM, and AVR paths instead of being parser-only sugar
 
 Relative imports:

@@ -2013,6 +2013,36 @@ fn builds_arduino_uno_with_spi_and_i2c_helpers() {
 }
 
 #[test]
+fn builds_arduino_uno_with_pulse_input_helpers() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_pulse_input_helpers.rn");
+    let output_path = dir.join("arduino_uno_pulse_input_helpers.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import PulseInput, pulse_input, uart_begin, uart_write_line\n\n\
+         def main() -> i32:\n    uart_begin(115200)\n    uart_write_line(\"pulse\")\n    let pulse = pulse_input(7, true)\n    println(pulse.measure_us(100))\n    println(pulse.measure_ms(100))\n    println(pulse.frequency_hz(100))\n    let other = PulseInput(pin=8, state=false)\n    println(other.measure_us(100))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno pulse input helper build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read pulse input helper hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_with_runtime_zero_division_guard() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_zero_division_guard.rn");

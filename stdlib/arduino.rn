@@ -638,3 +638,27 @@ class UltrasonicSensor:
 
 def ultrasonic_sensor(trig_pin: i64, echo_pin: i64) -> UltrasonicSensor:
     return UltrasonicSensor(trig_pin=trig_pin, echo_pin=echo_pin)
+
+class PulseInput:
+    pin: i64
+    state: bool
+
+    def measure_us(self, timeout_us: i64) -> i64:
+        return pulse_in(self.pin, self.state, timeout_us)
+
+    def measure_ms(self, timeout_us: i64) -> i64:
+        let pulse_us: i64 = self.measure_us(timeout_us)
+        if pulse_us < 0:
+            return (pulse_us - pulse_us) - 1
+        let micros_per_ms: i64 = 1000
+        return pulse_us / micros_per_ms
+
+    def frequency_hz(self, timeout_us: i64) -> i64:
+        let pulse_us: i64 = self.measure_us(timeout_us)
+        if pulse_us <= 0:
+            return (pulse_us - pulse_us) - 1
+        let micros_per_second: i64 = 1000000
+        return micros_per_second / pulse_us
+
+def pulse_input(pin: i64, state: bool) -> PulseInput:
+    return PulseInput(pin=pin, state=state)

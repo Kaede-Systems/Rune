@@ -642,6 +642,31 @@ fn llvm_backend_builds_and_runs_arduino_spi_and_i2c_helpers_program_on_windows()
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_arduino_pulse_input_helpers_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_arduino_pulse_input.rn");
+    let exe_path = dir.join("llvm_arduino_pulse_input.exe");
+
+    fs::write(
+        &source_path,
+        "from arduino import PulseInput, pulse_input\n\n\
+         def main() -> i32:\n    let pulse = pulse_input(7, true)\n    println(pulse.measure_us(100))\n    println(pulse.measure_ms(100))\n    println(pulse.frequency_hz(100))\n    let other = PulseInput(pin=8, state=false)\n    println(other.measure_us(100))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm arduino pulse input helper program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "0\n0\n-1\n0\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_break_continue_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_break_continue_demo.rn");
