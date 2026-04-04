@@ -221,6 +221,30 @@ fn llvm_backend_builds_and_runs_zero_division_error_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_serial_flush_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_serial_flush_demo.rn");
+    let exe_path = dir.join("llvm_serial_flush_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from serial import flush\n\ndef main() -> i32:\n    flush()\n    println(\"ok\")\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm serial flush program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built serial flush executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "ok\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_dynamic_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_dynamic_demo.rn");

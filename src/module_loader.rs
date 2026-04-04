@@ -43,6 +43,14 @@ pub enum ModuleLoadError {
         importer_span: Span,
         trace: Vec<ImportSite>,
     },
+    ImportCycle {
+        module: String,
+        path: PathBuf,
+        importer_path: PathBuf,
+        importer_source: String,
+        importer_span: Span,
+        trace: Vec<ImportSite>,
+    },
 }
 
 impl fmt::Display for ModuleLoadError {
@@ -85,6 +93,18 @@ impl fmt::Display for ModuleLoadError {
                 "module `{module}` does not export `{name}` in `{}`",
                 path.display()
             ),
+            ModuleLoadError::ImportCycle {
+                module,
+                path,
+                importer_path: _,
+                importer_source: _,
+                importer_span: _,
+                trace: _,
+            } => write!(
+                f,
+                "import cycle detected for module `{module}` at `{}`",
+                path.display()
+            ),
         }
     }
 }
@@ -97,7 +117,8 @@ impl ModuleLoadError {
             ModuleLoadError::Io { trace, .. }
             | ModuleLoadError::Parse { trace, .. }
             | ModuleLoadError::MissingModule { trace, .. }
-            | ModuleLoadError::MissingImport { trace, .. } => trace.push(site),
+            | ModuleLoadError::MissingImport { trace, .. }
+            | ModuleLoadError::ImportCycle { trace, .. } => trace.push(site),
         }
     }
 
@@ -177,6 +198,30 @@ impl ModuleLoadError {
                 ));
                 rendered
             }
+            ModuleLoadError::ImportCycle {
+                module,
+                path,
+                importer_path,
+                importer_source,
+                importer_span,
+                trace,
+            } => {
+                let mut rendered = String::new();
+                if !trace.is_empty() {
+                    rendered.push_str(&render_import_trace(trace));
+                    rendered.push('\n');
+                }
+                rendered.push_str(&render_file_diagnostic(
+                    importer_path,
+                    importer_source,
+                    &format!(
+                        "import cycle detected for module `{module}` at `{}`",
+                        path.display()
+                    ),
+                    *importer_span,
+                ));
+                rendered
+            }
         }
     }
 }
@@ -246,10 +291,12 @@ pub fn load_program_bundle_from_path(path: &Path) -> Result<LoadedProgram, Modul
     let mut import_sites = HashMap::new();
     let mut sources = HashMap::new();
     let mut export_maps = HashMap::new();
+    let mut active_stack = Vec::new();
     load_module_recursive(
         &canonical,
         true,
         &mut visited,
+        &mut active_stack,
         &mut exceptions,
         &mut structs,
         &mut functions,
@@ -278,6 +325,7 @@ fn load_module_recursive(
     path: &Path,
     is_entry: bool,
     visited: &mut BTreeSet<PathBuf>,
+    active_stack: &mut Vec<PathBuf>,
     out_exceptions: &mut Vec<ExceptionDecl>,
     out_structs: &mut Vec<StructDecl>,
     out_functions: &mut Vec<Function>,
@@ -286,10 +334,25 @@ fn load_module_recursive(
     sources: &mut HashMap<PathBuf, String>,
     export_maps: &mut HashMap<PathBuf, ExportMap>,
 ) -> Result<ExportMap, ModuleLoadError> {
+    if active_stack.contains(&path.to_path_buf()) {
+        return Err(ModuleLoadError::ImportCycle {
+            module: path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("<module>")
+                .to_string(),
+            path: path.to_path_buf(),
+            importer_path: path.to_path_buf(),
+            importer_source: sources.get(path).cloned().unwrap_or_default(),
+            importer_span: Span { line: 1, column: 1 },
+            trace: Vec::new(),
+        });
+    }
     if !visited.insert(path.to_path_buf()) {
         return Ok(export_maps.get(path).cloned().unwrap_or_default());
     }
 
+    active_stack.push(path.to_path_buf());
     let (program, source) = load_module_program(path)?;
     sources.insert(path.to_path_buf(), source.clone());
 
@@ -355,6 +418,7 @@ fn load_module_recursive(
                 &module_path,
                 false,
                 visited,
+                active_stack,
                 out_exceptions,
                 out_structs,
                 out_functions,
@@ -383,6 +447,7 @@ fn load_module_recursive(
             }
         }
     }
+    active_stack.pop();
 
     let own_exports = collect_module_exports(path, &program, is_entry);
     export_maps.insert(path.to_path_buf(), own_exports.clone());

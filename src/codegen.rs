@@ -3027,6 +3027,18 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_serial_flush" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_flush` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_flush\n");
+            out.push_str("    xor eax, eax\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_serial_read_line" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -4280,7 +4292,7 @@ impl<'a> FunctionEmitter<'a> {
                     });
                 }
                 out.push_str("    call rune_rt_serial_read_line\n");
-            } else {
+            } else if name == "__rune_builtin_serial_read_line_timeout" {
                 let [CallArg::Positional(timeout_expr)] = args.as_slice() else {
                     return Err(CodegenError {
                         message:
@@ -4291,6 +4303,13 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 self.emit_into_reg(out, "rcx", timeout_expr)?;
                 out.push_str("    call rune_rt_serial_read_line_timeout\n");
+            } else {
+                return Err(CodegenError {
+                    message: format!(
+                        "unsupported runtime string builtin `{name}` in the native backend"
+                    ),
+                    span: expr.span,
+                });
             }
             self.capture_runtime_string_result(out, ptr_reg, len_reg);
             return Ok(());
@@ -5652,7 +5671,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_interrupts_enable"
         | "__rune_builtin_arduino_interrupts_disable"
         | "__rune_builtin_arduino_random_seed"
-        | "__rune_builtin_serial_close" => Some(IrType::Unit),
+        | "__rune_builtin_serial_close"
+        | "__rune_builtin_serial_flush" => Some(IrType::Unit),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"
         | "__rune_builtin_env_get_i32"

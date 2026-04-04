@@ -1948,6 +1948,32 @@ fn builds_arduino_uno_with_runtime_zero_division_guard() {
 }
 
 #[test]
+fn builds_arduino_uno_with_serial_flush() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_serial_flush.rn");
+    let output_path = dir.join("arduino_uno_serial_flush.hex");
+
+    fs::write(
+        &source_path,
+        "from serial import begin, flush, send_line\n\n\
+         def main() -> i32:\n    begin(115200)\n    send_line(\"ready\")\n    flush()\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno serial flush build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read serial flush hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_and_runs_program_with_c_ffi_on_windows() {
     let _guard = build_lock()
         .lock()

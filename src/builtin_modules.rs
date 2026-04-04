@@ -1186,6 +1186,12 @@ fn serial_program() -> Program {
             vec![expr_stmt(call_name("close", vec![]))],
         ),
         function(
+            "flush",
+            vec![param("self", "dynamic")],
+            "unit",
+            vec![expr_stmt(call_name("flush", vec![]))],
+        ),
+        function(
             "available",
             vec![param("self", "dynamic")],
             "i64",
@@ -1326,6 +1332,22 @@ fn serial_program() -> Program {
                         None,
                     ),
                     expr_stmt(call_name("__rune_builtin_serial_close", vec![])),
+                ],
+            )),
+            Item::Function(function(
+                "flush",
+                vec![],
+                "unit",
+                vec![
+                    if_stmt(
+                        call_name("__rune_builtin_system_is_embedded", vec![]),
+                        vec![
+                            expr_stmt(call_name("__rune_builtin_serial_flush", vec![])),
+                            return_unit_stmt(),
+                        ],
+                        None,
+                    ),
+                    expr_stmt(call_name("__rune_builtin_serial_flush", vec![])),
                 ],
             )),
             Item::Function(function(

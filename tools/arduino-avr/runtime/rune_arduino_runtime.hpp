@@ -503,6 +503,10 @@ extern "C" bool rune_rt_serial_write_line(void* text, uint64_t len) {
     return true;
 }
 
+extern "C" void rune_rt_serial_flush(void) {
+    Serial.flush();
+}
+
 extern "C" void* rune_rt_serial_read_line(void) {
     return rune_read_serial_line();
 }

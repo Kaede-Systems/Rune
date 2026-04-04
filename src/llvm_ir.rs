@@ -3087,6 +3087,16 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_serial_flush" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                self.declared_runtime
+                    .insert("declare void @rune_rt_serial_flush()\n".into());
+                out.push_str("  call void @rune_rt_serial_flush()\n");
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), "0".into());
+                }
+                return Ok(());
+            }
             "__rune_builtin_serial_read_line" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let ptr_reg = self.next_reg();
@@ -4134,7 +4144,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_serial_read_line_timeout" => {
             Some(IrType::String)
         }
-        "panic" => Some(IrType::Unit),
+        "panic" | "__rune_builtin_serial_flush" => Some(IrType::Unit),
         "str" | "repr" => Some(IrType::String),
         "int" => Some(IrType::I64),
         "__rune_builtin_gpio_mode_input"

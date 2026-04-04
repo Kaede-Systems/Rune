@@ -154,6 +154,10 @@ def uart_write(text: String) -> unit:
     __rune_builtin_arduino_uart_write(text)
     return
 
+def uart_flush() -> unit:
+    __rune_builtin_serial_flush()
+    return
+
 def interrupts_enable() -> unit:
     __rune_builtin_arduino_interrupts_enable()
     return

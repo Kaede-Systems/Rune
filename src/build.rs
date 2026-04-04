@@ -2378,8 +2378,18 @@ fn emit_arduino_uno_stmt_expr(
             }
             Ok(())
         }
+        "serial_flush" => {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`serial_flush` takes no arguments on the Arduino Uno target".into(),
+                    span: expr.span,
+                });
+            }
+            out.push_str(&format!("{prefix}Serial.flush();\n"));
+            Ok(())
+        }
         _ => Err(CodegenError {
-            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `interrupts_enable`, `interrupts_disable`, `random_seed`, `tone`, `no_tone`, `servo_detach`, `servo_write`, `servo_write_us`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `send`, and `send_line` statements".into(),
+            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `interrupts_enable`, `interrupts_disable`, `random_seed`, `tone`, `no_tone`, `servo_detach`, `servo_write`, `servo_write_us`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `serial_flush`, `send`, and `send_line` statements".into(),
             span: callee.span,
         }),
     }
@@ -4518,6 +4528,7 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_serial_open" => "open",
         "__rune_builtin_serial_is_open" => "is_open",
         "__rune_builtin_serial_close" => "close",
+        "__rune_builtin_serial_flush" => "serial_flush",
         "__rune_builtin_serial_read_line" => "recv_line",
         "__rune_builtin_serial_read_line_timeout" => "recv_line_timeout",
         "__rune_builtin_serial_write" => "send",
@@ -4570,6 +4581,7 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "open"
             | "is_open"
             | "close"
+            | "serial_flush"
             | "recv_line"
             | "recv_line_timeout"
             | "send"
@@ -7608,6 +7620,16 @@ pub extern "C" fn rune_rt_serial_close() {
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     *guard = None;
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_flush() {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if let Some(port) = guard.as_mut() {
+        let _ = port.flush();
+    }
 }
 
 #[unsafe(no_mangle)]

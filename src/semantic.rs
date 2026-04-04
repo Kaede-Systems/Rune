@@ -3299,6 +3299,15 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::Unit)
                 }
+                "__rune_builtin_serial_flush" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_flush` takes no arguments".to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::Unit)
+                }
                 "__rune_builtin_serial_read_line" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -3814,6 +3823,7 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_serial_open" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_is_open" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_close" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_flush" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_read_line" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_read_line_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_write" => Some(Type::Unknown("builtin".to_string())),

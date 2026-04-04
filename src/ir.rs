@@ -996,6 +996,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_network_udp_bind"
         | "__rune_builtin_network_udp_send"
         | "__rune_builtin_network_clear_error"
+        | "__rune_builtin_serial_flush"
         | "__rune_builtin_fs_exists"
         | "__rune_builtin_fs_set_current_dir"
         | "__rune_builtin_fs_write_string"

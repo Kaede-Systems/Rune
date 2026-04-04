@@ -154,3 +154,28 @@ fn loads_namespaced_modules_with_overlapping_exports() {
             .any(|name| name.contains("__mod_") && name.ends_with("__pin"))
     );
 }
+
+#[test]
+fn rejects_import_cycles_with_trace() {
+    let dir = temp_dir();
+    fs::write(
+        dir.join("left.rn"),
+        "import right\n\ndef left_value() -> i32:\n    return right.right_value()\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("right.rn"),
+        "import left\n\ndef right_value() -> i32:\n    return left.left_value()\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.rn"),
+        "import left\n\ndef main() -> i32:\n    return left.left_value()\n",
+    )
+    .unwrap();
+
+    let error = load_program_from_path(&dir.join("main.rn")).expect_err("cycle should fail");
+    let rendered = error.render();
+    assert!(rendered.contains("import cycle detected"));
+    assert!(rendered.contains("imported `left`") || rendered.contains("imported `right`"));
+}
