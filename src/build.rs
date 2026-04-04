@@ -2996,6 +2996,15 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
                 }
+                "peek_byte" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`peek_byte` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)Serial.peek())".into(), ArduinoUnoType::I64))
+                }
                 "recv_line_timeout" => {
                     let [CallArg::Positional(timeout_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -3041,6 +3050,22 @@ fn emit_arduino_uno_expr(
                             span: expr.span,
                         })?;
                     Ok((format!("(Serial.println({}), true)", text), ArduinoUnoType::Bool))
+                }
+                "write_byte" => {
+                    let [CallArg::Positional(value_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`write_byte` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let rendered = emit_arduino_uno_expr(scope, functions, structs, value_expr)?;
+                    if rendered.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer byte value for `write_byte`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("(Serial.write((uint8_t)({})), true)", rendered.0), ArduinoUnoType::Bool))
                 }
                 "str" | "repr" => {
                     let display_name = dispatch_name;
@@ -3185,6 +3210,15 @@ fn emit_arduino_uno_expr(
                         });
                     }
                     Ok(("((int64_t)Serial.read())".into(), ArduinoUnoType::I64))
+                }
+                "uart_peek_byte" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`uart_peek_byte` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)Serial.peek())".into(), ArduinoUnoType::I64))
                 }
                 "mode_input" => {
                     if !args.is_empty() {
@@ -3361,7 +3395,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -4518,6 +4552,7 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_arduino_uart_begin" => "uart_begin",
         "__rune_builtin_arduino_uart_available" => "uart_available",
         "__rune_builtin_arduino_uart_read_byte" => "uart_read_byte",
+        "__rune_builtin_arduino_uart_peek_byte" => "uart_peek_byte",
         "__rune_builtin_arduino_uart_write_byte" => "uart_write_byte",
         "__rune_builtin_arduino_uart_write" => "uart_write",
         "__rune_builtin_arduino_interrupts_enable" => "interrupts_enable",
@@ -4529,9 +4564,11 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_serial_is_open" => "is_open",
         "__rune_builtin_serial_close" => "close",
         "__rune_builtin_serial_flush" => "serial_flush",
+        "__rune_builtin_serial_peek_byte" => "peek_byte",
         "__rune_builtin_serial_read_line" => "recv_line",
         "__rune_builtin_serial_read_line_timeout" => "recv_line_timeout",
         "__rune_builtin_serial_write" => "send",
+        "__rune_builtin_serial_write_byte" => "write_byte",
         "__rune_builtin_serial_write_line" => "send_line",
         "__rune_builtin_sum_range" => "sum_range",
         "__rune_builtin_system_pid" => "pid",
@@ -4584,7 +4621,9 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "serial_flush"
             | "recv_line"
             | "recv_line_timeout"
+            | "peek_byte"
             | "send"
+            | "write_byte"
             | "send_line"
             | "str"
             | "int"
@@ -4592,6 +4631,7 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "uart_begin"
             | "uart_available"
             | "uart_read_byte"
+            | "uart_peek_byte"
             | "uart_write_byte"
             | "uart_write"
             | "mode_input"
@@ -6962,7 +7002,12 @@ thread_local! {
 
 static RUNE_ARDUINO_START: OnceLock<Instant> = OnceLock::new();
 static RUNE_ARDUINO_RANDOM_STATE: AtomicU64 = AtomicU64::new(0);
-static RUNE_HOST_SERIAL: OnceLock<std::sync::Mutex<Option<std::fs::File>>> = OnceLock::new();
+struct RuneHostSerialState {
+    port: std::fs::File,
+    peeked: Option<u8>,
+}
+
+static RUNE_HOST_SERIAL: OnceLock<std::sync::Mutex<Option<RuneHostSerialState>>> = OnceLock::new();
 static RUNE_NETWORK_ERROR: OnceLock<Mutex<(i32, String)>> = OnceLock::new();
 #[cfg(not(target_os = "wasi"))]
 static RUNE_NETWORK_SERVER_HANDLES: OnceLock<Mutex<HashMap<i32, TcpListener>>> = OnceLock::new();
@@ -6999,7 +7044,7 @@ fn rune_rt_store_string(value: String) -> *const u8 {
     })
 }
 
-fn rune_rt_serial_handle() -> &'static std::sync::Mutex<Option<std::fs::File>> {
+fn rune_rt_serial_handle() -> &'static std::sync::Mutex<Option<RuneHostSerialState>> {
     RUNE_HOST_SERIAL.get_or_init(|| std::sync::Mutex::new(None))
 }
 
@@ -7532,6 +7577,11 @@ pub extern "C" fn rune_rt_arduino_uart_read_byte() -> i64 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_arduino_uart_peek_byte() -> i64 {
+    rune_rt_serial_peek_byte()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_arduino_uart_write_byte(value: i64) {
     let byte = [value as u8];
     let _ = io::stdout().write_all(&byte);
@@ -7600,7 +7650,10 @@ pub extern "C" fn rune_rt_serial_open(port_ptr: *const u8, port_len: i64, baud: 
     let mut guard = rune_rt_serial_handle()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    *guard = Some(port);
+    *guard = Some(RuneHostSerialState {
+        port,
+        peeked: None,
+    });
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     std::thread::sleep(Duration::from_millis(1200));
     true
@@ -7627,8 +7680,8 @@ pub extern "C" fn rune_rt_serial_flush() {
     let mut guard = rune_rt_serial_handle()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    if let Some(port) = guard.as_mut() {
-        let _ = port.flush();
+    if let Some(state) = guard.as_mut() {
+        let _ = state.port.flush();
     }
 }
 
@@ -7641,13 +7694,13 @@ pub extern "C" fn rune_rt_serial_write(ptr: *const u8, len: i64) -> bool {
     let mut guard = rune_rt_serial_handle()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    let Some(port) = guard.as_mut() else {
+    let Some(state) = guard.as_mut() else {
         return false;
     };
-    if port.write_all(bytes).is_err() {
+    if state.port.write_all(bytes).is_err() {
         return false;
     }
-    port.flush().is_ok()
+    state.port.flush().is_ok()
 }
 
 #[unsafe(no_mangle)]
@@ -7659,16 +7712,16 @@ pub extern "C" fn rune_rt_serial_write_line(ptr: *const u8, len: i64) -> bool {
     let mut guard = rune_rt_serial_handle()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    let Some(port) = guard.as_mut() else {
+    let Some(state) = guard.as_mut() else {
         return false;
     };
-    if port.write_all(bytes).is_err() {
+    if state.port.write_all(bytes).is_err() {
         return false;
     }
-    if port.write_all(b"\n").is_err() {
+    if state.port.write_all(b"\n").is_err() {
         return false;
     }
-    port.flush().is_ok()
+    state.port.flush().is_ok()
 }
 
 #[unsafe(no_mangle)]
@@ -7677,11 +7730,49 @@ pub extern "C" fn rune_rt_serial_read_line() -> *const u8 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_peek_byte() -> i64 {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(state) = guard.as_mut() else {
+        return -1;
+    };
+    if let Some(byte) = state.peeked {
+        return byte as i64;
+    }
+    let mut byte = [0u8; 1];
+    match state.port.read(&mut byte) {
+        Ok(0) => -1,
+        Ok(_) => {
+            state.peeked = Some(byte[0]);
+            byte[0] as i64
+        }
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => -1,
+        Err(_) => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_write_byte(value: i64) -> bool {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(state) = guard.as_mut() else {
+        return false;
+    };
+    let byte = [value as u8];
+    if state.port.write_all(&byte).is_err() {
+        return false;
+    }
+    state.port.flush().is_ok()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_serial_read_line_timeout(timeout_ms: i64) -> *const u8 {
     let mut guard = rune_rt_serial_handle()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    let Some(port) = guard.as_mut() else {
+    let Some(state) = guard.as_mut() else {
         return rune_rt_store_string(String::new());
     };
 
@@ -7699,31 +7790,35 @@ pub extern "C" fn rune_rt_serial_read_line_timeout(timeout_ms: i64) -> *const u8
         {
             return rune_rt_store_string(String::new());
         }
-        match port.read(&mut byte) {
-            Ok(0) => {
-                std::thread::sleep(Duration::from_millis(10));
-                continue;
+        if let Some(cached) = state.peeked.take() {
+            byte[0] = cached;
+        } else {
+            match state.port.read(&mut byte) {
+                Ok(0) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+                    if !bytes.is_empty() {
+                        break;
+                    }
+                    if let Some(deadline) = deadline
+                        && std::time::Instant::now() >= deadline
+                    {
+                        return rune_rt_store_string(String::new());
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(_) => return rune_rt_store_string(String::new()),
             }
-            Ok(_) => {
-                if byte[0] == b'\n' {
-                    break;
-                }
-                if byte[0] != b'\r' {
-                    bytes.push(byte[0]);
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::TimedOut => {
-                if !bytes.is_empty() {
-                    break;
-                }
-                if let Some(deadline) = deadline
-                    && std::time::Instant::now() >= deadline
-                {
-                    return rune_rt_store_string(String::new());
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => return rune_rt_store_string(String::new()),
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        if byte[0] != b'\r' {
+            bytes.push(byte[0]);
         }
     }
 

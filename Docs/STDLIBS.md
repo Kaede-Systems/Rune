@@ -31,7 +31,7 @@ from arduino import (
     high, low,
     bit_order_lsb_first, bit_order_msb_first,
     analog_ref_default, analog_ref_internal, analog_ref_external,
-    uart_begin, uart_available, uart_read_byte, uart_write_byte, uart_write,
+    uart_begin, uart_available, uart_read_byte, uart_peek_byte, uart_write_byte, uart_write,
     uart_flush,
     interrupts_enable, interrupts_disable,
     random_seed, random_i64, random_range,
@@ -93,6 +93,7 @@ Exports:
 - `uart_begin(baud: i64) -> unit`
 - `uart_available() -> i64`
 - `uart_read_byte() -> i64`
+- `uart_peek_byte() -> i64`
 - `uart_write_byte(value: i64) -> unit`
 - `uart_write(text: String) -> unit`
 - `uart_flush() -> unit`
@@ -266,8 +267,8 @@ Current ADC limitations:
 
 ```rune
 from serial import begin, open, is_open, close
-from serial import available, read_byte, recv_line, recv_line_timeout, recv_nonempty_timeout
-from serial import flush, write, write_line, send, send_line
+from serial import available, read_byte, peek_byte, recv_line, recv_line_timeout, recv_nonempty_timeout
+from serial import flush, write, write_byte, write_line, send, send_line
 from serial import send_i64, send_bool, send_line_i64, send_line_bool
 from serial import SerialPort, serial_port
 ```
@@ -281,10 +282,12 @@ Exports:
 - `flush() -> unit`
 - `available() -> i64`
 - `read_byte() -> i64`
+- `peek_byte() -> i64`
 - `recv_line() -> String`
 - `recv_line_timeout(timeout_ms: i64) -> String`
 - `recv_nonempty_timeout(timeout_ms: i64) -> String`
 - `write(text: String) -> unit`
+- `write_byte(value: i64) -> bool`
 - `write_line(text: String) -> unit`
 - `send(value: dynamic) -> bool`
 - `send_i64(value: i64) -> bool`
@@ -299,17 +302,19 @@ Current implemented serial scope:
 
 - Rust-side built-in module surface for shared serial-facing Rune code
 - shared serial-facing Rune surface for embedded and host code
-- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_line_timeout`, `recv_nonempty`, `recv_nonempty_timeout`, `send`, and `send_line` method names
+- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_line_timeout`, `recv_nonempty`, `recv_nonempty_timeout`, `peek_byte`, `write_byte`, `send`, and `send_line` method names
 - typed serial helpers are also available as `send_i64`, `send_bool`, `send_line_i64`, and `send_line_bool`
 - on Arduino Uno:
   - `begin` lowers to `uart_begin`
   - `open` behaves like `begin`
+  - `peek_byte` lowers to UART peek
+  - `write_byte` lowers to UART byte writes and reports success
   - `write` and `write_line` lower to UART writes
   - `send` and `send_line` lower to UART writes and report success
   - `recv_line` lowers to the normal embedded input surface
 - on non-embedded targets:
   - `open` opens a host serial port such as `COM5`
-  - `is_open`, `close`, `flush`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
+  - `is_open`, `close`, `flush`, `peek_byte`, `write_byte`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
   - `write` / `write_line` still lower to `print` / `println`
 
 Current serial limitations:
@@ -319,6 +324,7 @@ Current serial limitations:
 - lower-level byte control remains in `arduino` via `uart_*`
 - current host serial scope is for native host builds, not browser/WASM targets
 - `recv_nonempty_timeout` returns `""` when the timeout expires instead of retrying forever
+- `peek_byte()` returns `-1` when no byte is available or no host serial connection is open
 
 ## `json`
 

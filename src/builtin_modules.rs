@@ -1204,6 +1204,12 @@ fn serial_program() -> Program {
             vec![return_stmt(call_name("read_byte", vec![]))],
         ),
         function(
+            "peek_byte",
+            vec![param("self", "dynamic")],
+            "i64",
+            vec![return_stmt(call_name("peek_byte", vec![]))],
+        ),
+        function(
             "recv_line",
             vec![param("self", "dynamic")],
             "String",
@@ -1238,6 +1244,12 @@ fn serial_program() -> Program {
             vec![param("self", "dynamic"), param("value", "dynamic")],
             "bool",
             vec![return_stmt(call_name("send", vec![pos(ident("value"))]))],
+        ),
+        function(
+            "write_byte",
+            vec![param("self", "dynamic"), param("value", "i64")],
+            "bool",
+            vec![return_stmt(call_name("write_byte", vec![pos(ident("value"))]))],
         ),
         function(
             "send_i64",
@@ -1383,6 +1395,22 @@ fn serial_program() -> Program {
                 ],
             )),
             Item::Function(function(
+                "peek_byte",
+                vec![],
+                "i64",
+                vec![
+                    if_stmt(
+                        call_name("__rune_builtin_system_is_embedded", vec![]),
+                        vec![return_stmt(call_name(
+                            "__rune_builtin_arduino_uart_peek_byte",
+                            vec![],
+                        ))],
+                        None,
+                    ),
+                    return_stmt(call_name("__rune_builtin_serial_peek_byte", vec![])),
+                ],
+            )),
+            Item::Function(function(
                 "recv_line",
                 vec![],
                 "String",
@@ -1516,6 +1544,28 @@ fn serial_program() -> Program {
                     return_stmt(call_name(
                         "__rune_builtin_serial_write",
                         vec![pos(ident("text"))],
+                    )),
+                ],
+            )),
+            Item::Function(function(
+                "write_byte",
+                vec![param("value", "i64")],
+                "bool",
+                vec![
+                    if_stmt(
+                        call_name("__rune_builtin_system_is_embedded", vec![]),
+                        vec![
+                            expr_stmt(call_name(
+                                "__rune_builtin_arduino_uart_write_byte",
+                                vec![pos(ident("value"))],
+                            )),
+                            return_stmt(bool_lit(true)),
+                        ],
+                        None,
+                    ),
+                    return_stmt(call_name(
+                        "__rune_builtin_serial_write_byte",
+                        vec![pos(ident("value"))],
                     )),
                 ],
             )),

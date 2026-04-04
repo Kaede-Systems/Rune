@@ -415,6 +415,10 @@ extern "C" int64_t rune_rt_arduino_uart_read_byte(void) {
     return (int64_t)Serial.read();
 }
 
+extern "C" int64_t rune_rt_arduino_uart_peek_byte(void) {
+    return (int64_t)Serial.peek();
+}
+
 extern "C" void rune_rt_arduino_uart_write_byte(int64_t value) {
     Serial.write((uint8_t)value);
 }
@@ -500,6 +504,15 @@ extern "C" bool rune_rt_serial_write(void* text, uint64_t len) {
 extern "C" bool rune_rt_serial_write_line(void* text, uint64_t len) {
     Serial.write((const uint8_t*)text, (size_t)len);
     rune_rt_print_newline();
+    return true;
+}
+
+extern "C" int64_t rune_rt_serial_peek_byte(void) {
+    return (int64_t)Serial.peek();
+}
+
+extern "C" bool rune_rt_serial_write_byte(int64_t value) {
+    Serial.write((uint8_t)value);
     return true;
 }
 

@@ -2967,6 +2967,17 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_arduino_uart_peek_byte" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_arduino_uart_peek_byte()\n".into());
+                out.push_str(&format!("  {reg} = call i64 @rune_rt_arduino_uart_peek_byte()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_arduino_uart_write_byte" => {
                 self.expect_plain_arity(callee, args, 1)?;
                 let value = self.resolve_value(&args[0].value, &IrType::I64, out)?;
@@ -3097,6 +3108,17 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_serial_peek_byte" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_serial_peek_byte()\n".into());
+                out.push_str(&format!("  {reg} = call i64 @rune_rt_serial_peek_byte()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_serial_read_line" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let ptr_reg = self.next_reg();
@@ -3145,6 +3167,20 @@ impl<'a> FunctionEmitter<'a> {
                 self.declared_runtime
                     .insert(format!("declare i1 @{runtime}(ptr, i64)\n"));
                 out.push_str(&format!("  {reg} = call i1 @{runtime}({ptr}, {len})\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "__rune_builtin_serial_write_byte" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let value = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_serial_write_byte(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i1 @rune_rt_serial_write_byte(i64 {value})\n"
+                ));
                 if let Some(dst) = dst {
                     self.value_map.insert(dst.clone(), reg);
                 }
@@ -4236,10 +4272,13 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_analog_ref_internal"
         | "__rune_builtin_arduino_analog_ref_external"
         | "__rune_builtin_arduino_uart_available"
+        | "__rune_builtin_arduino_uart_peek_byte"
+        | "__rune_builtin_serial_peek_byte"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),
         "__rune_builtin_serial_open"
         | "__rune_builtin_serial_is_open"
         | "__rune_builtin_serial_write"
+        | "__rune_builtin_serial_write_byte"
         | "__rune_builtin_serial_write_line" => Some(IrType::Bool),
         "__rune_builtin_system_pid"
         | "__rune_builtin_system_cpu_count"

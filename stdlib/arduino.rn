@@ -146,6 +146,9 @@ def uart_available() -> i64:
 def uart_read_byte() -> i64:
     return __rune_builtin_arduino_uart_read_byte()
 
+def uart_peek_byte() -> i64:
+    return __rune_builtin_arduino_uart_peek_byte()
+
 def uart_write_byte(value: i64) -> unit:
     __rune_builtin_arduino_uart_write_byte(value)
     return

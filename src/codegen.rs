@@ -2898,6 +2898,18 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_arduino_uart_peek_byte" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_arduino_uart_peek_byte` takes no arguments"
+                        .to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_arduino_uart_peek_byte\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_arduino_uart_write_byte" {
             let [CallArg::Positional(value_expr)] = args else {
                 return Err(CodegenError {
@@ -3064,6 +3076,17 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_serial_peek_byte" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_peek_byte` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_peek_byte\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_serial_write" || name == "__rune_builtin_serial_write_line" {
             let [CallArg::Positional(text_expr)] = args else {
                 return Err(CodegenError {
@@ -3078,6 +3101,20 @@ impl<'a> FunctionEmitter<'a> {
                 "rune_rt_serial_write_line"
             };
             out.push_str(&format!("    call {runtime}\n"));
+            out.push_str("    movzx eax, al\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_serial_write_byte" {
+            let [CallArg::Positional(value_expr)] = args else {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_write_byte` expects 1 positional argument"
+                        .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", value_expr)?;
+            out.push_str("    call rune_rt_serial_write_byte\n");
             out.push_str("    movzx eax, al\n");
             return Ok(());
         }
@@ -4303,6 +4340,16 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 self.emit_into_reg(out, "rcx", timeout_expr)?;
                 out.push_str("    call rune_rt_serial_read_line_timeout\n");
+            } else if name == "__rune_builtin_serial_peek_byte" {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message: "`__rune_builtin_serial_peek_byte` expects 0 positional arguments in the native backend"
+                            .into(),
+                        span: expr.span,
+                    });
+                }
+                out.push_str("    call rune_rt_serial_peek_byte\n");
+                return Ok(());
             } else {
                 return Err(CodegenError {
                     message: format!(
@@ -5682,6 +5729,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_gpio_mode_input_pullup"
         | "__rune_builtin_gpio_pwm_duty_max"
         | "__rune_builtin_gpio_analog_max"
+        | "__rune_builtin_arduino_uart_peek_byte"
+        | "__rune_builtin_serial_peek_byte"
         | "__rune_builtin_arduino_mode_input"
         | "__rune_builtin_arduino_mode_output"
         | "__rune_builtin_arduino_mode_input_pullup"
@@ -5699,6 +5748,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_servo_attach"
         | "__rune_builtin_serial_is_open"
         | "__rune_builtin_serial_write"
+        | "__rune_builtin_serial_write_byte"
         | "__rune_builtin_serial_write_line" => Some(IrType::Bool),
         "__rune_builtin_env_exists"
         | "__rune_builtin_env_get_bool"
