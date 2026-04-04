@@ -140,15 +140,18 @@ extern "C" int64_t rune_rt_last_string_len(void) {
     return rune_last_string_len;
 }
 
-extern "C" void rune_rt_print_str(void* text, uint64_t len) {
+extern "C" void rune_rt_print_str(const char* text, uint64_t len) {
+#if RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME
     Serial.write((const uint8_t*)text, (size_t)len);
+#endif
 }
 
-extern "C" void rune_rt_eprint_str(void* text, uint64_t len) {
-    Serial.write((const uint8_t*)text, (size_t)len);
+extern "C" void rune_rt_eprint_str(const char* text, uint64_t len) {
+    rune_rt_print_str(text, len);
 }
 
 extern "C" void rune_rt_print_i64(int64_t value) {
+#if RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME
     char buffer[24];
     uint8_t index = 0;
     uint64_t magnitude = (value < 0) ? (uint64_t)(-value) : (uint64_t)value;
@@ -166,6 +169,7 @@ extern "C" void rune_rt_print_i64(int64_t value) {
     while (index > 0) {
         Serial.write(buffer[--index]);
     }
+#endif
 }
 
 extern "C" void rune_rt_eprint_i64(int64_t value) {
@@ -173,22 +177,31 @@ extern "C" void rune_rt_eprint_i64(int64_t value) {
 }
 
 extern "C" void rune_rt_print_bool(int64_t value) {
+#if RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME
     Serial.print(value != 0 ? "true" : "false");
+#endif
 }
 
 extern "C" void rune_rt_eprint_bool(int64_t value) {
-    Serial.print(value != 0 ? "true" : "false");
+    rune_rt_print_bool(value);
 }
 
 extern "C" void rune_rt_print_newline(void) {
+#if RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME
     Serial.write('\r');
     Serial.write('\n');
+#endif
 }
 
 extern "C" void rune_rt_fail(int32_t code) {
-    Serial.begin(115200);
+#if RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME || defined(RUNE_ARDUINO_FORCE_SERIAL_FAIL)
+    if (!rune_serial_is_open_flag) {
+        Serial.begin(115200);
+        rune_serial_is_open_flag = true;
+    }
     Serial.print("ERR E");
     Serial.println(code);
+#endif
     for (;;) {
         delay(1000);
     }
@@ -211,11 +224,10 @@ static int64_t rune_checked_mod_i64(int64_t left, int64_t right) {
 }
 
 extern "C" void rune_rt_eprint_newline(void) {
-    Serial.write('\r');
-    Serial.write('\n');
+    rune_rt_print_newline();
 }
 
-extern "C" int32_t rune_rt_string_compare(void* left_ptr, uint64_t left_len, void* right_ptr, uint64_t right_len) {
+extern "C" int32_t rune_rt_string_compare(const char* left_ptr, uint64_t left_len, const char* right_ptr, uint64_t right_len) {
     return rune_compare_bytes((const uint8_t*)left_ptr, left_len, (const uint8_t*)right_ptr, right_len);
 }
 
@@ -251,7 +263,7 @@ extern "C" void* rune_rt_string_from_bool(bool value) {
     return (void*)rune_store_string_literal(value ? "true" : "false");
 }
 
-extern "C" void* rune_rt_string_concat(void* left_ptr, int64_t left_len, void* right_ptr, int64_t right_len) {
+extern "C" void* rune_rt_string_concat(const char* left_ptr, int64_t left_len, const char* right_ptr, int64_t right_len) {
     char* slot = rune_claim_string_slot();
     size_t used = 0;
     size_t left_copy = left_len < (int64_t)(RUNE_STRING_SLOT_SIZE - 1) ? (size_t)left_len : RUNE_STRING_SLOT_SIZE - 1;
@@ -267,7 +279,7 @@ extern "C" void* rune_rt_string_concat(void* left_ptr, int64_t left_len, void* r
 }
 #endif
 
-extern "C" int64_t rune_rt_string_to_i64(void* ptr, uint64_t len) {
+extern "C" int64_t rune_rt_string_to_i64(const char* ptr, uint64_t len) {
     char buffer[32];
     size_t copy_len = len < sizeof(buffer) - 1 ? (size_t)len : sizeof(buffer) - 1;
     memcpy(buffer, ptr, copy_len);
@@ -285,6 +297,8 @@ extern "C" int64_t rune_rt_string_to_i64(void* ptr, uint64_t len) {
     }
     return negative ? -value : value;
 }
+
+
 
 #if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" void* rune_rt_dynamic_to_string(int64_t tag, int64_t payload, int64_t extra) {

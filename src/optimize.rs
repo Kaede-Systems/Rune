@@ -21,6 +21,7 @@ pub fn prune_program_for_executable(program: &mut Program) {
 pub fn prune_program_to_entry_roots(program: &mut Program, entry_roots: &[&str]) {
     let mut function_map = HashMap::new();
     let mut struct_map = HashMap::new();
+    let mut exception_names = HashSet::new();
     for item in &program.items {
         match item {
             Item::Function(function) => {
@@ -32,12 +33,16 @@ pub fn prune_program_to_entry_roots(program: &mut Program, entry_roots: &[&str])
                     function_map.insert(struct_method_symbol(&decl.name, &method.name), method);
                 }
             }
-            Item::Import(_) | Item::Exception(_) => {}
+            Item::Import(_) => {}
+            Item::Exception(exception) => {
+                exception_names.insert(exception.name.clone());
+            }
         }
     }
 
     let mut reachable_functions = HashSet::new();
     let mut reachable_structs = HashSet::new();
+    let mut reachable_exceptions = HashSet::new();
     let mut queue = VecDeque::new();
 
     for root in entry_roots {
@@ -50,13 +55,22 @@ pub fn prune_program_to_entry_roots(program: &mut Program, entry_roots: &[&str])
         match item {
             ReachableItem::Function(name) => {
                 if let Some(function) = function_map.get(&name) {
-                    collect_function_type_deps(function, &struct_map, &mut reachable_structs, &mut queue);
+                    collect_function_type_deps(
+                        function,
+                        &struct_map,
+                        &exception_names,
+                        &mut reachable_structs,
+                        &mut reachable_exceptions,
+                        &mut queue,
+                    );
                     collect_block_deps(
                         &function.body,
                         &function_map,
                         &struct_map,
+                        &exception_names,
                         &mut reachable_functions,
                         &mut reachable_structs,
+                        &mut reachable_exceptions,
                         &mut queue,
                     );
                 }
@@ -86,7 +100,8 @@ pub fn prune_program_to_entry_roots(program: &mut Program, entry_roots: &[&str])
     }
 
     program.items.retain(|item| match item {
-        Item::Import(_) | Item::Exception(_) => true,
+        Item::Import(_) => true,
+        Item::Exception(exception) => reachable_exceptions.contains(&exception.name),
         Item::Function(function) => reachable_functions.contains(&function.name),
         Item::Struct(decl) => reachable_structs.contains(&decl.name),
     });
@@ -105,7 +120,9 @@ fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {
 fn collect_function_type_deps(
     function: &Function,
     struct_map: &HashMap<String, &StructDecl>,
+    exception_names: &HashSet<String>,
     reachable_structs: &mut HashSet<String>,
+    reachable_exceptions: &mut HashSet<String>,
     queue: &mut VecDeque<ReachableItem>,
 ) {
     for param in &function.params {
@@ -115,7 +132,11 @@ fn collect_function_type_deps(
         collect_type_ref_deps(return_type, struct_map, reachable_structs, queue);
     }
     if let Some(raises) = &function.raises {
-        collect_type_ref_deps(raises, struct_map, reachable_structs, queue);
+        if exception_names.contains(&raises.name) {
+            reachable_exceptions.insert(raises.name.clone());
+        } else {
+            collect_type_ref_deps(raises, struct_map, reachable_structs, queue);
+        }
     }
 }
 
@@ -134,8 +155,10 @@ fn collect_block_deps(
     block: &Block,
     function_map: &HashMap<String, &Function>,
     struct_map: &HashMap<String, &StructDecl>,
+    exception_names: &HashSet<String>,
     reachable_functions: &mut HashSet<String>,
     reachable_structs: &mut HashSet<String>,
+    reachable_exceptions: &mut HashSet<String>,
     queue: &mut VecDeque<ReachableItem>,
 ) {
     for stmt in &block.statements {
@@ -143,8 +166,10 @@ fn collect_block_deps(
             stmt,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         );
     }
@@ -154,8 +179,10 @@ fn collect_stmt_deps(
     stmt: &Stmt,
     function_map: &HashMap<String, &Function>,
     struct_map: &HashMap<String, &StructDecl>,
+    exception_names: &HashSet<String>,
     reachable_functions: &mut HashSet<String>,
     reachable_structs: &mut HashSet<String>,
+    reachable_exceptions: &mut HashSet<String>,
     queue: &mut VecDeque<ReachableItem>,
 ) {
     match stmt {
@@ -163,8 +190,10 @@ fn collect_stmt_deps(
             &stmt.block,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         Stmt::Let(stmt) => {
@@ -175,8 +204,10 @@ fn collect_stmt_deps(
                 &stmt.value,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
         }
@@ -184,8 +215,10 @@ fn collect_stmt_deps(
             &stmt.value,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         Stmt::Return(stmt) => {
@@ -194,8 +227,10 @@ fn collect_stmt_deps(
                     value,
                     function_map,
                     struct_map,
+                    exception_names,
                     reachable_functions,
                     reachable_structs,
+                    reachable_exceptions,
                     queue,
                 );
             }
@@ -205,16 +240,20 @@ fn collect_stmt_deps(
                 &stmt.condition,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
             collect_block_deps(
                 &stmt.then_block,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
             for elif in &stmt.elif_blocks {
@@ -222,16 +261,20 @@ fn collect_stmt_deps(
                     &elif.condition,
                     function_map,
                     struct_map,
+                    exception_names,
                     reachable_functions,
                     reachable_structs,
+                    reachable_exceptions,
                     queue,
                 );
                 collect_block_deps(
                     &elif.block,
                     function_map,
                     struct_map,
+                    exception_names,
                     reachable_functions,
                     reachable_structs,
+                    reachable_exceptions,
                     queue,
                 );
             }
@@ -240,8 +283,10 @@ fn collect_stmt_deps(
                     block,
                     function_map,
                     struct_map,
+                    exception_names,
                     reachable_functions,
                     reachable_structs,
+                    reachable_exceptions,
                     queue,
                 );
             }
@@ -251,16 +296,20 @@ fn collect_stmt_deps(
                 &stmt.condition,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
             collect_block_deps(
                 &stmt.body,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
         }
@@ -268,24 +317,30 @@ fn collect_stmt_deps(
             &stmt.value,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         Stmt::Panic(stmt) => collect_expr_deps(
             &stmt.value,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         Stmt::Expr(stmt) => collect_expr_deps(
             &stmt.expr,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         Stmt::Break(_) | Stmt::Continue(_) => {}
@@ -296,8 +351,10 @@ fn collect_expr_deps(
     expr: &Expr,
     function_map: &HashMap<String, &Function>,
     struct_map: &HashMap<String, &StructDecl>,
+    exception_names: &HashSet<String>,
     reachable_functions: &mut HashSet<String>,
     reachable_structs: &mut HashSet<String>,
+    reachable_exceptions: &mut HashSet<String>,
     queue: &mut VecDeque<ReachableItem>,
 ) {
     match &expr.kind {
@@ -306,8 +363,10 @@ fn collect_expr_deps(
             expr,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         ExprKind::Binary { left, right, .. } => {
@@ -315,16 +374,20 @@ fn collect_expr_deps(
                 left,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
             collect_expr_deps(
                 right,
                 function_map,
                 struct_map,
+                exception_names,
                 reachable_functions,
                 reachable_structs,
+                reachable_exceptions,
                 queue,
             );
         }
@@ -332,8 +395,10 @@ fn collect_expr_deps(
             base,
             function_map,
             struct_map,
+            exception_names,
             reachable_functions,
             reachable_structs,
+            reachable_exceptions,
             queue,
         ),
         ExprKind::Call { callee, args } => {
@@ -343,16 +408,20 @@ fn collect_expr_deps(
                         expr,
                         function_map,
                         struct_map,
+                        exception_names,
                         reachable_functions,
                         reachable_structs,
+                        reachable_exceptions,
                         queue,
                     ),
                     CallArg::Keyword { value, .. } => collect_expr_deps(
                         value,
                         function_map,
                         struct_map,
+                        exception_names,
                         reachable_functions,
                         reachable_structs,
+                        reachable_exceptions,
                         queue,
                     ),
                 }
@@ -364,7 +433,16 @@ fn collect_expr_deps(
                         if reachable_functions.insert(name.clone()) {
                             queue.push_back(ReachableItem::Function(name.clone()));
                         }
-                        collect_function_type_deps(function, struct_map, reachable_structs, queue);
+                        collect_function_type_deps(
+                            function,
+                            struct_map,
+                            exception_names,
+                            reachable_structs,
+                            reachable_exceptions,
+                            queue,
+                        );
+                    } else if exception_names.contains(name) {
+                        reachable_exceptions.insert(name.clone());
                     } else if struct_map.contains_key(name) && reachable_structs.insert(name.clone()) {
                         queue.push_back(ReachableItem::Struct(name.clone()));
                     }
@@ -374,8 +452,10 @@ fn collect_expr_deps(
                         base,
                         function_map,
                         struct_map,
+                        exception_names,
                         reachable_functions,
                         reachable_structs,
+                        reachable_exceptions,
                         queue,
                     );
                     if let ExprKind::Identifier(struct_name) = &base.kind
@@ -394,8 +474,10 @@ fn collect_expr_deps(
                     callee,
                     function_map,
                     struct_map,
+                    exception_names,
                     reachable_functions,
                     reachable_structs,
+                    reachable_exceptions,
                     queue,
                 ),
             }

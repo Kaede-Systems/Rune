@@ -2759,6 +2759,10 @@ fn arduino_uno_runtime_profile(program: &Program, llvm_ir: &str) -> ArduinoUnoRu
         "rune_rt_serial_flush",
         "rune_rt_serial_read_line",
         "rune_rt_serial_close",
+        "rune_rt_print_str",
+        "rune_rt_print_i64",
+        "rune_rt_print_bool",
+        "rune_rt_print_newline",
     ]
     .iter()
     .any(|name| uses_runtime_symbol(name));

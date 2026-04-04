@@ -62,3 +62,38 @@ fn prunes_unreachable_functions_for_executable_roots() {
     assert!(function_names.contains(&"live"));
     assert!(!function_names.contains(&"dead_helper"));
 }
+
+#[test]
+fn prunes_unreachable_exceptions_for_executable_roots() {
+    let mut program = parse_source(
+        r#"exception UsedError
+exception DeadError
+
+def helper() -> unit raises UsedError:
+    raise UsedError("bad")
+
+def dead_helper() -> unit raises DeadError:
+    raise DeadError("dead")
+
+def main() -> i32:
+    helper()
+    return 0
+"#,
+    )
+    .unwrap();
+
+    optimize_program(&mut program);
+    prune_program_for_executable(&mut program);
+
+    let exception_names = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Exception(exception) => Some(exception.name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(exception_names.contains(&"UsedError"));
+    assert!(!exception_names.contains(&"DeadError"));
+}
