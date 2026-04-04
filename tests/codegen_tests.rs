@@ -367,6 +367,17 @@ fn lowers_panic_to_runtime_call() {
 }
 
 #[test]
+fn lowers_zero_division_to_runtime_error_code() {
+    let asm = emit_asm_source(
+        "def main() -> i32:\n    let value: i64 = 10\n    let zero: i64 = 0\n    println(value / zero)\n    return 0\n",
+    )
+    .expect("zero division should lower");
+
+    assert!(asm.contains("call rune_rt_fail"));
+    assert!(asm.contains("mov ecx, 1001"));
+}
+
+#[test]
 fn lowers_dynamic_comparisons_through_runtime_helper() {
     let asm = emit_asm_source(
         "def main() -> i32:\n    let value = 40\n    value = \"40\"\n    if value == 40:\n        println(\"eq\")\n    if value != 99:\n        println(\"ne\")\n    return 0\n",

@@ -983,21 +983,9 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
-    fn emit_zero_division_panic(
-        &mut self,
-        out: &mut String,
-        span: Span,
-        operation: &str,
-    ) {
-        let message = format!("{operation} by zero");
-        let message_label = self.intern_string(&message);
-        let context = format!("ZeroDivisionError in {} at line {}", self.function_name, span.line);
-        let context_label = self.intern_string(&context);
-        out.push_str(&format!("    lea rcx, {message_label}[rip]\n"));
-        out.push_str(&format!("    mov rdx, {}\n", message.len()));
-        out.push_str(&format!("    lea r8, {context_label}[rip]\n"));
-        out.push_str(&format!("    mov r9, {}\n", context.len()));
-        out.push_str("    call rune_rt_panic\n");
+    fn emit_runtime_error_code(&mut self, out: &mut String, error_code: i32) {
+        out.push_str(&format!("    mov ecx, {error_code}\n"));
+        out.push_str("    call rune_rt_fail\n");
         out.push_str("    mov eax, 101\n");
         out.push_str(&format!(
             "    jmp {}.return\n",
@@ -1245,7 +1233,8 @@ impl<'a> FunctionEmitter<'a> {
                         let ok_label = self.next_label("div_ok");
                         out.push_str("    cmp rcx, 0\n");
                         out.push_str(&format!("    jne {ok_label}\n"));
-                        self.emit_zero_division_panic(out, expr.span, "division");
+                        let _ = expr.span;
+                        self.emit_runtime_error_code(out, 1001);
                         out.push_str(&format!("{ok_label}:\n"));
                         out.push_str("    cqo\n");
                         out.push_str("    idiv rcx\n");
@@ -1254,7 +1243,8 @@ impl<'a> FunctionEmitter<'a> {
                         let ok_label = self.next_label("mod_ok");
                         out.push_str("    cmp rcx, 0\n");
                         out.push_str(&format!("    jne {ok_label}\n"));
-                        self.emit_zero_division_panic(out, expr.span, "modulo");
+                        let _ = expr.span;
+                        self.emit_runtime_error_code(out, 1002);
                         out.push_str(&format!("{ok_label}:\n"));
                         out.push_str("    cqo\n");
                         out.push_str("    idiv rcx\n");

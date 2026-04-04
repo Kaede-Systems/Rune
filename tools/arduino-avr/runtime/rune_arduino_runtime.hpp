@@ -9,15 +9,70 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char rune_input_buffer[128];
+#ifndef RUNE_INPUT_BUFFER_SIZE
+#define RUNE_INPUT_BUFFER_SIZE 128
+#endif
+
+#ifndef RUNE_STRING_SLOT_COUNT
+#define RUNE_STRING_SLOT_COUNT 8
+#endif
+
+#ifndef RUNE_STRING_SLOT_SIZE
+#define RUNE_STRING_SLOT_SIZE 96
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_STRING_RUNTIME
+#define RUNE_ARDUINO_ENABLE_STRING_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
+#define RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_SYSTEM_RUNTIME
+#define RUNE_ARDUINO_ENABLE_SYSTEM_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_ENV_RUNTIME
+#define RUNE_ARDUINO_ENABLE_ENV_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME
+#define RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_INTERRUPT_RUNTIME
+#define RUNE_ARDUINO_ENABLE_INTERRUPT_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_RANDOM_RUNTIME
+#define RUNE_ARDUINO_ENABLE_RANDOM_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_GPIO_RUNTIME
+#define RUNE_ARDUINO_ENABLE_GPIO_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_SHIFT_RUNTIME
+#define RUNE_ARDUINO_ENABLE_SHIFT_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_TONE_RUNTIME
+#define RUNE_ARDUINO_ENABLE_TONE_RUNTIME 1
+#endif
+
+#ifndef RUNE_ARDUINO_ENABLE_UART_PEEK_RUNTIME
+#define RUNE_ARDUINO_ENABLE_UART_PEEK_RUNTIME 1
+#endif
+
+static char rune_input_buffer[RUNE_INPUT_BUFFER_SIZE];
 static int64_t rune_last_string_len = 0;
 static bool rune_serial_is_open_flag = false;
 
-#define RUNE_STRING_SLOT_COUNT 8
-#define RUNE_STRING_SLOT_SIZE 96
-
+#if RUNE_ARDUINO_ENABLE_STRING_RUNTIME
 static char rune_string_slots[RUNE_STRING_SLOT_COUNT][RUNE_STRING_SLOT_SIZE];
 static uint8_t rune_string_slot_index = 0;
+#endif
 #ifdef RUNE_ARDUINO_ENABLE_SERVO
 alignas(Servo) static unsigned char rune_servo_storage[20][sizeof(Servo)];
 static Servo* rune_servo_slots[20] = { nullptr };
@@ -25,6 +80,7 @@ static bool rune_servo_constructed_flags[20] = { false };
 static bool rune_servo_attached_flags[20] = { false };
 #endif
 
+#if RUNE_ARDUINO_ENABLE_STRING_RUNTIME
 static char* rune_claim_string_slot(void) {
     char* slot = rune_string_slots[rune_string_slot_index];
     rune_string_slot_index = (uint8_t)((rune_string_slot_index + 1) % RUNE_STRING_SLOT_COUNT);
@@ -59,6 +115,7 @@ static const char* rune_store_string_literal(const char* text) {
     rune_last_string_len = (int64_t)strlen(text);
     return text;
 }
+#endif
 
 static int rune_compare_bytes(const uint8_t* left, uint64_t left_len, const uint8_t* right, uint64_t right_len) {
     uint64_t shared = left_len < right_len ? left_len : right_len;
@@ -128,11 +185,10 @@ extern "C" void rune_rt_print_newline(void) {
     Serial.write('\n');
 }
 
-static void rune_zero_division_error(const char* operation) {
+extern "C" void rune_rt_fail(int32_t code) {
     Serial.begin(115200);
-    Serial.print("ZeroDivisionError: ");
-    Serial.print(operation);
-    Serial.println(" by zero");
+    Serial.print("ERR E");
+    Serial.println(code);
     for (;;) {
         delay(1000);
     }
@@ -140,7 +196,7 @@ static void rune_zero_division_error(const char* operation) {
 
 static int64_t rune_checked_div_i64(int64_t left, int64_t right) {
     if (right == 0) {
-        rune_zero_division_error("division");
+        rune_rt_fail(1001);
         return 0;
     }
     return left / right;
@@ -148,7 +204,7 @@ static int64_t rune_checked_div_i64(int64_t left, int64_t right) {
 
 static int64_t rune_checked_mod_i64(int64_t left, int64_t right) {
     if (right == 0) {
-        rune_zero_division_error("modulo");
+        rune_rt_fail(1002);
         return 0;
     }
     return left % right;
@@ -163,6 +219,7 @@ extern "C" int32_t rune_rt_string_compare(void* left_ptr, uint64_t left_len, voi
     return rune_compare_bytes((const uint8_t*)left_ptr, left_len, (const uint8_t*)right_ptr, right_len);
 }
 
+#if RUNE_ARDUINO_ENABLE_STRING_RUNTIME
 extern "C" void* rune_rt_string_from_i64(int64_t value) {
     char* slot = rune_claim_string_slot();
     uint8_t index = 0;
@@ -208,6 +265,7 @@ extern "C" void* rune_rt_string_concat(void* left_ptr, int64_t left_len, void* r
     rune_last_string_len = (int64_t)used;
     return slot;
 }
+#endif
 
 extern "C" int64_t rune_rt_string_to_i64(void* ptr, uint64_t len) {
     char buffer[32];
@@ -228,6 +286,7 @@ extern "C" int64_t rune_rt_string_to_i64(void* ptr, uint64_t len) {
     return negative ? -value : value;
 }
 
+#if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" void* rune_rt_dynamic_to_string(int64_t tag, int64_t payload, int64_t extra) {
     switch (tag) {
         case 0:
@@ -256,7 +315,9 @@ extern "C" void rune_rt_eprint_dynamic(int64_t tag, int64_t payload, int64_t ext
     void* text = rune_rt_dynamic_to_string(tag, payload, extra);
     rune_rt_eprint_str(text, (uint64_t)rune_last_string_len);
 }
+#endif
 
+#if RUNE_ARDUINO_ENABLE_SYSTEM_RUNTIME
 extern "C" bool rune_rt_system_is_embedded(void) {
     return true;
 }
@@ -280,7 +341,9 @@ extern "C" void* rune_rt_system_board(void) {
 extern "C" bool rune_rt_system_is_wasm(void) {
     return false;
 }
+#endif
 
+#if RUNE_ARDUINO_ENABLE_ENV_RUNTIME
 extern "C" int32_t rune_rt_env_arg_count(void) {
     return 0;
 }
@@ -296,7 +359,9 @@ extern "C" void* rune_rt_env_arg(int32_t index) {
     (void)index;
     return (void*)rune_store_string_literal("");
 }
+#endif
 
+#if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" int64_t rune_rt_sum_range(int64_t start, int64_t stop, int64_t step) {
     if (step == 0) {
         return 0;
@@ -401,6 +466,7 @@ extern "C" bool rune_rt_dynamic_compare(const int64_t* left, const int64_t* righ
         default: return false;
     }
 }
+#endif
 
 extern "C" void rune_rt_arduino_uart_begin(int64_t baud) {
     Serial.begin((unsigned long)baud);
@@ -415,9 +481,11 @@ extern "C" int64_t rune_rt_arduino_uart_read_byte(void) {
     return (int64_t)Serial.read();
 }
 
+#if RUNE_ARDUINO_ENABLE_UART_PEEK_RUNTIME
 extern "C" int64_t rune_rt_arduino_uart_peek_byte(void) {
     return (int64_t)Serial.peek();
 }
+#endif
 
 extern "C" void rune_rt_arduino_uart_write_byte(int64_t value) {
     Serial.write((uint8_t)value);
@@ -427,6 +495,7 @@ extern "C" void rune_rt_arduino_uart_write(void* text, uint64_t len) {
     Serial.write((const uint8_t*)text, (size_t)len);
 }
 
+#if RUNE_ARDUINO_ENABLE_INTERRUPT_RUNTIME
 extern "C" void rune_rt_arduino_interrupts_enable(void) {
     interrupts();
 }
@@ -434,7 +503,9 @@ extern "C" void rune_rt_arduino_interrupts_enable(void) {
 extern "C" void rune_rt_arduino_interrupts_disable(void) {
     noInterrupts();
 }
+#endif
 
+#if RUNE_ARDUINO_ENABLE_RANDOM_RUNTIME
 extern "C" void rune_rt_arduino_random_seed(int64_t seed) {
     randomSeed((unsigned long)seed);
 }
@@ -452,6 +523,7 @@ extern "C" int64_t rune_rt_arduino_random_range(int64_t min_value, int64_t max_v
     }
     return (int64_t)random((long)min_value, (long)max_value);
 }
+#endif
 
 static void* rune_read_serial_line(void) {
     size_t index = 0;
@@ -484,6 +556,7 @@ extern "C" void* rune_rt_input_line(void) {
     return rune_read_serial_line();
 }
 
+#if RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME
 extern "C" bool rune_rt_serial_is_open(void) {
     return rune_serial_is_open_flag;
 }
@@ -527,7 +600,9 @@ extern "C" void* rune_rt_serial_read_line(void) {
 extern "C" void rune_rt_serial_close(void) {
     Serial.flush();
 }
+#endif
 
+#if RUNE_ARDUINO_ENABLE_GPIO_RUNTIME
 extern "C" void rune_rt_arduino_pin_mode(int64_t pin, int64_t mode) {
     pinMode((uint8_t)pin, (uint8_t)mode);
 }
@@ -554,22 +629,6 @@ extern "C" void rune_rt_arduino_analog_reference(int64_t mode) {
 
 extern "C" int64_t rune_rt_arduino_pulse_in(int64_t pin, bool state, int64_t timeout_us) {
     return (int64_t)pulseIn((uint8_t)pin, state ? HIGH : LOW, (unsigned long)timeout_us);
-}
-
-extern "C" void rune_rt_arduino_shift_out(int64_t data_pin, int64_t clock_pin, int64_t bit_order, int64_t value) {
-    shiftOut((uint8_t)data_pin, (uint8_t)clock_pin, (uint8_t)bit_order, (uint8_t)value);
-}
-
-extern "C" int64_t rune_rt_arduino_shift_in(int64_t data_pin, int64_t clock_pin, int64_t bit_order) {
-    return (int64_t)shiftIn((uint8_t)data_pin, (uint8_t)clock_pin, (uint8_t)bit_order);
-}
-
-extern "C" void rune_rt_arduino_tone(int64_t pin, int64_t frequency_hz, int64_t duration_ms) {
-    tone((uint8_t)pin, (unsigned int)frequency_hz, (unsigned long)duration_ms);
-}
-
-extern "C" void rune_rt_arduino_no_tone(int64_t pin) {
-    noTone((uint8_t)pin);
 }
 
 #ifdef RUNE_ARDUINO_ENABLE_SERVO
@@ -679,6 +738,27 @@ extern "C" int64_t rune_rt_arduino_analog_ref_internal(void) {
 extern "C" int64_t rune_rt_arduino_analog_ref_external(void) {
     return EXTERNAL;
 }
+#endif
+
+#if RUNE_ARDUINO_ENABLE_SHIFT_RUNTIME
+extern "C" void rune_rt_arduino_shift_out(int64_t data_pin, int64_t clock_pin, int64_t bit_order, int64_t value) {
+    shiftOut((uint8_t)data_pin, (uint8_t)clock_pin, (uint8_t)bit_order, (uint8_t)value);
+}
+
+extern "C" int64_t rune_rt_arduino_shift_in(int64_t data_pin, int64_t clock_pin, int64_t bit_order) {
+    return (int64_t)shiftIn((uint8_t)data_pin, (uint8_t)clock_pin, (uint8_t)bit_order);
+}
+#endif
+
+#if RUNE_ARDUINO_ENABLE_TONE_RUNTIME
+extern "C" void rune_rt_arduino_tone(int64_t pin, int64_t frequency_hz, int64_t duration_ms) {
+    tone((uint8_t)pin, (unsigned int)frequency_hz, (unsigned long)duration_ms);
+}
+
+extern "C" void rune_rt_arduino_no_tone(int64_t pin) {
+    noTone((uint8_t)pin);
+}
+#endif
 
 #if defined(RUNE_ARDUINO_ENTRY_MAIN)
 extern "C" int rune_entry_main(void);

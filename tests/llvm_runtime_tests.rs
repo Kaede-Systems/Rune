@@ -216,8 +216,7 @@ fn llvm_backend_builds_and_runs_zero_division_error_program_on_windows() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
-    assert!(stderr.contains("Rune panic: division by zero"));
-    assert!(stderr.contains("ZeroDivisionError in main"));
+    assert!(stderr.contains("Rune error E1001: division by zero"));
 }
 
 #[test]

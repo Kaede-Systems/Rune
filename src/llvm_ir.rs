@@ -374,12 +374,12 @@ impl<'a> FunctionEmitter<'a> {
         label
     }
 
-    fn emit_zero_division_panic(
+    fn emit_runtime_error_code(
         &mut self,
         out: &mut String,
         divisor: &str,
         divisor_ty: &IrType,
-        operation: &str,
+        error_code: i32,
     ) -> Result<(), LlvmIrError> {
         let cmp = self.next_reg();
         let trap_label = self.next_label("divzero");
@@ -392,15 +392,9 @@ impl<'a> FunctionEmitter<'a> {
             "  br i1 {cmp}, label %{trap_label}, label %{ok_label}\n"
         ));
         out.push_str(&format!("{trap_label}:\n"));
-        let message = self.intern_string_ref(&format!("{operation} by zero"));
-        let (msg_ptr, msg_len) = split_string_value(&message)?;
-        let context = self.intern_string_ref(&format!("ZeroDivisionError in {}", self.function_name));
-        let (ctx_ptr, ctx_len) = split_string_value(&context)?;
         self.declared_runtime
-            .insert("declare void @rune_rt_panic(ptr, i64, ptr, i64)\n".into());
-        out.push_str(&format!(
-            "  call void @rune_rt_panic({msg_ptr}, {msg_len}, {ctx_ptr}, {ctx_len})\n"
-        ));
+            .insert("declare void @rune_rt_fail(i32)\n".into());
+        out.push_str(&format!("  call void @rune_rt_fail(i32 {error_code})\n"));
         out.push_str("  unreachable\n");
         out.push_str(&format!("{ok_label}:\n"));
         Ok(())
@@ -801,14 +795,14 @@ impl<'a> FunctionEmitter<'a> {
                 llvm_scalar_type(&op_ty)?
             ),
             BinaryOp::Divide => {
-                self.emit_zero_division_panic(out, &right_val, &op_ty, "division")?;
+                self.emit_runtime_error_code(out, &right_val, &op_ty, 1001)?;
                 format!(
                     "  {reg} = sdiv {} {left_val}, {right_val}\n",
                     llvm_scalar_type(&op_ty)?
                 )
             }
             BinaryOp::Modulo => {
-                self.emit_zero_division_panic(out, &right_val, &op_ty, "modulo")?;
+                self.emit_runtime_error_code(out, &right_val, &op_ty, 1002)?;
                 format!(
                     "  {reg} = srem {} {left_val}, {right_val}\n",
                     llvm_scalar_type(&op_ty)?

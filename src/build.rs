@@ -877,6 +877,24 @@ struct ArduinoUnoPrecodeArtifacts {
     runtime_cpp: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ArduinoUnoRuntimeProfile {
+    input_buffer_size: usize,
+    string_slot_count: usize,
+    string_slot_size: usize,
+    enable_string_runtime: bool,
+    enable_dynamic_runtime: bool,
+    enable_system_runtime: bool,
+    enable_env_runtime: bool,
+    enable_serial_wrapper_runtime: bool,
+    enable_interrupt_runtime: bool,
+    enable_random_runtime: bool,
+    enable_gpio_runtime: bool,
+    enable_shift_runtime: bool,
+    enable_tone_runtime: bool,
+    enable_uart_peek_runtime: bool,
+}
+
 fn emit_arduino_uno_precode_via_llvm_cbe(
     program: &Program,
 ) -> Result<ArduinoUnoPrecodeArtifacts, BuildError> {
@@ -898,14 +916,36 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
 
     let temp_dir = create_temp_dir()?;
     let llvm_ir_path = temp_dir.join("rune_arduino_uno.ll");
+    let optimized_llvm_ir_path = temp_dir.join("rune_arduino_uno.opt.ll");
     let c_path = temp_dir.join("rune_arduino_uno.c");
     fs::write(&llvm_ir_path, &llvm_ir).map_err(|source| BuildError::Io {
         context: format!("failed to write `{}`", llvm_ir_path.display()),
         source,
     })?;
 
-    let cbe = Command::new(&llvm_cbe)
+    let opt_tool = find_packaged_llvm_tool("opt")
+        .ok_or_else(|| BuildError::ToolNotFound("packaged LLVM opt tool not found".into()))?;
+    let opt = Command::new(&opt_tool)
+        .arg("-S")
+        .arg("-passes=default<Oz>")
         .arg(&llvm_ir_path)
+        .arg("-o")
+        .arg(&optimized_llvm_ir_path)
+        .output()
+        .map_err(|source| BuildError::Io {
+            context: format!("failed to run `{}`", opt_tool.display()),
+            source,
+        })?;
+    if !opt.status.success() {
+        return Err(BuildError::ToolFailed {
+            tool: opt_tool.display().to_string(),
+            status: opt.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&opt.stderr).into_owned(),
+        });
+    }
+
+    let cbe = Command::new(&llvm_cbe)
+        .arg(&optimized_llvm_ir_path)
         .arg("-o")
         .arg(&c_path)
         .output()
@@ -930,9 +970,15 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
         context: format!("failed to read `{}`", runtime_header_path.display()),
         source,
     })?;
-    let runtime_cpp = emit_arduino_uno_cbe_runtime_cpp_with_features(entrypoint, include_servo_sources);
+    let runtime_profile = arduino_uno_runtime_profile(program, &llvm_ir);
+    let runtime_cpp = emit_arduino_uno_cbe_runtime_cpp_with_features(
+        entrypoint,
+        include_servo_sources,
+        runtime_profile,
+    );
 
     let _ = fs::remove_file(&llvm_ir_path);
+    let _ = fs::remove_file(&optimized_llvm_ir_path);
     let _ = fs::remove_file(&c_path);
     let _ = fs::remove_dir(temp_dir);
 
@@ -1027,14 +1073,84 @@ fn rewrite_llvm_global_identifiers(source: &str, rename_map: &HashMap<String, St
 fn emit_arduino_uno_cbe_runtime_cpp_with_features(
     entrypoint: ArduinoUnoEntrypointKind,
     enable_servo: bool,
+    runtime_profile: ArduinoUnoRuntimeProfile,
 ) -> String {
     let mut defines = vec![match entrypoint {
         ArduinoUnoEntrypointKind::Main => "#define RUNE_ARDUINO_ENTRY_MAIN 1",
         ArduinoUnoEntrypointKind::SetupLoop => "#define RUNE_ARDUINO_ENTRY_SETUP_LOOP 1",
-    }];
-    if enable_servo {
-        defines.push("#define RUNE_ARDUINO_ENABLE_SERVO 1");
     }
+    .to_string()];
+    if enable_servo {
+        defines.push("#define RUNE_ARDUINO_ENABLE_SERVO 1".to_string());
+    }
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_STRING_RUNTIME {}",
+        if runtime_profile.enable_string_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME {}",
+        if runtime_profile.enable_dynamic_runtime {
+            1
+        } else {
+            0
+        }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_SYSTEM_RUNTIME {}",
+        if runtime_profile.enable_system_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_ENV_RUNTIME {}",
+        if runtime_profile.enable_env_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_SERIAL_WRAPPER_RUNTIME {}",
+        if runtime_profile.enable_serial_wrapper_runtime {
+            1
+        } else {
+            0
+        }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_INTERRUPT_RUNTIME {}",
+        if runtime_profile.enable_interrupt_runtime {
+            1
+        } else {
+            0
+        }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_RANDOM_RUNTIME {}",
+        if runtime_profile.enable_random_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_GPIO_RUNTIME {}",
+        if runtime_profile.enable_gpio_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_SHIFT_RUNTIME {}",
+        if runtime_profile.enable_shift_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_TONE_RUNTIME {}",
+        if runtime_profile.enable_tone_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_ARDUINO_ENABLE_UART_PEEK_RUNTIME {}",
+        if runtime_profile.enable_uart_peek_runtime { 1 } else { 0 }
+    ));
+    defines.push(format!(
+        "#define RUNE_INPUT_BUFFER_SIZE {}",
+        runtime_profile.input_buffer_size
+    ));
+    defines.push(format!(
+        "#define RUNE_STRING_SLOT_COUNT {}",
+        runtime_profile.string_slot_count
+    ));
+    defines.push(format!(
+        "#define RUNE_STRING_SLOT_SIZE {}",
+        runtime_profile.string_slot_size
+    ));
     format!("{}\n#include \"rune_arduino_runtime.hpp\"\n", defines.join("\n"))
 }
 
@@ -1445,25 +1561,24 @@ static void rune_serial_newline(void) {{\n\
     Serial.write('\\r');\n\
     Serial.write('\\n');\n\
 }}\n\n\
-static void rune_zero_division_error(const char* operation) {{\n\
+extern \"C\" void rune_rt_fail(int32_t code) {{\n\
     Serial.begin(115200);\n\
-    Serial.print(\"ZeroDivisionError: \");\n\
-    Serial.print(operation);\n\
-    Serial.println(\" by zero\");\n\
+    Serial.print(\"ERR E\");\n\
+    Serial.println(code);\n\
     for (;;) {{\n\
         delay(1000);\n\
     }}\n\
 }}\n\n\
 static int64_t rune_checked_div_i64(int64_t left, int64_t right) {{\n\
     if (right == 0) {{\n\
-        rune_zero_division_error(\"division\");\n\
+        rune_rt_fail(1001);\n\
         return 0;\n\
     }}\n\
     return left / right;\n\
 }}\n\n\
 static int64_t rune_checked_mod_i64(int64_t left, int64_t right) {{\n\
     if (right == 0) {{\n\
-        rune_zero_division_error(\"modulo\");\n\
+        rune_rt_fail(1002);\n\
         return 0;\n\
     }}\n\
     return left % right;\n\
@@ -2588,6 +2703,171 @@ fn program_uses_arduino_serial(program: &Program) -> bool {
     program.items.iter().any(item_uses_arduino_serial)
 }
 
+fn arduino_uno_runtime_profile(program: &Program, llvm_ir: &str) -> ArduinoUnoRuntimeProfile {
+    let uses_serial_read = program_uses_arduino_serial_read(program);
+    let uses_string_heavy_runtime = program_uses_arduino_string_heavy_runtime(program);
+    let uses_runtime_symbol = |name: &str| llvm_ir.contains(&format!("@{name}"));
+    let enable_string_runtime = [
+        "rune_rt_string_from_i64",
+        "rune_rt_string_from_bool",
+        "rune_rt_string_concat",
+        "rune_rt_dynamic_to_string",
+        "rune_rt_print_dynamic",
+        "rune_rt_eprint_dynamic",
+        "rune_rt_system_platform",
+        "rune_rt_system_arch",
+        "rune_rt_system_target",
+        "rune_rt_system_board",
+        "rune_rt_env_get_string",
+        "rune_rt_env_arg",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_dynamic_runtime = [
+        "rune_rt_dynamic_to_string",
+        "rune_rt_print_dynamic",
+        "rune_rt_eprint_dynamic",
+        "rune_rt_dynamic_binary",
+        "rune_rt_dynamic_compare",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_system_runtime = [
+        "rune_rt_system_is_embedded",
+        "rune_rt_system_platform",
+        "rune_rt_system_arch",
+        "rune_rt_system_target",
+        "rune_rt_system_board",
+        "rune_rt_system_is_wasm",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_env_runtime = [
+        "rune_rt_env_arg_count",
+        "rune_rt_env_get_string",
+        "rune_rt_env_arg",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_serial_wrapper_runtime = [
+        "rune_rt_serial_is_open",
+        "rune_rt_serial_open",
+        "rune_rt_serial_write",
+        "rune_rt_serial_write_line",
+        "rune_rt_serial_peek_byte",
+        "rune_rt_serial_write_byte",
+        "rune_rt_serial_flush",
+        "rune_rt_serial_read_line",
+        "rune_rt_serial_close",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_interrupt_runtime = [
+        "rune_rt_arduino_interrupts_enable",
+        "rune_rt_arduino_interrupts_disable",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_random_runtime = [
+        "rune_rt_arduino_random_seed",
+        "rune_rt_arduino_random_i64",
+        "rune_rt_arduino_random_range",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_gpio_runtime = [
+        "rune_rt_arduino_pin_mode",
+        "rune_rt_arduino_digital_write",
+        "rune_rt_arduino_digital_read",
+        "rune_rt_arduino_analog_write",
+        "rune_rt_arduino_analog_read",
+        "rune_rt_arduino_analog_reference",
+        "rune_rt_arduino_pulse_in",
+        "rune_rt_arduino_mode_input",
+        "rune_rt_arduino_mode_output",
+        "rune_rt_arduino_mode_input_pullup",
+        "rune_rt_arduino_led_builtin",
+        "rune_rt_arduino_high",
+        "rune_rt_arduino_low",
+        "rune_rt_arduino_analog_ref_default",
+        "rune_rt_arduino_analog_ref_internal",
+        "rune_rt_arduino_analog_ref_external",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_shift_runtime = [
+        "rune_rt_arduino_shift_out",
+        "rune_rt_arduino_shift_in",
+        "rune_rt_arduino_bit_order_lsb_first",
+        "rune_rt_arduino_bit_order_msb_first",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_tone_runtime = [
+        "rune_rt_arduino_tone",
+        "rune_rt_arduino_no_tone",
+    ]
+    .iter()
+    .any(|name| uses_runtime_symbol(name));
+    let enable_uart_peek_runtime = uses_runtime_symbol("rune_rt_arduino_uart_peek_byte");
+    if uses_string_heavy_runtime {
+        ArduinoUnoRuntimeProfile {
+            input_buffer_size: if uses_serial_read { 128 } else { 64 },
+            string_slot_count: 8,
+            string_slot_size: 96,
+            enable_string_runtime,
+            enable_dynamic_runtime,
+            enable_system_runtime,
+            enable_env_runtime,
+            enable_serial_wrapper_runtime,
+            enable_interrupt_runtime,
+            enable_random_runtime,
+            enable_gpio_runtime,
+            enable_shift_runtime,
+            enable_tone_runtime,
+            enable_uart_peek_runtime,
+        }
+    } else if uses_serial_read {
+        ArduinoUnoRuntimeProfile {
+            input_buffer_size: 48,
+            string_slot_count: 2,
+            string_slot_size: 32,
+            enable_string_runtime,
+            enable_dynamic_runtime,
+            enable_system_runtime,
+            enable_env_runtime,
+            enable_serial_wrapper_runtime,
+            enable_interrupt_runtime,
+            enable_random_runtime,
+            enable_gpio_runtime,
+            enable_shift_runtime,
+            enable_tone_runtime,
+            enable_uart_peek_runtime,
+        }
+    } else {
+        ArduinoUnoRuntimeProfile {
+            input_buffer_size: 32,
+            string_slot_count: 2,
+            string_slot_size: 24,
+            enable_string_runtime,
+            enable_dynamic_runtime,
+            enable_system_runtime,
+            enable_env_runtime,
+            enable_serial_wrapper_runtime,
+            enable_interrupt_runtime,
+            enable_random_runtime,
+            enable_gpio_runtime,
+            enable_shift_runtime,
+            enable_tone_runtime,
+            enable_uart_peek_runtime,
+        }
+    }
+}
+
+fn program_uses_arduino_string_heavy_runtime(program: &Program) -> bool {
+    program.items.iter().any(item_uses_arduino_string_heavy_runtime)
+}
+
 fn item_uses_arduino_servo(item: &Item) -> bool {
     match item {
         Item::Function(function) => block_uses_arduino_servo(&function.body),
@@ -2621,6 +2901,14 @@ fn item_uses_arduino_serial(item: &Item) -> bool {
     }
 }
 
+fn item_uses_arduino_string_heavy_runtime(item: &Item) -> bool {
+    match item {
+        Item::Struct(_) => true,
+        Item::Function(function) => block_uses_arduino_string_heavy_runtime(&function.body),
+        _ => false,
+    }
+}
+
 fn block_uses_arduino_servo(block: &crate::parser::Block) -> bool {
     block.statements.iter().any(stmt_uses_arduino_servo)
 }
@@ -2631,6 +2919,12 @@ fn block_uses_arduino_serial_read(block: &crate::parser::Block) -> bool {
 
 fn block_uses_arduino_serial(block: &crate::parser::Block) -> bool {
     block.statements.iter().any(stmt_uses_arduino_serial)
+}
+
+fn block_uses_arduino_string_heavy_runtime(block: &crate::parser::Block) -> bool {
+    block.statements
+        .iter()
+        .any(stmt_uses_arduino_string_heavy_runtime)
 }
 
 fn stmt_uses_arduino_servo(stmt: &Stmt) -> bool {
@@ -2665,6 +2959,41 @@ fn stmt_uses_arduino_servo(stmt: &Stmt) -> bool {
         Stmt::Raise(raise_stmt) => expr_uses_arduino_servo(&raise_stmt.value),
         Stmt::Panic(panic_stmt) => expr_uses_arduino_servo(&panic_stmt.value),
         Stmt::Expr(expr_stmt) => expr_uses_arduino_servo(&expr_stmt.expr),
+    }
+}
+
+fn stmt_uses_arduino_string_heavy_runtime(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Block(block) => block_uses_arduino_string_heavy_runtime(&block.block),
+        Stmt::Let(let_stmt) => expr_uses_arduino_string_heavy_runtime(&let_stmt.value),
+        Stmt::Assign(assign_stmt) => expr_uses_arduino_string_heavy_runtime(&assign_stmt.value),
+        Stmt::Return(return_stmt) => return_stmt
+            .value
+            .as_ref()
+            .is_some_and(expr_uses_arduino_string_heavy_runtime),
+        Stmt::If(if_stmt) => {
+            expr_uses_arduino_string_heavy_runtime(&if_stmt.condition)
+                || block_uses_arduino_string_heavy_runtime(&if_stmt.then_block)
+                || if_stmt
+                    .elif_blocks
+                    .iter()
+                    .any(|elif| {
+                        expr_uses_arduino_string_heavy_runtime(&elif.condition)
+                            || block_uses_arduino_string_heavy_runtime(&elif.block)
+                    })
+                || if_stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(block_uses_arduino_string_heavy_runtime)
+        }
+        Stmt::While(while_stmt) => {
+            expr_uses_arduino_string_heavy_runtime(&while_stmt.condition)
+                || block_uses_arduino_string_heavy_runtime(&while_stmt.body)
+        }
+        Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::Raise(raise_stmt) => expr_uses_arduino_string_heavy_runtime(&raise_stmt.value),
+        Stmt::Panic(panic_stmt) => expr_uses_arduino_string_heavy_runtime(&panic_stmt.value),
+        Stmt::Expr(expr_stmt) => expr_uses_arduino_string_heavy_runtime(&expr_stmt.expr),
     }
 }
 
@@ -4144,6 +4473,42 @@ fn build_string_expr(span: crate::lexer::Span, value: impl Into<String>) -> Expr
     }
 }
 
+fn expr_uses_arduino_string_heavy_runtime(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Identifier(_) | ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) => {
+            false
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Await { expr } => {
+            expr_uses_arduino_string_heavy_runtime(expr)
+        }
+        ExprKind::Binary { left, right, .. } => {
+            expr_uses_arduino_string_heavy_runtime(left)
+                || expr_uses_arduino_string_heavy_runtime(right)
+        }
+        ExprKind::Field { base, name } => {
+            matches!(name.as_str(), "__str__" | "__repr__")
+                || expr_uses_arduino_string_heavy_runtime(base)
+        }
+        ExprKind::Call { callee, args } => {
+            let uses_string_builtin = match &callee.kind {
+                ExprKind::Identifier(name) => {
+                    matches!(arduino_uno_builtin_alias(name), "str" | "repr")
+                }
+                ExprKind::Field { name, .. } => matches!(name.as_str(), "__str__" | "__repr__"),
+                _ => false,
+            };
+            uses_string_builtin
+                || expr_uses_arduino_string_heavy_runtime(callee)
+                || args.iter().any(|arg| match arg {
+                    CallArg::Positional(expr) => expr_uses_arduino_string_heavy_runtime(expr),
+                    CallArg::Keyword { value, .. } => {
+                        expr_uses_arduino_string_heavy_runtime(value)
+                    }
+                })
+        }
+    }
+}
+
 fn expr_uses_arduino_serial_read(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Identifier(_) | ExprKind::Integer(_) | ExprKind::String(_) | ExprKind::Bool(_) => {
@@ -5594,6 +5959,16 @@ function createHost(options = {{}}) {{
         writeText("stderr", `Rune panic: ${{message}}\n  ${{context}}\n`);
         throw new Error(`Rune panic: ${{message}} (${{context}})`);
       }},
+      rune_rt_fail(code) {{
+        const numericCode = Number(code);
+        const known = new Map([
+          [1001, "division by zero"],
+          [1002, "modulo by zero"],
+        ]);
+        const message = known.get(numericCode) || "runtime failure";
+        writeText("stderr", `Rune error E${{numericCode}}: ${{message}}\n`);
+        throw new Error(`Rune error E${{numericCode}}: ${{message}}`);
+      }},
       rune_rt_time_now_unix() {{
         return BigInt(Math.floor(Date.now() / 1000));
       }},
@@ -6375,6 +6750,23 @@ void rune_rt_panic(const char* msg_ptr, int64_t msg_len, const char* ctx_ptr, in
     fflush(stderr);
     exit(101);
 }
+void rune_rt_fail(int32_t code) {
+    rune_rt_init_io();
+    const char* message = "runtime failure";
+    switch (code) {
+        case 1001:
+            message = "division by zero";
+            break;
+        case 1002:
+            message = "modulo by zero";
+            break;
+        default:
+            break;
+    }
+    fprintf(stderr, "Rune error E%d: %s\n", code, message);
+    fflush(stderr);
+    exit(101);
+}
 char* rune_rt_dynamic_to_string(int64_t tag, int64_t payload, int64_t extra) {
     switch (tag) {
         case 0:
@@ -6492,15 +6884,13 @@ void rune_rt_dynamic_binary(const int64_t* left, const int64_t* right, int64_t* 
         case 2: out[1] = left_number * right_number; break;
         case 3:
             if (right_number == 0) {
-                fprintf(stderr, "Rune runtime: dynamic division by zero\n");
-                exit(111);
+                rune_rt_fail(1001);
             }
             out[1] = left_number / right_number;
             break;
         case 4:
             if (right_number == 0) {
-                fprintf(stderr, "Rune runtime: dynamic modulo by zero\n");
-                exit(111);
+                rune_rt_fail(1002);
             }
             out[1] = left_number % right_number;
             break;
@@ -7968,6 +8358,18 @@ pub extern "C" fn rune_rt_panic(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_fail(code: i32) {
+    let message = match code {
+        1001 => "division by zero",
+        1002 => "modulo by zero",
+        _ => "runtime failure",
+    };
+    eprintln!("Rune error E{code}: {message}");
+    std::process::exit(101);
+}
+
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_raise(
     msg_ptr: *const u8,
     msg_len: i64,
@@ -8795,13 +9197,13 @@ pub extern "C" fn rune_rt_dynamic_binary(left: *const i64, right: *const i64, ou
         2 => left_number * right_number,
         3 => {
             if right_number == 0 {
-                panic!("dynamic division by zero");
+                rune_rt_fail(1001);
             }
             left_number / right_number
         }
         4 => {
             if right_number == 0 {
-                panic!("dynamic modulo by zero");
+                rune_rt_fail(1002);
             }
             left_number % right_number
         }

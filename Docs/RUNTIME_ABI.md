@@ -61,7 +61,13 @@ Implemented areas today include:
 ### Panic / Exception
 
 - `rune_rt_panic`
+- `rune_rt_fail`
 - `rune_rt_raise`
+
+Current runtime error codes:
+
+- `1001`: division by zero
+- `1002`: modulo by zero
 
 ### String Helpers
 

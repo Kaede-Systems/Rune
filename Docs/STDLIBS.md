@@ -678,6 +678,11 @@ Current network error codes:
 - `9`: write failed
 - `10`: socket option setup failed
 
+Current core runtime arithmetic error codes:
+
+- `1001`: division by zero
+- `1002`: modulo by zero
+
 Not implemented in this module yet:
 
 - persistent TCP server socket lifecycle and multi-client accept loops
