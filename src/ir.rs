@@ -968,6 +968,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_env_arg"
         | "__rune_builtin_env_get_string"
         | "__rune_builtin_gpio_analog_read"
+        | "__rune_builtin_serial_available"
+        | "__rune_builtin_serial_read_byte"
         | "__rune_builtin_arduino_uart_peek_byte"
         | "__rune_builtin_serial_peek_byte"
         | "__rune_builtin_serial_read_line"

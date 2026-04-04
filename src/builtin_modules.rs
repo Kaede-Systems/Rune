@@ -1375,7 +1375,7 @@ fn serial_program() -> Program {
                         ))],
                         None,
                     ),
-                    return_stmt(int_lit(0)),
+                    return_stmt(call_name("__rune_builtin_serial_available", vec![])),
                 ],
             )),
             Item::Function(function(
@@ -1391,7 +1391,7 @@ fn serial_program() -> Program {
                         ))],
                         None,
                     ),
-                    return_stmt(int_lit(-1)),
+                    return_stmt(call_name("__rune_builtin_serial_read_byte", vec![])),
                 ],
             )),
             Item::Function(function(

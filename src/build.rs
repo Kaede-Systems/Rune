@@ -3021,6 +3021,24 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("rune_serial_read_line()".into(), ArduinoUnoType::String))
                 }
+                "available" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`available` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)Serial.available())".into(), ArduinoUnoType::I64))
+                }
+                "read_byte" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`read_byte` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("((int64_t)Serial.read())".into(), ArduinoUnoType::I64))
+                }
                 "send" => {
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -3395,7 +3413,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -4564,6 +4582,8 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_serial_is_open" => "is_open",
         "__rune_builtin_serial_close" => "close",
         "__rune_builtin_serial_flush" => "serial_flush",
+        "__rune_builtin_serial_available" => "available",
+        "__rune_builtin_serial_read_byte" => "read_byte",
         "__rune_builtin_serial_peek_byte" => "peek_byte",
         "__rune_builtin_serial_read_line" => "recv_line",
         "__rune_builtin_serial_read_line_timeout" => "recv_line_timeout",
@@ -4619,6 +4639,8 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "is_open"
             | "close"
             | "serial_flush"
+            | "available"
+            | "read_byte"
             | "recv_line"
             | "recv_line_timeout"
             | "peek_byte"
@@ -7686,6 +7708,29 @@ pub extern "C" fn rune_rt_serial_flush() {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_available() -> i64 {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(state) = guard.as_mut() else {
+        return 0;
+    };
+    if state.peeked.is_some() {
+        return 1;
+    }
+    let mut byte = [0u8; 1];
+    match state.port.read(&mut byte) {
+        Ok(0) => 0,
+        Ok(_) => {
+            state.peeked = Some(byte[0]);
+            1
+        }
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => 0,
+        Err(_) => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_serial_write(ptr: *const u8, len: i64) -> bool {
     if ptr.is_null() || len < 0 {
         return false;
@@ -7727,6 +7772,26 @@ pub extern "C" fn rune_rt_serial_write_line(ptr: *const u8, len: i64) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_serial_read_line() -> *const u8 {
     rune_rt_serial_read_line_timeout(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_read_byte() -> i64 {
+    let mut guard = rune_rt_serial_handle()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let Some(state) = guard.as_mut() else {
+        return -1;
+    };
+    if let Some(byte) = state.peeked.take() {
+        return byte as i64;
+    }
+    let mut byte = [0u8; 1];
+    match state.port.read(&mut byte) {
+        Ok(0) => -1,
+        Ok(_) => byte[0] as i64,
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => -1,
+        Err(_) => -1,
+    }
 }
 
 #[unsafe(no_mangle)]

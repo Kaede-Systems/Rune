@@ -270,6 +270,31 @@ def main() -> i32:\n    println(peek_byte())\n    println(write_byte(65))\n    r
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_serial_available_and_read_byte_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_serial_available_read_byte_demo.rn");
+    let exe_path = dir.join("llvm_serial_available_read_byte_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from serial import available, read_byte\n\n\
+def main() -> i32:\n    println(available())\n    println(read_byte())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm serial available/read_byte program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built serial available/read_byte executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "0\n-1\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_dynamic_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_dynamic_demo.rn");

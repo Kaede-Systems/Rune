@@ -314,7 +314,7 @@ Current implemented serial scope:
   - `recv_line` lowers to the normal embedded input surface
 - on non-embedded targets:
   - `open` opens a host serial port such as `COM5`
-  - `is_open`, `close`, `flush`, `peek_byte`, `write_byte`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
+  - `is_open`, `close`, `flush`, `available`, `read_byte`, `peek_byte`, `write_byte`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
   - `write` / `write_line` still lower to `print` / `println`
 
 Current serial limitations:
@@ -323,6 +323,7 @@ Current serial limitations:
 - text line input stays on the normal Rune `input()` surface
 - lower-level byte control remains in `arduino` via `uart_*`
 - current host serial scope is for native host builds, not browser/WASM targets
+- `available()` returns `0` and `read_byte()` returns `-1` when no host serial connection is open
 - `recv_nonempty_timeout` returns `""` when the timeout expires instead of retrying forever
 - `peek_byte()` returns `-1` when no byte is available or no host serial connection is open
 

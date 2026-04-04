@@ -3051,6 +3051,28 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_serial_available" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_available` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_available\n");
+            return Ok(());
+        }
+
+        if name == "__rune_builtin_serial_read_byte" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_serial_read_byte` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_serial_read_byte\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_serial_read_line" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -5729,6 +5751,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_gpio_mode_input_pullup"
         | "__rune_builtin_gpio_pwm_duty_max"
         | "__rune_builtin_gpio_analog_max"
+        | "__rune_builtin_serial_available"
+        | "__rune_builtin_serial_read_byte"
         | "__rune_builtin_arduino_uart_peek_byte"
         | "__rune_builtin_serial_peek_byte"
         | "__rune_builtin_arduino_mode_input"
