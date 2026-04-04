@@ -295,6 +295,31 @@ def main() -> i32:\n    println(available())\n    println(read_byte())\n    retu
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_serial_read_byte_timeout_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_serial_read_byte_timeout_demo.rn");
+    let exe_path = dir.join("llvm_serial_read_byte_timeout_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from serial import read_byte_timeout\n\n\
+def main() -> i32:\n    println(read_byte_timeout(10))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm serial read_byte_timeout program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built serial read_byte_timeout executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "-1\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_dynamic_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_dynamic_demo.rn");

@@ -1204,6 +1204,15 @@ fn serial_program() -> Program {
             vec![return_stmt(call_name("read_byte", vec![]))],
         ),
         function(
+            "read_byte_timeout",
+            vec![param("self", "dynamic"), param("timeout_ms", "i64")],
+            "i64",
+            vec![return_stmt(call_name(
+                "read_byte_timeout",
+                vec![pos(ident("timeout_ms"))],
+            ))],
+        ),
+        function(
             "peek_byte",
             vec![param("self", "dynamic")],
             "i64",
@@ -1392,6 +1401,60 @@ fn serial_program() -> Program {
                         None,
                     ),
                     return_stmt(call_name("__rune_builtin_serial_read_byte", vec![])),
+                ],
+            )),
+            Item::Function(function(
+                "read_byte_timeout",
+                vec![param("timeout_ms", "i64")],
+                "i64",
+                vec![
+                    if_stmt(
+                        call_name("__rune_builtin_system_is_embedded", vec![]),
+                        vec![
+                            if_stmt(
+                                binary(ident("timeout_ms"), BinaryOp::LessEqual, int_lit(0)),
+                                vec![return_stmt(call_name("read_byte", vec![]))],
+                                None,
+                            ),
+                            Stmt::Let(crate::parser::LetStmt {
+                                name: "deadline".to_string(),
+                                ty: Some(ty("i64")),
+                                value: binary(
+                                    call_name("__rune_builtin_arduino_millis", vec![]),
+                                    BinaryOp::Add,
+                                    ident("timeout_ms"),
+                                ),
+                                span: s(),
+                            }),
+                            Stmt::While(crate::parser::WhileStmt {
+                                condition: binary(
+                                    call_name("__rune_builtin_arduino_millis", vec![]),
+                                    BinaryOp::Less,
+                                    ident("deadline"),
+                                ),
+                                body: Block {
+                                    statements: vec![
+                                        if_stmt(
+                                            binary(call_name("available", vec![]), BinaryOp::Greater, int_lit(0)),
+                                            vec![return_stmt(call_name("read_byte", vec![]))],
+                                            None,
+                                        ),
+                                        expr_stmt(call_name(
+                                            "__rune_builtin_arduino_delay_ms",
+                                            vec![pos(int_lit(1))],
+                                        )),
+                                    ],
+                                },
+                                span: s(),
+                            }),
+                            return_stmt(int_lit(-1)),
+                        ],
+                        None,
+                    ),
+                    return_stmt(call_name(
+                        "__rune_builtin_serial_read_byte_timeout",
+                        vec![pos(ident("timeout_ms"))],
+                    )),
                 ],
             )),
             Item::Function(function(

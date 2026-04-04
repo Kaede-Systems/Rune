@@ -1367,6 +1367,24 @@ static void rune_rt_arduino_servo_write_us(int64_t pin, int64_t pulse_us) {\n\
     rune_input_buffer[index] = '\\0';\n\
     return rune_input_buffer;\n\
 }\n\n\
+static int64_t rune_serial_read_byte_timeout(int64_t timeout_ms) {\n\
+    if (timeout_ms <= 0) {\n\
+        if (Serial.available() > 0) {\n\
+            return (int64_t)Serial.read();\n\
+        }\n\
+        return -1;\n\
+    }\n\
+    unsigned long start = millis();\n\
+    for (;;) {\n\
+        if (Serial.available() > 0) {\n\
+            return (int64_t)Serial.read();\n\
+        }\n\
+        if ((int64_t)(millis() - start) >= timeout_ms) {\n\
+            return -1;\n\
+        }\n\
+        delay(1);\n\
+    }\n\
+}\n\n\
 "
     } else {
         ""
@@ -3039,6 +3057,22 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("((int64_t)Serial.read())".into(), ArduinoUnoType::I64))
                 }
+                "read_byte_timeout" => {
+                    let [CallArg::Positional(timeout_expr)] = args.as_slice() else {
+                        return Err(CodegenError {
+                            message: "`read_byte_timeout` expects 1 positional argument on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    };
+                    let timeout = emit_arduino_uno_expr(scope, functions, structs, timeout_expr)?;
+                    if timeout.1 != ArduinoUnoType::I64 {
+                        return Err(CodegenError {
+                            message: "Arduino Uno target requires integer timeout for `read_byte_timeout`".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok((format!("rune_serial_read_byte_timeout({})", timeout.0), ArduinoUnoType::I64))
+                }
                 "send" => {
                     let [CallArg::Positional(value_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -3413,7 +3447,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `read_byte_timeout`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -4123,7 +4157,10 @@ fn expr_uses_arduino_serial_read(expr: &Expr) -> bool {
         ExprKind::Call { callee, args } => {
             let is_serial_read_builtin = match &callee.kind {
                 ExprKind::Identifier(name) => {
-                    matches!(arduino_uno_builtin_alias(name), "input" | "read_line" | "recv_line")
+                    matches!(
+                        arduino_uno_builtin_alias(name),
+                        "input" | "read_line" | "recv_line" | "read_byte_timeout"
+                    )
                 }
                 _ => false,
             };
@@ -4159,6 +4196,9 @@ fn expr_uses_arduino_serial(expr: &Expr) -> bool {
                             | "send_line"
                             | "open"
                             | "is_open"
+                            | "available"
+                            | "read_byte"
+                            | "read_byte_timeout"
                             | "uart_available"
                             | "uart_read_byte"
                     )
@@ -4584,6 +4624,7 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_serial_flush" => "serial_flush",
         "__rune_builtin_serial_available" => "available",
         "__rune_builtin_serial_read_byte" => "read_byte",
+        "__rune_builtin_serial_read_byte_timeout" => "read_byte_timeout",
         "__rune_builtin_serial_peek_byte" => "peek_byte",
         "__rune_builtin_serial_read_line" => "recv_line",
         "__rune_builtin_serial_read_line_timeout" => "recv_line_timeout",
@@ -4641,6 +4682,7 @@ fn is_arduino_uno_builtin_dispatch_name(name: &str) -> bool {
             | "serial_flush"
             | "available"
             | "read_byte"
+            | "read_byte_timeout"
             | "recv_line"
             | "recv_line_timeout"
             | "peek_byte"
@@ -7791,6 +7833,24 @@ pub extern "C" fn rune_rt_serial_read_byte() -> i64 {
         Ok(_) => byte[0] as i64,
         Err(error) if error.kind() == io::ErrorKind::TimedOut => -1,
         Err(_) => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_serial_read_byte_timeout(timeout_ms: i64) -> i64 {
+    if timeout_ms < 0 {
+        return rune_rt_serial_read_byte();
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
+    loop {
+        let value = rune_rt_serial_read_byte();
+        if value >= 0 {
+            return value;
+        }
+        if std::time::Instant::now() >= deadline {
+            return -1;
+        }
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 

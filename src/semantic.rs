@@ -3326,6 +3326,23 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::I64)
                 }
+                "__rune_builtin_serial_read_byte_timeout" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_read_byte_timeout` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let [CallArg::Positional(timeout_expr)] = args else {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_serial_read_byte_timeout` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let timeout_ty = self.check_expr(timeout_expr, scope, in_async)?;
+                    self.expect_integer_type(&timeout_ty, timeout_expr.span, "serial byte timeout")?;
+                    Ok(Type::I64)
+                }
                 "__rune_builtin_serial_read_line" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -3871,6 +3888,7 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_serial_flush" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_available" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_read_byte" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_serial_read_byte_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_read_line" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_read_line_timeout" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_serial_peek_byte" => Some(Type::Unknown("builtin".to_string())),

@@ -267,7 +267,7 @@ Current ADC limitations:
 
 ```rune
 from serial import begin, open, is_open, close
-from serial import available, read_byte, peek_byte, recv_line, recv_line_timeout, recv_nonempty_timeout
+from serial import available, read_byte, read_byte_timeout, peek_byte, recv_line, recv_line_timeout, recv_nonempty_timeout
 from serial import flush, write, write_byte, write_line, send, send_line
 from serial import send_i64, send_bool, send_line_i64, send_line_bool
 from serial import SerialPort, serial_port
@@ -282,6 +282,7 @@ Exports:
 - `flush() -> unit`
 - `available() -> i64`
 - `read_byte() -> i64`
+- `read_byte_timeout(timeout_ms: i64) -> i64`
 - `peek_byte() -> i64`
 - `recv_line() -> String`
 - `recv_line_timeout(timeout_ms: i64) -> String`
@@ -302,11 +303,12 @@ Current implemented serial scope:
 
 - Rust-side built-in module surface for shared serial-facing Rune code
 - shared serial-facing Rune surface for embedded and host code
-- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_line_timeout`, `recv_nonempty`, `recv_nonempty_timeout`, `peek_byte`, `write_byte`, `send`, and `send_line` method names
+- class-style `SerialPort` wrappers using the same `connect`, `is_open`, `close`, `recv_line`, `recv_line_timeout`, `recv_nonempty`, `recv_nonempty_timeout`, `read_byte_timeout`, `peek_byte`, `write_byte`, `send`, and `send_line` method names
 - typed serial helpers are also available as `send_i64`, `send_bool`, `send_line_i64`, and `send_line_bool`
 - on Arduino Uno:
   - `begin` lowers to `uart_begin`
   - `open` behaves like `begin`
+  - `read_byte_timeout` polls the UART for up to the requested number of milliseconds
   - `peek_byte` lowers to UART peek
   - `write_byte` lowers to UART byte writes and reports success
   - `write` and `write_line` lower to UART writes
@@ -314,7 +316,7 @@ Current implemented serial scope:
   - `recv_line` lowers to the normal embedded input surface
 - on non-embedded targets:
   - `open` opens a host serial port such as `COM5`
-  - `is_open`, `close`, `flush`, `available`, `read_byte`, `peek_byte`, `write_byte`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
+  - `is_open`, `close`, `flush`, `available`, `read_byte`, `read_byte_timeout`, `peek_byte`, `write_byte`, `send`, `send_line`, `recv_line`, and `recv_line_timeout` talk to the active host serial connection
   - `write` / `write_line` still lower to `print` / `println`
 
 Current serial limitations:

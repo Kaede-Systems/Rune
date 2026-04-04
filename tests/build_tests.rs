@@ -2026,6 +2026,32 @@ fn builds_arduino_uno_with_serial_available_and_read_byte() {
 }
 
 #[test]
+fn builds_arduino_uno_with_serial_read_byte_timeout() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_serial_read_byte_timeout.rn");
+    let output_path = dir.join("arduino_uno_serial_read_byte_timeout.hex");
+
+    fs::write(
+        &source_path,
+        "from serial import begin, read_byte_timeout\n\n\
+         def main() -> i32:\n    begin(115200)\n    println(read_byte_timeout(10))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno serial read_byte_timeout build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno serial read_byte_timeout hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_and_runs_program_with_c_ffi_on_windows() {
     let _guard = build_lock()
         .lock()

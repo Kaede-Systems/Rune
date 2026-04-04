@@ -3130,6 +3130,20 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_serial_read_byte_timeout" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let timeout = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_serial_read_byte_timeout(i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_serial_read_byte_timeout(i64 {timeout})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_serial_peek_byte" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
@@ -4296,6 +4310,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_uart_available"
         | "__rune_builtin_serial_available"
         | "__rune_builtin_serial_read_byte"
+        | "__rune_builtin_serial_read_byte_timeout"
         | "__rune_builtin_arduino_uart_peek_byte"
         | "__rune_builtin_serial_peek_byte"
         | "__rune_builtin_arduino_uart_read_byte" => Some(IrType::I64),

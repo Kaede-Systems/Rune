@@ -3073,6 +3073,20 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_serial_read_byte_timeout" {
+            let [CallArg::Positional(timeout_expr)] = args else {
+                return Err(CodegenError {
+                    message:
+                        "`__rune_builtin_serial_read_byte_timeout` expects 1 positional argument"
+                            .to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", timeout_expr)?;
+            out.push_str("    call rune_rt_serial_read_byte_timeout\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_serial_read_line" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -5753,6 +5767,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_gpio_analog_max"
         | "__rune_builtin_serial_available"
         | "__rune_builtin_serial_read_byte"
+        | "__rune_builtin_serial_read_byte_timeout"
         | "__rune_builtin_arduino_uart_peek_byte"
         | "__rune_builtin_serial_peek_byte"
         | "__rune_builtin_arduino_mode_input"
