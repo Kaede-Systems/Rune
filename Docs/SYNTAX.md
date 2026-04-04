@@ -213,6 +213,12 @@ Current import behavior:
 - `import module` now supports namespace-qualified access like `module.name(...)`
 - this makes it possible for different imported modules to export the same short name safely when accessed through their module namespace
 - import aliases such as `import module as alias` are not implemented yet
+- current module-loader diagnostics use stable error codes:
+  - `E2000`: module loader I/O failure
+  - `E2001`: module parse failure
+  - `E2002`: missing module
+  - `E2003`: missing imported export
+  - `E2004`: import cycle
 
 Current embedded-stdlib note:
 

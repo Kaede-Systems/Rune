@@ -66,8 +66,8 @@ Implemented areas today include:
 
 Current runtime error codes:
 
-- `1001`: division by zero
-- `1002`: modulo by zero
+- `E1001`: division by zero
+- `E1002`: modulo by zero
 
 ### String Helpers
 
