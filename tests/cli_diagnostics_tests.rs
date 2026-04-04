@@ -147,6 +147,7 @@ fn missing_module_errors_point_to_import_site() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E2002"));
     assert!(stderr.contains("module `missing_math` was not found"));
     assert!(stderr.contains("main.rn:1:"));
     assert!(stderr.contains("1 | import missing_math"));

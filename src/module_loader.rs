@@ -55,12 +55,13 @@ pub enum ModuleLoadError {
 
 impl fmt::Display for ModuleLoadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let code = self.code();
         match self {
             ModuleLoadError::Io {
                 context,
                 source,
                 trace: _,
-            } => write!(f, "{context}: {source}"),
+            } => write!(f, "{code}: {context}: {source}"),
             ModuleLoadError::Parse {
                 path,
                 source: _,
@@ -68,7 +69,7 @@ impl fmt::Display for ModuleLoadError {
                 span: _,
                 trace: _,
             } => {
-                write!(f, "failed to parse `{}`: {message}", path.display())
+                write!(f, "{code}: failed to parse `{}`: {message}", path.display())
             }
             ModuleLoadError::MissingModule {
                 module,
@@ -78,7 +79,11 @@ impl fmt::Display for ModuleLoadError {
                 importer_span: _,
                 trace: _,
             } => {
-                write!(f, "module `{module}` was not found at `{}`", path.display())
+                write!(
+                    f,
+                    "{code}: module `{module}` was not found at `{}`",
+                    path.display()
+                )
             }
             ModuleLoadError::MissingImport {
                 module,
@@ -90,7 +95,7 @@ impl fmt::Display for ModuleLoadError {
                 trace: _,
             } => write!(
                 f,
-                "module `{module}` does not export `{name}` in `{}`",
+                "{code}: module `{module}` does not export `{name}` in `{}`",
                 path.display()
             ),
             ModuleLoadError::ImportCycle {
@@ -102,7 +107,7 @@ impl fmt::Display for ModuleLoadError {
                 trace: _,
             } => write!(
                 f,
-                "import cycle detected for module `{module}` at `{}`",
+                "{code}: import cycle detected for module `{module}` at `{}`",
                 path.display()
             ),
         }
@@ -112,6 +117,16 @@ impl fmt::Display for ModuleLoadError {
 impl std::error::Error for ModuleLoadError {}
 
 impl ModuleLoadError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            ModuleLoadError::Io { .. } => "E2000",
+            ModuleLoadError::Parse { .. } => "E2001",
+            ModuleLoadError::MissingModule { .. } => "E2002",
+            ModuleLoadError::MissingImport { .. } => "E2003",
+            ModuleLoadError::ImportCycle { .. } => "E2004",
+        }
+    }
+
     fn push_trace(&mut self, site: ImportSite) {
         match self {
             ModuleLoadError::Io { trace, .. }
@@ -123,6 +138,7 @@ impl ModuleLoadError {
     }
 
     pub fn render(&self) -> String {
+        let code = self.code();
         match self {
             ModuleLoadError::Io {
                 context,
@@ -134,7 +150,7 @@ impl ModuleLoadError {
                     rendered.push_str(&render_import_trace(trace));
                     rendered.push('\n');
                 }
-                rendered.push_str(&format!("{context}: {source}"));
+                rendered.push_str(&format!("{code}: {context}: {source}"));
                 rendered
             }
             ModuleLoadError::Parse {
@@ -149,7 +165,12 @@ impl ModuleLoadError {
                     rendered.push_str(&render_import_trace(trace));
                     rendered.push('\n');
                 }
-                rendered.push_str(&render_file_diagnostic(path, source, message, *span));
+                rendered.push_str(&render_file_diagnostic(
+                    path,
+                    source,
+                    &format!("{code}: {message}"),
+                    *span,
+                ));
                 rendered
             }
             ModuleLoadError::MissingModule {
@@ -168,7 +189,10 @@ impl ModuleLoadError {
                 rendered.push_str(&render_file_diagnostic(
                     importer_path,
                     importer_source,
-                    &format!("module `{module}` was not found at `{}`", path.display()),
+                    &format!(
+                        "{code}: module `{module}` was not found at `{}`",
+                        path.display()
+                    ),
                     *importer_span,
                 ));
                 rendered
@@ -191,7 +215,7 @@ impl ModuleLoadError {
                     importer_path,
                     importer_source,
                     &format!(
-                        "module `{module}` does not export `{name}` in `{}`",
+                        "{code}: module `{module}` does not export `{name}` in `{}`",
                         path.display()
                     ),
                     *importer_span,
@@ -215,7 +239,7 @@ impl ModuleLoadError {
                     importer_path,
                     importer_source,
                     &format!(
-                        "import cycle detected for module `{module}` at `{}`",
+                        "{code}: import cycle detected for module `{module}` at `{}`",
                         path.display()
                     ),
                     *importer_span,

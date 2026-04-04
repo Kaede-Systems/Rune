@@ -50,6 +50,7 @@ fn rejects_missing_imported_name() {
     .unwrap();
 
     let error = load_program_from_path(&dir.join("main.rn")).expect_err("load should fail");
+    assert!(error.to_string().contains("E2003"));
     assert!(error.to_string().contains("does not export `sub`"));
 }
 
@@ -176,6 +177,7 @@ fn rejects_import_cycles_with_trace() {
 
     let error = load_program_from_path(&dir.join("main.rn")).expect_err("cycle should fail");
     let rendered = error.render();
+    assert!(rendered.contains("E2004"));
     assert!(rendered.contains("import cycle detected"));
     assert!(rendered.contains("imported `left`") || rendered.contains("imported `right`"));
 }
