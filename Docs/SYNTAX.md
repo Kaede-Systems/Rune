@@ -16,6 +16,7 @@ Rune uses Python-inspired surface syntax:
 - `raise` and `panic`
 - `class`
 - `extern def`
+- `break` and `continue`
 
 Example:
 
@@ -113,6 +114,13 @@ while count > 0:
     count = count - 1
 ```
 
+```rune
+while true:
+    if ready:
+        break
+    continue
+```
+
 Dynamic truthiness is currently supported in native code paths for conditions.
 
 ## Classes
@@ -206,6 +214,11 @@ Current import behavior:
 - this makes it possible for different imported modules to export the same short name safely when accessed through their module namespace
 - import aliases such as `import module as alias` are not implemented yet
 
+Current embedded-stdlib note:
+
+- higher-level helper objects such as `serial.SerialPort`, `arduino.UartPort`, `arduino.TonePin`, `arduino.ShiftBus`, `arduino.SpiBus`, `arduino.I2cBus`, and `arduino.UltrasonicSensor` are ordinary Rune class surfaces layered on top of the real runtime/compiler hooks
+- that means they compile through the same semantics, IR, native, LLVM, and AVR paths instead of being parser-only sugar
+
 Relative imports:
 
 ```rune
@@ -246,6 +259,15 @@ The packaged `arduino` stdlib can be imported directly with:
 
 ```rune
 from arduino import pin_mode, led_builtin, mode_output
+```
+
+Namespace-qualified embedded helpers also work:
+
+```rune
+import arduino
+
+let spi = arduino.spi_bus(13, 11, 12, arduino.bit_order_msb_first())
+let i2c = arduino.i2c_bus(5, 4)
 ```
 
 ## Exceptions

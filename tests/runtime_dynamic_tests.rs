@@ -185,6 +185,56 @@ fn builds_and_runs_arduino_uart_tone_and_shift_helpers_program() {
 }
 
 #[test]
+fn builds_and_runs_arduino_uart_and_ultrasonic_helpers_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_host_uart_ultrasonic.rn");
+    let exe_path = dir.join("arduino_host_uart_ultrasonic.exe");
+
+    fs::write(
+        &source_path,
+        "from arduino import UartPort, uart_port, ultrasonic_sensor\n\n\
+         def main() -> i32:\n    let uart = uart_port(115200)\n    uart.begin()\n    uart.write_line(\"ready\")\n    println(uart.read_byte_timeout(10))\n    let sensor = ultrasonic_sensor(7, 8)\n    println(sensor.distance_cm(100))\n    println(sensor.distance_mm(100))\n    let direct = UartPort(baud=9600)\n    direct.begin()\n    println(direct.peek_byte())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("arduino uart/ultrasonic helper host program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "ready\n-1\n-1\n-1\n-1\n");
+}
+
+#[test]
+fn builds_and_runs_arduino_spi_and_i2c_helpers_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_host_spi_i2c.rn");
+    let exe_path = dir.join("arduino_host_spi_i2c.exe");
+
+    fs::write(
+        &source_path,
+        "from arduino import I2cBus, SpiBus, bit_order_msb_first, i2c_bus, spi_bus\n\n\
+         def main() -> i32:\n    let spi = spi_bus(13, 11, 12, bit_order_msb_first())\n    spi.begin()\n    println(spi.transfer(170))\n    spi.write(85)\n    let other_spi = SpiBus(sck_pin=8, mosi_pin=9, miso_pin=10, bit_order=bit_order_msb_first())\n    other_spi.begin()\n    println(other_spi.read())\n    let i2c = i2c_bus(5, 4)\n    i2c.begin()\n    println(i2c.write_byte(64))\n    println(i2c.read_byte(true))\n    println(i2c.probe(80))\n    println(i2c.write_to(80, 12))\n    println(i2c.write_register(80, 1, 34))\n    println(i2c.read_register(80, 1))\n    let other_i2c = I2cBus(scl_pin=3, sda_pin=2)\n    other_i2c.begin()\n    println(other_i2c.probe(42))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None)
+        .expect("arduino spi/i2c helper host program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "0\n0\ntrue\n0\ntrue\ntrue\ntrue\n0\ntrue\n");
+}
+
+#[test]
 fn builds_and_runs_panic_program() {
     let dir = temp_dir();
     let source_path = dir.join("panic_demo.rn");

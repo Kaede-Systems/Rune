@@ -22,7 +22,9 @@ Current namespace note:
 from arduino import (
     pin_mode, digital_write, digital_read,
     analog_write, analog_read, analog_reference,
-    pulse_in, shift_out, shift_in, tone, no_tone,
+    pulse_in, shift_out, shift_in, spi_begin,
+    i2c_begin, i2c_start, i2c_stop, i2c_write_byte, i2c_read_byte,
+    tone, no_tone,
     servo_attach, servo_detach, servo_write, servo_write_us,
     servo_pulse_for_angle, servo_write_calibrated,
     delay_ms, delay_us, millis, micros,
@@ -35,6 +37,7 @@ from arduino import (
     uart_flush,
     interrupts_enable, interrupts_disable,
     random_seed, random_i64, random_range,
+    uart_port, ultrasonic_sensor, spi_bus, i2c_bus,
 )
 ```
 
@@ -62,6 +65,12 @@ Exports:
 - `pulse_in(pin: i64, state: bool, timeout_us: i64) -> i64`
 - `shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit`
 - `shift_in(data_pin: i64, clock_pin: i64, bit_order: i64) -> i64`
+- `spi_begin(sck_pin: i64, mosi_pin: i64, miso_pin: i64) -> unit`
+- `i2c_begin(scl_pin: i64, sda_pin: i64) -> unit`
+- `i2c_start(scl_pin: i64, sda_pin: i64) -> unit`
+- `i2c_stop(scl_pin: i64, sda_pin: i64) -> unit`
+- `i2c_write_byte(scl_pin: i64, sda_pin: i64, value: i64) -> bool`
+- `i2c_read_byte(scl_pin: i64, sda_pin: i64, ack: bool) -> i64`
 - `tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit`
 - `no_tone(pin: i64) -> unit`
 - `servo_attach(pin: i64) -> bool`
@@ -99,6 +108,7 @@ Exports:
 - `uart_write(text: String) -> unit`
 - `uart_write_line(text: String) -> unit`
 - `uart_flush() -> unit`
+- `uart_port(baud: i64) -> UartPort`
 - `interrupts_enable() -> unit`
 - `interrupts_disable() -> unit`
 - `random_seed(seed: i64) -> unit`
@@ -106,6 +116,9 @@ Exports:
 - `random_range(min_value: i64, max_value: i64) -> i64`
 - `tone_pin(pin: i64) -> TonePin`
 - `shift_bus(data_pin: i64, clock_pin: i64, bit_order: i64) -> ShiftBus`
+- `ultrasonic_sensor(trig_pin: i64, echo_pin: i64) -> UltrasonicSensor`
+- `spi_bus(sck_pin: i64, mosi_pin: i64, miso_pin: i64, bit_order: i64) -> SpiBus`
+- `i2c_bus(scl_pin: i64, sda_pin: i64) -> I2cBus`
 
 Current implemented Arduino scope:
 
@@ -115,8 +128,12 @@ Current implemented Arduino scope:
 - byte-oriented UART access with `uart_available`, `uart_read_byte`, and `uart_write_byte`
 - timeout-aware low-level UART byte reads with `uart_read_byte_timeout`
 - line-oriented low-level UART output with `uart_write_line`
+- reusable UART object wrapper through `UartPort`
 - board constants and pin/timing helpers
 - PWM, pulse timing, tone generation, shift register output, and analog reference selection
+- software-style SPI bus helpers on top of the current GPIO/timing runtime
+- software-style I2C bus helpers on top of the current GPIO/timing runtime
+- higher-level pulse/sensor helper through `UltrasonicSensor`
 - shift register input, interrupt enable/disable control, and Arduino random helpers
 - Servo control through the packaged Arduino Servo library
 - `servo_write(pin, angle)` is the normal positional-servo API using the Arduino Servo library defaults
@@ -142,6 +159,45 @@ Current Uno example files using this surface:
 - [servo_connector_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/servo_connector_arduino.rn)
 - [ultrasonic_distance_arduino.rn](/C:/Users/kaededevkentohinode/KUROX/ultrasonic_distance_arduino.rn)
 - [avr_oop_string_test.rn](/C:/Users/kaededevkentohinode/KUROX/avr_oop_string_test.rn)
+
+High-level Arduino helper classes:
+
+- `UartPort(baud=...)`
+  - `.begin()`
+  - `.available()`
+  - `.read_byte()`
+  - `.read_byte_timeout(timeout_ms)`
+  - `.peek_byte()`
+  - `.write_byte(value)`
+  - `.write(text)`
+  - `.write_line(text)`
+  - `.flush()`
+- `TonePin(pin=...)`
+  - `.play(frequency_hz, duration_ms)`
+  - `.stop()`
+  - `.beep(duration_ms)`
+- `ShiftBus(data_pin=..., clock_pin=..., bit_order=...)`
+  - `.write(value)`
+  - `.read()`
+- `SpiBus(sck_pin=..., mosi_pin=..., miso_pin=..., bit_order=...)`
+  - `.begin()`
+  - `.transfer(value)`
+  - `.write(value)`
+  - `.read()`
+- `I2cBus(scl_pin=..., sda_pin=...)`
+  - `.begin()`
+  - `.start()`
+  - `.stop()`
+  - `.write_byte(value)`
+  - `.read_byte(ack)`
+  - `.probe(address)`
+  - `.write_to(address, value)`
+  - `.write_register(address, register, value)`
+  - `.read_register(address, register)`
+- `UltrasonicSensor(trig_pin=..., echo_pin=...)`
+  - `.measure_pulse_us(timeout_us)`
+  - `.distance_cm(timeout_us)`
+  - `.distance_mm(timeout_us)`
 
 Current Arduino limitations:
 
@@ -748,6 +804,20 @@ High-level hardware classes:
 - `ShiftBus(data_pin=..., clock_pin=..., bit_order=...)`
   - `.write(value)`
   - `.read() -> i64`
+- `UartPort(baud=...)`
+  - `.begin()`
+  - `.available() -> i64`
+  - `.read_byte() -> i64`
+  - `.read_byte_timeout(timeout_ms) -> i64`
+  - `.peek_byte() -> i64`
+  - `.write_byte(value)`
+  - `.write(text)`
+  - `.write_line(text)`
+  - `.flush()`
+- `UltrasonicSensor(trig_pin=..., echo_pin=...)`
+  - `.measure_pulse_us(timeout_us) -> i64`
+  - `.distance_cm(timeout_us) -> i64`
+  - `.distance_mm(timeout_us) -> i64`
 
 Voltage note:
 - Arduino Uno does not have a true DAC, so Rune cannot set an arbitrary analog voltage directly on normal Uno pins.

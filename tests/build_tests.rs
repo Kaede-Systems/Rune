@@ -1953,6 +1953,66 @@ fn builds_arduino_uno_with_uart_tone_and_shift_helpers() {
 }
 
 #[test]
+fn builds_arduino_uno_with_uart_and_ultrasonic_helpers() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_uart_ultrasonic_helpers.rn");
+    let output_path = dir.join("arduino_uno_uart_ultrasonic_helpers.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import UartPort, uart_port, ultrasonic_sensor\n\n\
+         def main() -> i32:\n    let uart = uart_port(115200)\n    uart.begin()\n    uart.write_line(\"ready\")\n    println(uart.read_byte_timeout(10))\n    let sensor = ultrasonic_sensor(7, 8)\n    println(sensor.distance_cm(100))\n    println(sensor.distance_mm(100))\n    let direct = UartPort(baud=9600)\n    direct.begin()\n    println(direct.peek_byte())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno uart/ultrasonic helper build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read uart/ultrasonic helper hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
+fn builds_arduino_uno_with_spi_and_i2c_helpers() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_spi_i2c_helpers.rn");
+    let output_path = dir.join("arduino_uno_spi_i2c_helpers.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import I2cBus, SpiBus, bit_order_msb_first, i2c_bus, spi_bus, uart_begin, uart_write_line\n\n\
+         def main() -> i32:\n    uart_begin(115200)\n    uart_write_line(\"spi-i2c\")\n    let spi = spi_bus(13, 11, 12, bit_order_msb_first())\n    spi.begin()\n    println(spi.transfer(170))\n    let other_spi = SpiBus(sck_pin=8, mosi_pin=9, miso_pin=10, bit_order=bit_order_msb_first())\n    other_spi.begin()\n    other_spi.write(85)\n    println(other_spi.read())\n    let i2c = i2c_bus(5, 4)\n    i2c.begin()\n    println(i2c.probe(80))\n    println(i2c.write_to(80, 12))\n    println(i2c.write_register(80, 1, 34))\n    println(i2c.read_register(80, 1))\n    let other_i2c = I2cBus(scl_pin=3, sda_pin=2)\n    other_i2c.begin()\n    println(other_i2c.read_byte(true))\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno spi/i2c helper build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read spi/i2c helper hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_with_runtime_zero_division_guard() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_zero_division_guard.rn");

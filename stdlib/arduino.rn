@@ -48,6 +48,93 @@ def shift_out(data_pin: i64, clock_pin: i64, bit_order: i64, value: i64) -> unit
 def shift_in(data_pin: i64, clock_pin: i64, bit_order: i64) -> i64:
     return __rune_builtin_arduino_shift_in(data_pin, clock_pin, bit_order)
 
+def spi_begin(sck_pin: i64, mosi_pin: i64, miso_pin: i64) -> unit:
+    pin_mode(sck_pin, mode_output())
+    pin_mode(mosi_pin, mode_output())
+    pin_mode(miso_pin, mode_input())
+    digital_write(sck_pin, false)
+    return
+
+def i2c_begin(scl_pin: i64, sda_pin: i64) -> unit:
+    pin_mode(scl_pin, mode_input_pullup())
+    pin_mode(sda_pin, mode_input_pullup())
+    return
+
+def i2c_start(scl_pin: i64, sda_pin: i64) -> unit:
+    pin_mode(sda_pin, mode_input_pullup())
+    pin_mode(scl_pin, mode_input_pullup())
+    delay_us(4)
+    pin_mode(sda_pin, mode_output())
+    digital_write(sda_pin, false)
+    delay_us(4)
+    pin_mode(scl_pin, mode_output())
+    digital_write(scl_pin, false)
+    delay_us(4)
+    return
+
+def i2c_stop(scl_pin: i64, sda_pin: i64) -> unit:
+    pin_mode(sda_pin, mode_output())
+    digital_write(sda_pin, false)
+    delay_us(4)
+    pin_mode(scl_pin, mode_input_pullup())
+    delay_us(4)
+    pin_mode(sda_pin, mode_input_pullup())
+    delay_us(4)
+    return
+
+def i2c_write_byte(scl_pin: i64, sda_pin: i64, value: i64) -> bool:
+    let divisor: i64 = 128
+    while divisor > 0:
+        if ((value / divisor) % 2) != 0:
+            pin_mode(sda_pin, mode_input_pullup())
+        else:
+            pin_mode(sda_pin, mode_output())
+            digital_write(sda_pin, false)
+        delay_us(4)
+        pin_mode(scl_pin, mode_input_pullup())
+        delay_us(4)
+        pin_mode(scl_pin, mode_output())
+        digital_write(scl_pin, false)
+        delay_us(4)
+        divisor = divisor / 2
+    pin_mode(sda_pin, mode_input_pullup())
+    delay_us(4)
+    pin_mode(scl_pin, mode_input_pullup())
+    delay_us(4)
+    let ack: bool = not digital_read(sda_pin)
+    pin_mode(scl_pin, mode_output())
+    digital_write(scl_pin, false)
+    delay_us(4)
+    return ack
+
+def i2c_read_byte(scl_pin: i64, sda_pin: i64, ack: bool) -> i64:
+    let received: i64 = 0
+    let count: i64 = 0
+    pin_mode(sda_pin, mode_input_pullup())
+    while count < 8:
+        received = received * 2
+        pin_mode(scl_pin, mode_input_pullup())
+        delay_us(4)
+        if digital_read(sda_pin):
+            received = received + 1
+        pin_mode(scl_pin, mode_output())
+        digital_write(scl_pin, false)
+        delay_us(4)
+        count = count + 1
+    if ack:
+        pin_mode(sda_pin, mode_output())
+        digital_write(sda_pin, false)
+    else:
+        pin_mode(sda_pin, mode_input_pullup())
+    delay_us(4)
+    pin_mode(scl_pin, mode_input_pullup())
+    delay_us(4)
+    pin_mode(scl_pin, mode_output())
+    digital_write(scl_pin, false)
+    pin_mode(sda_pin, mode_input_pullup())
+    delay_us(4)
+    return received
+
 def tone(pin: i64, frequency_hz: i64, duration_ms: i64) -> unit:
     __rune_builtin_arduino_tone(pin, frequency_hz, duration_ms)
     return
@@ -177,6 +264,44 @@ def uart_write_line(text: String) -> unit:
 def uart_flush() -> unit:
     __rune_builtin_serial_flush()
     return
+
+class UartPort:
+    baud: i64
+
+    def begin(self) -> unit:
+        uart_begin(self.baud)
+        return
+
+    def available(self) -> i64:
+        return uart_available()
+
+    def read_byte(self) -> i64:
+        return uart_read_byte()
+
+    def read_byte_timeout(self, timeout_ms: i64) -> i64:
+        return uart_read_byte_timeout(timeout_ms)
+
+    def peek_byte(self) -> i64:
+        return uart_peek_byte()
+
+    def write_byte(self, value: i64) -> unit:
+        uart_write_byte(value)
+        return
+
+    def write(self, text: String) -> unit:
+        uart_write(text)
+        return
+
+    def write_line(self, text: String) -> unit:
+        uart_write_line(text)
+        return
+
+    def flush(self) -> unit:
+        uart_flush()
+        return
+
+def uart_port(baud: i64) -> UartPort:
+    return UartPort(baud=baud)
 
 def interrupts_enable() -> unit:
     __rune_builtin_arduino_interrupts_enable()
@@ -364,8 +489,152 @@ class ShiftBus:
     def read(self) -> i64:
         return shift_in(self.data_pin, self.clock_pin, self.bit_order)
 
+class SpiBus:
+    sck_pin: i64
+    mosi_pin: i64
+    miso_pin: i64
+    bit_order: i64
+
+    def begin(self) -> unit:
+        spi_begin(self.sck_pin, self.mosi_pin, self.miso_pin)
+        return
+
+    def transfer(self, value: i64) -> i64:
+        let received: i64 = 0
+        if self.bit_order == bit_order_msb_first():
+            let divisor: i64 = 128
+            while divisor > 0:
+                digital_write(self.mosi_pin, ((value / divisor) % 2) != 0)
+                delay_us(1)
+                digital_write(self.sck_pin, true)
+                delay_us(1)
+                received = received * 2
+                if digital_read(self.miso_pin):
+                    received = received + 1
+                digital_write(self.sck_pin, false)
+                delay_us(1)
+                divisor = divisor / 2
+            return received
+        let divisor: i64 = 1
+        while divisor < 256:
+            digital_write(self.mosi_pin, ((value / divisor) % 2) != 0)
+            delay_us(1)
+            digital_write(self.sck_pin, true)
+            delay_us(1)
+            if digital_read(self.miso_pin):
+                received = received + divisor
+            digital_write(self.sck_pin, false)
+            delay_us(1)
+            divisor = divisor * 2
+        return received
+
+    def write(self, value: i64) -> unit:
+        self.transfer(value)
+        return
+
+    def read(self) -> i64:
+        return self.transfer(0)
+
+class I2cBus:
+    scl_pin: i64
+    sda_pin: i64
+
+    def begin(self) -> unit:
+        i2c_begin(self.scl_pin, self.sda_pin)
+        return
+
+    def start(self) -> unit:
+        i2c_start(self.scl_pin, self.sda_pin)
+        return
+
+    def stop(self) -> unit:
+        i2c_stop(self.scl_pin, self.sda_pin)
+        return
+
+    def write_byte(self, value: i64) -> bool:
+        return i2c_write_byte(self.scl_pin, self.sda_pin, value)
+
+    def read_byte(self, ack: bool) -> i64:
+        return i2c_read_byte(self.scl_pin, self.sda_pin, ack)
+
+    def write_to(self, address: i64, value: i64) -> bool:
+        self.start()
+        if not self.write_byte(address * 2):
+            self.stop()
+            return false
+        let ok: bool = self.write_byte(value)
+        self.stop()
+        return ok
+
+    def write_register(self, address: i64, register_id: i64, value: i64) -> bool:
+        self.start()
+        if not self.write_byte(address * 2):
+            self.stop()
+            return false
+        if not self.write_byte(register_id):
+            self.stop()
+            return false
+        let ok: bool = self.write_byte(value)
+        self.stop()
+        return ok
+
+    def read_register(self, address: i64, register_id: i64) -> i64:
+        self.start()
+        if not self.write_byte(address * 2):
+            self.stop()
+            return (address - address) - 1
+        if not self.write_byte(register_id):
+            self.stop()
+            return (address - address) - 1
+        self.start()
+        if not self.write_byte((address * 2) + 1):
+            self.stop()
+            return (address - address) - 1
+        let value: i64 = self.read_byte(false)
+        self.stop()
+        return value
+
+    def probe(self, address: i64) -> bool:
+        self.start()
+        let ok: bool = self.write_byte(address * 2)
+        self.stop()
+        return ok
+
 def tone_pin(pin: i64) -> TonePin:
     return TonePin(pin=pin)
 
 def shift_bus(data_pin: i64, clock_pin: i64, bit_order: i64) -> ShiftBus:
     return ShiftBus(data_pin=data_pin, clock_pin=clock_pin, bit_order=bit_order)
+
+def spi_bus(sck_pin: i64, mosi_pin: i64, miso_pin: i64, bit_order: i64) -> SpiBus:
+    return SpiBus(sck_pin=sck_pin, mosi_pin=mosi_pin, miso_pin=miso_pin, bit_order=bit_order)
+
+def i2c_bus(scl_pin: i64, sda_pin: i64) -> I2cBus:
+    return I2cBus(scl_pin=scl_pin, sda_pin=sda_pin)
+
+class UltrasonicSensor:
+    trig_pin: i64
+    echo_pin: i64
+
+    def measure_pulse_us(self, timeout_us: i64) -> i64:
+        digital_write(self.trig_pin, false)
+        delay_us(2)
+        digital_write(self.trig_pin, true)
+        delay_us(10)
+        digital_write(self.trig_pin, false)
+        return pulse_in(self.echo_pin, true, timeout_us)
+
+    def distance_cm(self, timeout_us: i64) -> i64:
+        let pulse_us: i64 = self.measure_pulse_us(timeout_us)
+        if pulse_us <= 0:
+            return (pulse_us - pulse_us) - 1
+        return pulse_us / 58
+
+    def distance_mm(self, timeout_us: i64) -> i64:
+        let distance_cm: i64 = self.distance_cm(timeout_us)
+        if distance_cm < 0:
+            return (distance_cm - distance_cm) - 1
+        return distance_cm * 10
+
+def ultrasonic_sensor(trig_pin: i64, echo_pin: i64) -> UltrasonicSensor:
+    return UltrasonicSensor(trig_pin=trig_pin, echo_pin=echo_pin)

@@ -72,6 +72,8 @@ stmt            ::= let_stmt
                   | return_stmt
                   | if_stmt
                   | while_stmt
+                  | break_stmt
+                  | continue_stmt
                   | raise_stmt
                   | panic_stmt
                   | expr_stmt
@@ -83,6 +85,8 @@ if_stmt         ::= "if" expr ":" NEWLINE block
                     { "elif" expr ":" NEWLINE block }
                     [ "else" ":" NEWLINE block ]
 while_stmt      ::= "while" expr ":" NEWLINE block
+break_stmt      ::= "break" NEWLINE
+continue_stmt   ::= "continue" NEWLINE
 raise_stmt      ::= "raise" expr NEWLINE
 panic_stmt      ::= "panic" expr NEWLINE
 expr_stmt       ::= expr NEWLINE
@@ -115,6 +119,8 @@ primary         ::= ident | integer | string | "true" | "false" | "(" expr ")"
 - `await` parses, but async native backend support is still incomplete.
 - `extern def` declarations are implemented for bodyless native C FFI declarations.
 - `try` / `except` tokens exist lexically but are not parser-level language constructs yet.
+- `import module` plus `module.name(...)` namespace-qualified access is implemented.
+- import aliases such as `import module as alias` are not implemented yet.
 - Struct/class declarations, constructor calls, and field reads are implemented for the current static native slice.
 - Class methods declared inside the class body are implemented for the semantic checker, native executable path, and LLVM executable path.
 - Current struct limitations:
