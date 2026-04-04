@@ -2584,6 +2584,8 @@ fn arduino_uno_common_compile_args(
         "-DARDUINO_ARCH_AVR".into(),
         "-DARDUINO_AVR_UNO".into(),
         "-Os".into(),
+        "-maccumulate-args".into(),
+        "-mcall-prologues".into(),
         "-mrelax".into(),
         "-flto".into(),
         "-ffunction-sections".into(),
