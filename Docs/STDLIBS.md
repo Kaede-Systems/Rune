@@ -31,7 +31,7 @@ from arduino import (
     high, low,
     bit_order_lsb_first, bit_order_msb_first,
     analog_ref_default, analog_ref_internal, analog_ref_external,
-    uart_begin, uart_available, uart_read_byte, uart_peek_byte, uart_write_byte, uart_write,
+    uart_begin, uart_available, uart_read_byte, uart_read_byte_timeout, uart_peek_byte, uart_write_byte, uart_write, uart_write_line,
     uart_flush,
     interrupts_enable, interrupts_disable,
     random_seed, random_i64, random_range,
@@ -93,15 +93,19 @@ Exports:
 - `uart_begin(baud: i64) -> unit`
 - `uart_available() -> i64`
 - `uart_read_byte() -> i64`
+- `uart_read_byte_timeout(timeout_ms: i64) -> i64`
 - `uart_peek_byte() -> i64`
 - `uart_write_byte(value: i64) -> unit`
 - `uart_write(text: String) -> unit`
+- `uart_write_line(text: String) -> unit`
 - `uart_flush() -> unit`
 - `interrupts_enable() -> unit`
 - `interrupts_disable() -> unit`
 - `random_seed(seed: i64) -> unit`
 - `random_i64(max_value: i64) -> i64`
 - `random_range(min_value: i64, max_value: i64) -> i64`
+- `tone_pin(pin: i64) -> TonePin`
+- `shift_bus(data_pin: i64, clock_pin: i64, bit_order: i64) -> ShiftBus`
 
 Current implemented Arduino scope:
 
@@ -109,6 +113,8 @@ Current implemented Arduino scope:
 - serial text output with normal Rune `print` and `println`
 - serial line input with normal Rune `input()` and `read_line()`
 - byte-oriented UART access with `uart_available`, `uart_read_byte`, and `uart_write_byte`
+- timeout-aware low-level UART byte reads with `uart_read_byte_timeout`
+- line-oriented low-level UART output with `uart_write_line`
 - board constants and pin/timing helpers
 - PWM, pulse timing, tone generation, shift register output, and analog reference selection
 - shift register input, interrupt enable/disable control, and Arduino random helpers
@@ -735,6 +741,13 @@ High-level hardware classes:
   - `.read() -> i64`
   - `.read_voltage_mv(reference_mv: i64) -> i64`
   - `.read_percent() -> i64`
+- `TonePin(pin=...)`
+  - `.play(frequency_hz, duration_ms)`
+  - `.stop()`
+  - `.beep(duration_ms)`
+- `ShiftBus(data_pin=..., clock_pin=..., bit_order=...)`
+  - `.write(value)`
+  - `.read() -> i64`
 
 Voltage note:
 - Arduino Uno does not have a true DAC, so Rune cannot set an arbitrary analog voltage directly on normal Uno pins.

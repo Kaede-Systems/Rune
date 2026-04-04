@@ -146,6 +146,18 @@ def uart_available() -> i64:
 def uart_read_byte() -> i64:
     return __rune_builtin_arduino_uart_read_byte()
 
+def uart_read_byte_timeout(timeout_ms: i64) -> i64:
+    if timeout_ms <= 0:
+        if uart_available() > 0:
+            return uart_read_byte()
+        return -1
+    let deadline: i64 = millis() + timeout_ms
+    while millis() < deadline:
+        if uart_available() > 0:
+            return uart_read_byte()
+        delay_ms(1)
+    return -1
+
 def uart_peek_byte() -> i64:
     return __rune_builtin_arduino_uart_peek_byte()
 
@@ -155,6 +167,11 @@ def uart_write_byte(value: i64) -> unit:
 
 def uart_write(text: String) -> unit:
     __rune_builtin_arduino_uart_write(text)
+    return
+
+def uart_write_line(text: String) -> unit:
+    uart_write(text)
+    uart_write_byte(10)
     return
 
 def uart_flush() -> unit:
@@ -319,3 +336,36 @@ class AnalogPin:
 
     def read_percent(self) -> i64:
         return analog_read_percent(self.pin)
+
+class TonePin:
+    pin: i64
+
+    def play(self, frequency_hz: i64, duration_ms: i64) -> unit:
+        tone(self.pin, frequency_hz, duration_ms)
+        return
+
+    def stop(self) -> unit:
+        no_tone(self.pin)
+        return
+
+    def beep(self, duration_ms: i64) -> unit:
+        self.play(880, duration_ms)
+        return
+
+class ShiftBus:
+    data_pin: i64
+    clock_pin: i64
+    bit_order: i64
+
+    def write(self, value: i64) -> unit:
+        shift_out(self.data_pin, self.clock_pin, self.bit_order, value)
+        return
+
+    def read(self) -> i64:
+        return shift_in(self.data_pin, self.clock_pin, self.bit_order)
+
+def tone_pin(pin: i64) -> TonePin:
+    return TonePin(pin=pin)
+
+def shift_bus(data_pin: i64, clock_pin: i64, bit_order: i64) -> ShiftBus:
+    return ShiftBus(data_pin=data_pin, clock_pin=clock_pin, bit_order=bit_order)

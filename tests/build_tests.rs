@@ -1923,6 +1923,36 @@ fn builds_arduino_uno_with_shift_interrupts_and_random() {
 }
 
 #[test]
+fn builds_arduino_uno_with_uart_tone_and_shift_helpers() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_uart_tone_shift_helpers.rn");
+    let output_path = dir.join("arduino_uno_uart_tone_shift_helpers.hex");
+    let stdlib_source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("stdlib")
+        .join("arduino.rn");
+    fs::copy(&stdlib_source, dir.join("arduino.rn")).expect("failed to stage arduino stdlib");
+
+    fs::write(
+        &source_path,
+        "from arduino import ShiftBus, TonePin, bit_order_msb_first, shift_bus, tone_pin, uart_begin, uart_read_byte_timeout, uart_write_line\n\n\
+         def main() -> i32:\n    uart_begin(115200)\n    let bus = shift_bus(8, 7, bit_order_msb_first())\n    let speaker = tone_pin(9)\n    speaker.play(440, 1)\n    speaker.stop()\n    uart_write_line(\"ok\")\n    println(uart_read_byte_timeout(10))\n    println(bus.read())\n    let other = ShiftBus(data_pin=4, clock_pin=5, bit_order=bit_order_msb_first())\n    let beeper = TonePin(pin=6)\n    beeper.beep(1)\n    println(other.read())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno uart/tone/shift helper build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read uart/tone/shift helper hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_with_runtime_zero_division_guard() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_zero_division_guard.rn");

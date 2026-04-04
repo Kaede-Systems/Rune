@@ -567,6 +567,31 @@ fn llvm_backend_builds_and_runs_arduino_random_and_shift_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_arduino_uart_tone_and_shift_helpers_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_arduino_uart_tone_shift.rn");
+    let exe_path = dir.join("llvm_arduino_uart_tone_shift.exe");
+
+    fs::write(
+        &source_path,
+        "from arduino import ShiftBus, TonePin, bit_order_msb_first, shift_bus, tone_pin, uart_read_byte_timeout, uart_write_line\n\n\
+         def main() -> i32:\n    let bus = shift_bus(8, 7, bit_order_msb_first())\n    let speaker = tone_pin(9)\n    speaker.play(440, 1)\n    speaker.stop()\n    uart_write_line(\"ok\")\n    println(uart_read_byte_timeout(10))\n    println(bus.read())\n    let other = ShiftBus(data_pin=4, clock_pin=5, bit_order=bit_order_msb_first())\n    let beeper = TonePin(pin=6)\n    beeper.beep(1)\n    println(other.read())\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm arduino uart/tone/shift helper program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "ok\n-1\n0\n0\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_break_continue_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_break_continue_demo.rn");
