@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 
-use crate::avr_cbe_opt::{rewrite_arduino_uno_cbe_llvm_ir, ArduinoUnoEntrypointKind};
+use crate::avr_cbe_opt::{
+    rewrite_arduino_uno_cbe_llvm_ir, rewrite_arduino_uno_cbe_source, ArduinoUnoEntrypointKind,
+};
 use crate::codegen::CodegenError;
 use crate::llvm_backend::{emit_object_file, emit_object_file_from_ir};
 use crate::llvm_ir::emit_llvm_ir;
@@ -987,18 +989,6 @@ fn emit_arduino_uno_precode_via_llvm_cbe(
         runtime_header,
         runtime_cpp,
     })
-}
-
-fn rewrite_arduino_uno_cbe_source(
-    c_source: &str,
-    entrypoint: ArduinoUnoEntrypointKind,
-) -> String {
-    match entrypoint {
-        ArduinoUnoEntrypointKind::Main => c_source.replace("int main(void)", "int rune_entry_main(void)"),
-        ArduinoUnoEntrypointKind::SetupLoop => c_source
-            .replace("void setup(void)", "void rune_entry_setup(void)")
-            .replace("void loop(void)", "void rune_entry_loop(void)"),
-    }
 }
 
 fn emit_arduino_uno_cbe_runtime_cpp_with_features(
