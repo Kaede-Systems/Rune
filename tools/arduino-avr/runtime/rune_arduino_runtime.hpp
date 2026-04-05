@@ -66,7 +66,7 @@
 #endif
 
 static char rune_input_buffer[RUNE_INPUT_BUFFER_SIZE];
-static int64_t rune_last_string_len = 0;
+static uint16_t rune_last_string_len = 0;
 static bool rune_serial_is_open_flag = false;
 
 #if RUNE_ARDUINO_ENABLE_STRING_RUNTIME
@@ -140,7 +140,7 @@ static int rune_compare_bytes(const uint8_t* left, uint64_t left_len, const uint
 }
 
 extern "C" int64_t rune_rt_last_string_len(void) {
-    return rune_last_string_len;
+    return (int64_t)rune_last_string_len;
 }
 
 extern "C" void rune_rt_print_str(const char* text, uint64_t len) {
