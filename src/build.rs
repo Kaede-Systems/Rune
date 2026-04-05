@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 
+use crate::avr_cbe_opt::{rewrite_arduino_uno_cbe_llvm_ir, ArduinoUnoEntrypointKind};
 use crate::codegen::CodegenError;
 use crate::llvm_backend::{emit_object_file, emit_object_file_from_ir};
 use crate::llvm_ir::emit_llvm_ir;
@@ -629,12 +630,6 @@ fn emit_arduino_uno_precode(program: &Program) -> Result<String, BuildError> {
     ))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArduinoUnoEntrypointKind {
-    Main,
-    SetupLoop,
-}
-
 fn detect_arduino_uno_entrypoint_kind(
     program: &Program,
 ) -> Result<ArduinoUnoEntrypointKind, CodegenError> {
@@ -1004,74 +999,6 @@ fn rewrite_arduino_uno_cbe_source(
             .replace("void setup(void)", "void rune_entry_setup(void)")
             .replace("void loop(void)", "void rune_entry_loop(void)"),
     }
-}
-
-fn rewrite_arduino_uno_cbe_llvm_ir(
-    llvm_ir: &str,
-    entrypoint: ArduinoUnoEntrypointKind,
-) -> String {
-    let mut rename_map = HashMap::new();
-    for line in llvm_ir.lines() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with("define ") {
-            continue;
-        }
-        let Some(at_index) = trimmed.find('@') else {
-            continue;
-        };
-        let name_start = at_index + 1;
-        let name_end = trimmed[name_start..]
-            .find('(')
-            .map(|index| name_start + index)
-            .unwrap_or(trimmed.len());
-        let name = &trimmed[name_start..name_end];
-        if name.starts_with("rune_rt_") {
-            continue;
-        }
-        if matches!(
-            (entrypoint, name),
-            (ArduinoUnoEntrypointKind::Main, "main")
-                | (ArduinoUnoEntrypointKind::SetupLoop, "setup")
-                | (ArduinoUnoEntrypointKind::SetupLoop, "loop")
-        ) {
-            continue;
-        }
-        rename_map.insert(name.to_string(), format!("rune_cbe_{name}"));
-    }
-
-    rewrite_llvm_global_identifiers(llvm_ir, &rename_map)
-}
-
-fn rewrite_llvm_global_identifiers(source: &str, rename_map: &HashMap<String, String>) -> String {
-    let mut out = String::with_capacity(source.len());
-    let bytes = source.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'@' {
-            let start = index + 1;
-            let mut end = start;
-            while end < bytes.len() {
-                let ch = bytes[end];
-                if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
-                    end += 1;
-                } else {
-                    break;
-                }
-            }
-            if end > start {
-                let name = &source[start..end];
-                if let Some(replacement) = rename_map.get(name) {
-                    out.push('@');
-                    out.push_str(replacement);
-                    index = end;
-                    continue;
-                }
-            }
-        }
-        out.push(bytes[index] as char);
-        index += 1;
-    }
-    out
 }
 
 fn emit_arduino_uno_cbe_runtime_cpp_with_features(

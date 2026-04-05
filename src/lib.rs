@@ -1,6 +1,7 @@
 // Frontend and language model.
 pub mod build;
 pub mod builtin_modules;
+pub mod avr_cbe_opt;
 pub mod ir;
 pub mod lexer;
 pub mod module_loader;
