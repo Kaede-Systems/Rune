@@ -549,7 +549,7 @@ extern "C" int64_t rune_rt_arduino_random_range(int64_t min_value, int64_t max_v
 #endif
 
 static void* rune_read_serial_line(void) {
-    size_t index = 0;
+    uint8_t index = 0;
     for (;;) {
         int value = Serial.read();
         if (value < 0) {
