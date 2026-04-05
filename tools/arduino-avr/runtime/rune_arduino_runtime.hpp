@@ -118,12 +118,15 @@ static const char* rune_store_string_literal(const char* text) {
 #endif
 
 static int rune_compare_bytes(const uint8_t* left, uint64_t left_len, const uint8_t* right, uint64_t right_len) {
-    uint64_t shared = left_len < right_len ? left_len : right_len;
-    for (uint64_t index = 0; index < shared; ++index) {
-        if (left[index] < right[index]) {
+    size_t left_size = left_len > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)left_len;
+    size_t right_size = right_len > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)right_len;
+    size_t shared = left_size < right_size ? left_size : right_size;
+    if (shared > 0) {
+        int cmp = memcmp(left, right, shared);
+        if (cmp < 0) {
             return -1;
         }
-        if (left[index] > right[index]) {
+        if (cmp > 0) {
             return 1;
         }
     }
