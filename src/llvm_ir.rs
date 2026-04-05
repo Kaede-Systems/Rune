@@ -694,6 +694,22 @@ impl<'a> FunctionEmitter<'a> {
             let right_val = self.resolve_value(right, &IrType::String, out)?;
             let (left_ptr, left_len) = split_string_value(&left_val)?;
             let (right_ptr, right_len) = split_string_value(&right_val)?;
+            if matches!(op, BinaryOp::EqualEqual | BinaryOp::NotEqual) {
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_string_equal(ptr, i64, ptr, i64)\n".into());
+                let eq_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {eq_reg} = call i1 @rune_rt_string_equal({left_ptr}, {left_len}, {right_ptr}, {right_len})\n"
+                ));
+                if matches!(op, BinaryOp::EqualEqual) {
+                    self.value_map.insert(dst.to_string(), eq_reg);
+                } else {
+                    let reg = self.next_reg();
+                    out.push_str(&format!("  {reg} = xor i1 {eq_reg}, true\n"));
+                    self.value_map.insert(dst.to_string(), reg);
+                }
+                return Ok(());
+            }
             self.declared_runtime.insert(
                 "declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)\n".into(),
             );
@@ -703,8 +719,6 @@ impl<'a> FunctionEmitter<'a> {
             ));
             let reg = self.next_reg();
             let predicate = match op {
-                BinaryOp::EqualEqual => "eq",
-                BinaryOp::NotEqual => "ne",
                 BinaryOp::Greater => "sgt",
                 BinaryOp::GreaterEqual => "sge",
                 BinaryOp::Less => "slt",
@@ -926,10 +940,9 @@ impl<'a> FunctionEmitter<'a> {
                     let left_len = self.next_reg();
                     let right_ptr = self.next_reg();
                     let right_len = self.next_reg();
-                    let cmp_reg = self.next_reg();
-                    self.declared_runtime.insert(
-                        "declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)\n".into(),
-                    );
+                    let eq_reg = self.next_reg();
+                    self.declared_runtime
+                        .insert("declare i1 @rune_rt_string_equal(ptr, i64, ptr, i64)\n".into());
                     let string_ty = llvm_internal_type(field_ty, self.struct_layouts)?;
                     out.push_str(&format!(
                         "  {left_ptr} = extractvalue {string_ty} {left_field}, 0\n"
@@ -944,10 +957,8 @@ impl<'a> FunctionEmitter<'a> {
                         "  {right_len} = extractvalue {string_ty} {right_field}, 1\n"
                     ));
                     out.push_str(&format!(
-                        "  {cmp_reg} = call i32 @rune_rt_string_compare({left_ptr}, {left_len}, {right_ptr}, {right_len})\n"
+                        "  {eq_reg} = call i1 @rune_rt_string_equal({left_ptr}, {left_len}, {right_ptr}, {right_len})\n"
                     ));
-                    let eq_reg = self.next_reg();
-                    out.push_str(&format!("  {eq_reg} = icmp eq i32 {cmp_reg}, 0\n"));
                     eq_reg
                 }
                 IrType::Struct(nested_name) => {

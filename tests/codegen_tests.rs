@@ -163,6 +163,14 @@ fn emits_extended_stdlib_runtime_calls() {
 }
 
 #[test]
+fn emits_string_equal_runtime_call_for_equality() {
+    let asm = emit_asm_source("def main(op: String) -> bool:\n    return op == \"+\"\n")
+        .expect("string equality should generate");
+
+    assert!(asm.contains("call rune_rt_string_equal"));
+}
+
+#[test]
 fn emits_env_and_network_runtime_calls() {
     let asm = emit_asm_source(
         "def main() -> bool:\n    let host: String = __rune_builtin_env_get_string(\"HOST\", \"127.0.0.1\")\n    let port: i32 = __rune_builtin_env_get_i32(\"PORT\", 8080)\n    println(host)\n    return __rune_builtin_network_tcp_connect(host, port)\n",

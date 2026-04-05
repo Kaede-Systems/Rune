@@ -153,11 +153,22 @@ fn emits_int_string_runtime_call() {
 }
 
 #[test]
-fn emits_string_compare_runtime_call() {
+fn emits_string_equal_runtime_call_for_equality() {
     let ir = emit_llvm_ir_source(
         "def main(op: String) -> bool:\n    return op == \"+\"\n",
     )
     .expect("llvm ir should generate for string comparisons");
+
+    assert!(ir.contains("declare i1 @rune_rt_string_equal(ptr, i64, ptr, i64)"));
+    assert!(ir.contains("call i1 @rune_rt_string_equal"));
+}
+
+#[test]
+fn emits_string_compare_runtime_call_for_ordering() {
+    let ir = emit_llvm_ir_source(
+        "def main(left: String, right: String) -> bool:\n    return left < right\n",
+    )
+    .expect("llvm ir should generate for ordered string comparisons");
 
     assert!(ir.contains("declare i32 @rune_rt_string_compare(ptr, i64, ptr, i64)"));
     assert!(ir.contains("call i32 @rune_rt_string_compare"));

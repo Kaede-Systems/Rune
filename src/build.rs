@@ -5864,6 +5864,9 @@ function createHost(options = {{}}) {{
       rune_rt_string_compare(leftPtr, leftLen, rightPtr, rightLen) {{
         return runeStringCompare(leftPtr, leftLen, rightPtr, rightLen);
       }},
+      rune_rt_string_equal(leftPtr, leftLen, rightPtr, rightLen) {{
+        return runeStringCompare(leftPtr, leftLen, rightPtr, rightLen) === 0;
+      }},
       rune_rt_string_concat(leftPtr, leftLen, rightPtr, rightLen) {{
         return runeStringConcat(leftPtr, leftLen, rightPtr, rightLen);
       }},
@@ -6528,6 +6531,9 @@ int32_t rune_rt_string_compare(const char* left_ptr, int64_t left_len, const cha
         return 1;
     }
     return 0;
+}
+_Bool rune_rt_string_equal(const char* left_ptr, int64_t left_len, const char* right_ptr, int64_t right_len) {
+    return left_len == right_len && memcmp(left_ptr, right_ptr, (size_t)left_len) == 0;
 }
 char* rune_rt_string_from_i64(int64_t value) {
     char buffer[64];
@@ -8398,6 +8404,18 @@ pub extern "C" fn rune_rt_string_compare(
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_equal(
+    left_ptr: *const u8,
+    left_len: i64,
+    right_ptr: *const u8,
+    right_len: i64,
+) -> bool {
+    let left = unsafe { std::slice::from_raw_parts(left_ptr, left_len as usize) };
+    let right = unsafe { std::slice::from_raw_parts(right_ptr, right_len as usize) };
+    left == right
 }
 
 #[unsafe(no_mangle)]

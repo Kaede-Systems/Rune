@@ -202,8 +202,9 @@ extern "C" void rune_rt_fail(int32_t code) {
         Serial.begin(115200);
         rune_serial_is_open_flag = true;
     }
-    Serial.print("ERR E");
-    Serial.println(code);
+    rune_rt_print_str("ERR E", 5);
+    rune_rt_print_i64((int64_t)code);
+    rune_rt_print_newline();
 #endif
     for (;;) {
         delay(1000);
@@ -232,6 +233,11 @@ extern "C" void rune_rt_eprint_newline(void) {
 
 extern "C" int32_t rune_rt_string_compare(const char* left_ptr, uint64_t left_len, const char* right_ptr, uint64_t right_len) {
     return rune_compare_bytes((const uint8_t*)left_ptr, left_len, (const uint8_t*)right_ptr, right_len);
+}
+
+extern "C" bool rune_rt_string_equal(const char* left_ptr, uint64_t left_len, const char* right_ptr, uint64_t right_len) {
+    return left_len == right_len
+        && memcmp(left_ptr, right_ptr, (size_t)(left_len > (uint64_t)SIZE_MAX ? SIZE_MAX : left_len)) == 0;
 }
 
 #if RUNE_ARDUINO_ENABLE_STRING_RUNTIME

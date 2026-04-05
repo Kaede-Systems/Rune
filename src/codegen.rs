@@ -1175,14 +1175,18 @@ impl<'a> FunctionEmitter<'a> {
                         "    mov rdx, QWORD PTR [rbp-{}]\n",
                         self.scratch_offset + 8
                     ));
-                    out.push_str("    call rune_rt_string_compare\n");
-                    out.push_str("    cmp eax, 0\n");
                     match op {
-                        BinaryOp::EqualEqual => out.push_str("    sete al\n"),
-                        BinaryOp::NotEqual => out.push_str("    setne al\n"),
+                        BinaryOp::EqualEqual => {
+                            out.push_str("    call rune_rt_string_equal\n");
+                            out.push_str("    movzx rax, al\n");
+                        }
+                        BinaryOp::NotEqual => {
+                            out.push_str("    call rune_rt_string_equal\n");
+                            out.push_str("    xor eax, 1\n");
+                            out.push_str("    movzx rax, al\n");
+                        }
                         _ => unreachable!(),
                     }
-                    out.push_str("    movzx rax, al\n");
                     return Ok(());
                 }
                 if matches!(
