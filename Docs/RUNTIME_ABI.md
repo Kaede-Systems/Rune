@@ -68,6 +68,7 @@ Current runtime error codes:
 
 - `E1001`: division by zero
 - `E1002`: modulo by zero
+- `E1100`: wall clock unavailable on current target
 
 ### String Helpers
 
@@ -93,6 +94,12 @@ Current runtime error codes:
 - `rune_rt_time_monotonic_us`
 - `rune_rt_time_sleep_ms`
 - `rune_rt_time_sleep_us`
+
+Notes:
+
+- `rune_rt_time_monotonic_*` and `rune_rt_time_sleep_*` are available on host and embedded targets in the current scope.
+- `rune_rt_time_now_unix` is a real wall-clock call on host targets.
+- On bare embedded targets without an RTC-backed wall clock, `rune_rt_time_now_unix` fails with `E1100` instead of inventing a fake timestamp.
 
 ### System
 

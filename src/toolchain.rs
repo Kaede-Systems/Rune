@@ -444,6 +444,8 @@ fn append_arduino_avr_roots(roots: &mut Vec<PathBuf>, base_root: &Path) {
         return;
     }
 
+    roots.push(base_root.to_path_buf());
+
     let host_dir = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", "x86_64") => Some("windows-x64"),
         ("linux", "x86_64") => Some("linux-x64"),

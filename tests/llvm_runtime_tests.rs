@@ -196,6 +196,31 @@ fn llvm_backend_builds_and_runs_panic_program_on_windows() {
 }
 
 #[test]
+fn llvm_backend_builds_and_runs_clock_module_program_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_clock_demo.rn");
+    let exe_path = dir.join("llvm_clock_demo.exe");
+
+    fs::write(
+        &source_path,
+        "from clock import ticks_ms, ticks_us, elapsed_ms, elapsed_us, sleep_ms, sleep_us, wait_until_ms, wait_until_us\n\n\
+def main() -> i32:\n    let start_ms: i64 = ticks_ms()\n    let start_us: i64 = ticks_us()\n    sleep_ms(1)\n    sleep_us(100)\n    wait_until_ms(start_ms)\n    wait_until_us(start_us)\n    println(elapsed_ms(start_ms) >= 0)\n    println(elapsed_us(start_us) >= 0)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm clock stdlib program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm-built clock executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\ntrue\n");
+}
+
+#[test]
 fn llvm_backend_builds_and_runs_zero_division_error_program_on_windows() {
     let dir = temp_dir();
     let source_path = dir.join("llvm_zero_division_demo.rn");

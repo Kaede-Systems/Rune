@@ -76,10 +76,17 @@ Current stdlib modules are available through Rune's default stdlib registry. Man
 - `system`
 - `terminal`
 - `time`
+- `clock`
 - `audio`
 - `arduino`
 
 Core ergonomics are available through `io`, `terminal`, `env`, and `sys` aliases such as `prompt(...)`, `flush_stdout()`, `cursor_hide()`, `arg_or(...)`, and `is_host()`.
+
+Timing note:
+
+- `time` includes wall-clock and monotonic helpers.
+- `clock` is the portable monotonic/tick timing surface for pacing, elapsed time, and embedded timing.
+- On bare embedded targets without an RTC, use `clock` or `time.monotonic_*`; do not expect a real wall clock.
 
 Current import note:
 

@@ -556,6 +556,33 @@ fn builds_arduino_uno_hex_with_arduino_stdlib_runtime_calls() {
 }
 
 #[test]
+fn builds_arduino_uno_with_builtin_time_and_clock_modules() {
+    let dir = temp_dir();
+    let source_path = dir.join("arduino_uno_time_clock.hex.rn");
+    let output_path = dir.join("arduino_uno_time_clock.hex");
+
+    fs::write(
+        &source_path,
+        "from time import monotonic_ms, monotonic_us, sleep_ms, sleep_us\n\
+from clock import ticks_ms, ticks_us, elapsed_ms, elapsed_us, wait_until_ms, wait_until_us\n\n\
+def main() -> i32:\n    let start_ms: i64 = monotonic_ms()\n    let start_us: i64 = monotonic_us()\n    sleep_ms(1)\n    sleep_us(10)\n    wait_until_ms(start_ms)\n    wait_until_us(start_us)\n    println(ticks_ms() >= start_ms)\n    println(ticks_us() >= start_us)\n    println(elapsed_ms(start_ms) >= 0)\n    println(elapsed_us(start_us) >= 0)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(
+        &source_path,
+        &output_path,
+        Some("avr-atmega328p-arduino-uno"),
+    )
+    .expect("arduino uno builtin time/clock build should succeed");
+
+    let bytes = fs::read(&output_path).expect("failed to read arduino uno time/clock hex");
+    assert!(!bytes.is_empty());
+    assert_eq!(bytes[0], b':');
+    assert!(output_path.with_extension("elf").is_file());
+}
+
+#[test]
 fn builds_arduino_uno_hex_with_pwm_and_board_constants() {
     let dir = temp_dir();
     let source_path = dir.join("arduino_uno_pwm.rn");

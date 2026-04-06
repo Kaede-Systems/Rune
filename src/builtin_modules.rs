@@ -382,6 +382,140 @@ fn time_program() -> Program {
     }
 }
 
+fn clock_program() -> Program {
+    Program {
+        items: vec![
+            Item::Function(function(
+                "ticks_ms",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("monotonic_ms", vec![]))],
+            )),
+            Item::Function(function(
+                "ticks_us",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name("monotonic_us", vec![]))],
+            )),
+            Item::Function(function(
+                "monotonic_ms",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_time_monotonic_ms",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "monotonic_us",
+                vec![],
+                "i64",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_time_monotonic_us",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep_ms",
+                vec![param("ms", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_time_sleep_ms",
+                    vec![pos(ident("ms"))],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep_us",
+                vec![param("us", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "__rune_builtin_time_sleep_us",
+                    vec![pos(ident("us"))],
+                ))],
+            )),
+            Item::Function(function(
+                "sleep",
+                vec![param("seconds", "i64")],
+                "unit",
+                vec![expr_stmt(call_name(
+                    "sleep_ms",
+                    vec![pos(binary(ident("seconds"), BinaryOp::Multiply, int_lit(1000)))],
+                ))],
+            )),
+            Item::Function(function(
+                "elapsed_ms",
+                vec![param("start_ms", "i64")],
+                "i64",
+                vec![return_stmt(binary(
+                    call_name("ticks_ms", vec![]),
+                    BinaryOp::Subtract,
+                    ident("start_ms"),
+                ))],
+            )),
+            Item::Function(function(
+                "elapsed_us",
+                vec![param("start_us", "i64")],
+                "i64",
+                vec![return_stmt(binary(
+                    call_name("ticks_us", vec![]),
+                    BinaryOp::Subtract,
+                    ident("start_us"),
+                ))],
+            )),
+            Item::Function(function(
+                "wait_until_ms",
+                vec![param("deadline_ms", "i64")],
+                "unit",
+                vec![
+                    Stmt::Let(crate::parser::LetStmt {
+                        name: "now".to_string(),
+                        ty: Some(ty("i64")),
+                        value: call_name("ticks_ms", vec![]),
+                        span: s(),
+                    }),
+                    if_stmt(
+                        binary(ident("deadline_ms"), BinaryOp::Greater, ident("now")),
+                        vec![expr_stmt(call_name(
+                            "sleep_ms",
+                            vec![pos(binary(
+                                ident("deadline_ms"),
+                                BinaryOp::Subtract,
+                                ident("now"),
+                            ))],
+                        ))],
+                        None,
+                    ),
+                ],
+            )),
+            Item::Function(function(
+                "wait_until_us",
+                vec![param("deadline_us", "i64")],
+                "unit",
+                vec![
+                    Stmt::Let(crate::parser::LetStmt {
+                        name: "now".to_string(),
+                        ty: Some(ty("i64")),
+                        value: call_name("ticks_us", vec![]),
+                        span: s(),
+                    }),
+                    if_stmt(
+                        binary(ident("deadline_us"), BinaryOp::Greater, ident("now")),
+                        vec![expr_stmt(call_name(
+                            "sleep_us",
+                            vec![pos(binary(
+                                ident("deadline_us"),
+                                BinaryOp::Subtract,
+                                ident("now"),
+                            ))],
+                        ))],
+                        None,
+                    ),
+                ],
+            )),
+        ],
+    }
+}
+
 fn sys_program() -> Program {
     Program {
         items: vec![
@@ -3799,6 +3933,10 @@ pub fn builtin_module(module: &[String]) -> Option<BuiltinModule> {
         [name] if name == "time" => Some(BuiltinModule {
             virtual_path: PathBuf::from("<builtin>/time"),
             body: BuiltinModuleBody::Program(time_program()),
+        }),
+        [name] if name == "clock" => Some(BuiltinModule {
+            virtual_path: PathBuf::from("<builtin>/clock"),
+            body: BuiltinModuleBody::Program(clock_program()),
         }),
         [name] if name == "sys" || name == "system" => Some(BuiltinModule {
             virtual_path: PathBuf::from(format!("<builtin>/{name}")),

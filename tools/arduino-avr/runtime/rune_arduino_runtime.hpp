@@ -709,6 +709,27 @@ extern "C" void rune_rt_arduino_delay_us(int64_t us) {
     delayMicroseconds((unsigned int)us);
 }
 
+extern "C" int64_t rune_rt_time_now_unix(void) {
+    rune_rt_fail(1100);
+    return 0;
+}
+
+extern "C" int64_t rune_rt_time_monotonic_ms(void) {
+    return (int64_t)millis();
+}
+
+extern "C" int64_t rune_rt_time_monotonic_us(void) {
+    return (int64_t)micros();
+}
+
+extern "C" void rune_rt_time_sleep_ms(int64_t ms) {
+    delay((unsigned long)ms);
+}
+
+extern "C" void rune_rt_time_sleep_us(int64_t us) {
+    delayMicroseconds((unsigned int)us);
+}
+
 extern "C" int64_t rune_rt_arduino_millis(void) {
     return (int64_t)millis();
 }
@@ -759,6 +780,45 @@ extern "C" int64_t rune_rt_arduino_analog_ref_internal(void) {
 
 extern "C" int64_t rune_rt_arduino_analog_ref_external(void) {
     return EXTERNAL;
+}
+#endif
+
+#if !RUNE_ARDUINO_ENABLE_GPIO_RUNTIME
+extern "C" void rune_rt_arduino_delay_ms(int64_t ms) {
+    delay((unsigned long)ms);
+}
+
+extern "C" void rune_rt_arduino_delay_us(int64_t us) {
+    delayMicroseconds((unsigned int)us);
+}
+
+extern "C" int64_t rune_rt_time_now_unix(void) {
+    rune_rt_fail(1100);
+    return 0;
+}
+
+extern "C" int64_t rune_rt_time_monotonic_ms(void) {
+    return (int64_t)millis();
+}
+
+extern "C" int64_t rune_rt_time_monotonic_us(void) {
+    return (int64_t)micros();
+}
+
+extern "C" void rune_rt_time_sleep_ms(int64_t ms) {
+    delay((unsigned long)ms);
+}
+
+extern "C" void rune_rt_time_sleep_us(int64_t us) {
+    delayMicroseconds((unsigned int)us);
+}
+
+extern "C" int64_t rune_rt_arduino_millis(void) {
+    return (int64_t)millis();
+}
+
+extern "C" int64_t rune_rt_arduino_micros(void) {
+    return (int64_t)micros();
 }
 #endif
 

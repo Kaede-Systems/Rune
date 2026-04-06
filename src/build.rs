@@ -1490,6 +1490,10 @@ extern \"C\" void rune_rt_fail(int32_t code) {{\n\
         delay(1000);\n\
     }}\n\
 }}\n\n\
+static int64_t rune_rt_time_now_unix(void) {{\n\
+    rune_rt_fail(1100);\n\
+    return 0;\n\
+}}\n\n\
 static int64_t rune_checked_div_i64(int64_t left, int64_t right) {{\n\
     if (right == 0) {{\n\
         rune_rt_fail(1001);\n\
@@ -2443,7 +2447,7 @@ fn emit_arduino_uno_stmt_expr(
             Ok(())
         }
         _ => Err(CodegenError {
-            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `interrupts_enable`, `interrupts_disable`, `random_seed`, `tone`, `no_tone`, `servo_detach`, `servo_write`, `servo_write_us`, `delay_ms`, `delay_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `serial_flush`, `send`, and `send_line` statements".into(),
+            message: "current Arduino Uno target supports `print`, `println`, `pin_mode`, `digital_write`, `analog_write`, `analog_reference`, `shift_out`, `interrupts_enable`, `interrupts_disable`, `random_seed`, `tone`, `no_tone`, `servo_detach`, `servo_write`, `servo_write_us`, `delay_ms`, `delay_us`, `sleep_ms`, `sleep_us`, `uart_begin`, `uart_write_byte`, `uart_write`, `close`, `serial_flush`, `send`, and `send_line` statements".into(),
             span: callee.span,
         }),
     }
@@ -3172,6 +3176,15 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("((int64_t)micros())".into(), ArduinoUnoType::I64))
                 }
+                "unix_now" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`unix_now` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("rune_rt_time_now_unix()".into(), ArduinoUnoType::I64))
+                }
                 "random_i64" => {
                     let [CallArg::Positional(max_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -3705,7 +3718,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `read_byte_timeout`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `unix_now`, `monotonic_ms`, `monotonic_us`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `read_byte_timeout`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -4869,7 +4882,11 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_gpio_mode_input_pullup" => "mode_input_pullup",
         "__rune_builtin_gpio_pwm_duty_max" => "gpio_pwm_duty_max",
         "__rune_builtin_gpio_analog_max" => "gpio_analog_max",
+        "__rune_builtin_time_now_unix" => "unix_now",
+        "__rune_builtin_time_monotonic_ms" => "millis",
+        "__rune_builtin_time_monotonic_us" => "micros",
         "__rune_builtin_time_sleep_ms" => "delay_ms",
+        "__rune_builtin_time_sleep_us" => "delay_us",
         "__rune_builtin_arduino_pin_mode" => "pin_mode",
         "__rune_builtin_arduino_digital_write" => "digital_write",
         "__rune_builtin_arduino_digital_read" => "digital_read",
@@ -6412,6 +6429,20 @@ fn find_rustc() -> Option<PathBuf> {
     };
     if rustup_bin.is_file() {
         return Some(rustup_bin);
+    }
+
+    let rustup_toolchains = PathBuf::from(&home).join(".rustup").join("toolchains");
+    if let Ok(entries) = fs::read_dir(rustup_toolchains) {
+        for entry in entries.flatten() {
+            let candidate = if cfg!(target_os = "windows") {
+                entry.path().join("bin").join("rustc.exe")
+            } else {
+                entry.path().join("bin").join("rustc")
+            };
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
     }
 
     None

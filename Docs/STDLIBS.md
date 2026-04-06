@@ -496,6 +496,34 @@ Exports:
 - `sleep_until(deadline_ms: i64) -> unit`
 - `sleep_until_us(deadline_us: i64) -> unit`
 
+Notes:
+
+- `monotonic_*` and `sleep_*` are cross-platform and work on host and embedded targets.
+- On Arduino-class bare-metal targets, `monotonic_ms()` and `monotonic_us()` map to the board uptime counters.
+- `unix_now()` is a real wall-clock call on host targets. Bare embedded targets without an RTC do not provide a real wall clock; calling it there fails with runtime error `E1100`.
+
+## `clock`
+
+```rune
+from clock import ticks_ms, ticks_us, monotonic_ms, monotonic_us, elapsed_ms, elapsed_us, sleep_ms, sleep_us, sleep, wait_until_ms, wait_until_us
+```
+
+Exports:
+
+- `ticks_ms() -> i64`
+- `ticks_us() -> i64`
+- `monotonic_ms() -> i64`
+- `monotonic_us() -> i64`
+- `elapsed_ms(start_ms: i64) -> i64`
+- `elapsed_us(start_us: i64) -> i64`
+- `sleep_ms(ms: i64) -> unit`
+- `sleep_us(us: i64) -> unit`
+- `sleep(seconds: i64) -> unit`
+- `wait_until_ms(deadline_ms: i64) -> unit`
+- `wait_until_us(deadline_us: i64) -> unit`
+
+`clock` is the portable monotonic/tick timing surface. Use it for uptime, deadlines, pacing, and embedded timing where wall-clock time is not available.
+
 ## `system`
 
 ```rune

@@ -360,6 +360,19 @@ Current exported functions:
 - `sleep_until(deadline_ms: i64) -> unit`
 - `sleep_until_us(deadline_us: i64) -> unit`
 
+`clock`
+- `ticks_ms() -> i64`
+- `ticks_us() -> i64`
+- `monotonic_ms() -> i64`
+- `monotonic_us() -> i64`
+- `elapsed_ms(start_ms: i64) -> i64`
+- `elapsed_us(start_us: i64) -> i64`
+- `sleep_ms(ms: i64) -> unit`
+- `sleep_us(us: i64) -> unit`
+- `sleep(seconds: i64) -> unit`
+- `wait_until_ms(deadline_ms: i64) -> unit`
+- `wait_until_us(deadline_us: i64) -> unit`
+
 `system`
 - `pid() -> i32`
 - `cpu_count() -> i32`
