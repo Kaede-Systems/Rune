@@ -629,3 +629,25 @@ fn emits_string_contains_call() {
 
     assert!(asm.contains("rune_rt_string_contains"), "expected call to rune_rt_string_contains");
 }
+
+#[test]
+fn accepts_same_name_let_in_different_branches() {
+    // `let result` in both branches is valid: exclusive branches share a stack slot.
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let x: i64 = 1\n    if x > 0:\n        let result: i64 = x + 10\n        return result\n    else:\n        let result: i64 = x - 10\n        return result\n    return 0\n",
+    )
+    .expect("same-name locals in different branches should codegen");
+
+    assert!(asm.contains(".globl main"));
+}
+
+#[test]
+fn accepts_same_name_let_in_loop_body() {
+    // `let acc` declared each iteration via a loop body is valid.
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let i: i64 = 0\n    while i < 3:\n        let acc: i64 = i * 2\n        i = i + 1\n    return 0\n",
+    )
+    .expect("let inside while body should codegen");
+
+    assert!(asm.contains(".globl main"));
+}
