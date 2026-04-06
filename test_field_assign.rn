@@ -1,0 +1,37 @@
+struct Point:
+    x: i64
+    y: i64
+
+struct Rectangle:
+    x: i64
+    y: i64
+    w: i64
+    h: i64
+
+def translate(p: Point, dx: i64, dy: i64) -> Point:
+    p.x += dx
+    p.y += dy
+    return p
+
+def area(r: Rectangle) -> i64:
+    return r.w * r.h
+
+def main() -> i32:
+    let p = Point(x=3, y=4)
+    p.x = 10
+    p.y = 20
+    println(p.x)
+    println(p.y)
+
+    let p2 = translate(Point(x=1, y=1), 5, 7)
+    println(p2.x)
+    println(p2.y)
+
+    let r = Rectangle(x=0, y=0, w=8, h=5)
+    println(area(r))
+
+    r.w = 10
+    r.h = 3
+    println(area(r))
+
+    return 0

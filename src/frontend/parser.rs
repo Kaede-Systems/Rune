@@ -624,7 +624,9 @@ impl Parser {
                     | TokenKind::PercentEqual
                     | TokenKind::AmpersandEqual
                     | TokenKind::PipeEqual
-                    | TokenKind::CaretEqual,
+                    | TokenKind::CaretEqual
+                    | TokenKind::ShiftLeftEqual
+                    | TokenKind::ShiftRightEqual,
                 ) => return true,
                 // Allow dots for field-path assignment
                 Some(TokenKind::Dot) => {
@@ -674,6 +676,8 @@ impl Parser {
                     TokenKind::AmpersandEqual => BinaryOp::BitwiseAnd,
                     TokenKind::PipeEqual => BinaryOp::BitwiseOr,
                     TokenKind::CaretEqual => BinaryOp::BitwiseXor,
+                    TokenKind::ShiftLeftEqual => BinaryOp::ShiftLeft,
+                    TokenKind::ShiftRightEqual => BinaryOp::ShiftRight,
                     _ => unreachable!("peek_is_ident_assignment only returns true for known ops"),
                 };
                 // Build the current-value expression (name or name.field.field...)

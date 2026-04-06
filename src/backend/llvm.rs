@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use crate::ir::{IrArg, IrFunction, IrInst, IrProgram, IrType, lower_program};
-use crate::optimize::optimize_program;
-use crate::parser::{BinaryOp, Item, Program, TypeRef, parse_source};
+use crate::ir::optimize_program;
+use crate::frontend::parser::{BinaryOp, Item, Program, TypeRef, parse_source};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlvmIrError {
@@ -4815,5 +4815,512 @@ fn dynamic_compare_opcode(op: &BinaryOp) -> Result<i64, LlvmIrError> {
                 op
             ),
         }),
+    }
+}
+
+// === llvm_backend (merged from llvm_backend.rs) ===
+
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::driver::toolchain::find_packaged_llvm_tool_for_target;
+
+/// Optimization level for LLVM-backed builds.
+///
+/// The default, `Full`, runs the complete LLVM optimization pipeline
+/// (`default<O3>`). This maximizes both execution speed and binary quality:
+/// the same passes that improve speed (inlining, dead-code elimination,
+/// constant propagation) also reduce the amount of code that ends up in the
+/// binary.
+///
+/// `MinSize` pushes further by switching LLVM to its size-first mode
+/// (`default<Oz>`), which trades some runtime performance for the smallest
+/// possible output. Use it when flash or disk space is the primary constraint.
+///
+/// AVR (`avr-atmega328p-arduino-uno`) always uses `default<Oz>` regardless of
+/// this setting because the ATmega328P has only 32 KiB of flash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LlvmOptLevel {
+    /// Full LLVM optimization pipeline. Uses `default<O3>` in opt and `-O3`
+    /// in llc. Dead-code elimination, inlining, and constant propagation all
+    /// run, which improves both speed and binary size simultaneously.
+    /// This is the default for all host and cross-compiled targets.
+    #[default]
+    Full,
+    /// Aggressive size-first optimization. Uses `default<Oz>` in opt and
+    /// `-Oz` in llc. Produces the smallest possible binary at the cost of
+    /// some runtime performance. Enabled with `--size` on the CLI.
+    MinSize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlvmBackendError {
+    pub message: String,
+}
+
+impl fmt::Display for LlvmBackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for LlvmBackendError {}
+
+impl From<LlvmIrError> for LlvmBackendError {
+    fn from(value: LlvmIrError) -> Self {
+        Self {
+            message: value.message,
+        }
+    }
+}
+
+pub fn emit_object_file(
+    program: &Program,
+    target_triple: &str,
+    output_path: &Path,
+    opt_level: LlvmOptLevel,
+) -> Result<String, LlvmBackendError> {
+    let llvm_ir = emit_llvm_ir(program)?;
+    emit_object_file_from_ir(&llvm_ir, target_triple, output_path, opt_level)?;
+    Ok(llvm_ir)
+}
+
+pub fn emit_assembly_file(
+    program: &Program,
+    target_triple: &str,
+    output_path: &Path,
+    opt_level: LlvmOptLevel,
+) -> Result<String, LlvmBackendError> {
+    let llvm_ir = emit_llvm_ir(program)?;
+    emit_assembly_file_from_ir(&llvm_ir, target_triple, output_path, opt_level)?;
+    Ok(llvm_ir)
+}
+
+pub fn emit_object_file_from_ir(
+    llvm_ir: &str,
+    target_triple: &str,
+    output_path: &Path,
+    opt_level: LlvmOptLevel,
+) -> Result<(), LlvmBackendError> {
+    emit_codegen_artifact_from_ir(llvm_ir, target_triple, output_path, "obj", opt_level)
+}
+
+pub fn emit_assembly_file_from_ir(
+    llvm_ir: &str,
+    target_triple: &str,
+    output_path: &Path,
+    opt_level: LlvmOptLevel,
+) -> Result<(), LlvmBackendError> {
+    emit_codegen_artifact_from_ir(llvm_ir, target_triple, output_path, "asm", opt_level)
+}
+
+fn emit_codegen_artifact_from_ir(
+    llvm_ir: &str,
+    target_triple: &str,
+    output_path: &Path,
+    filetype: &str,
+    opt_level: LlvmOptLevel,
+) -> Result<(), LlvmBackendError> {
+    let temp_dir = create_temp_dir()?;
+    let input_path = temp_dir.join("rune.ll");
+    let optimized_path = temp_dir.join("rune.opt.ll");
+    fs::write(&input_path, llvm_ir).map_err(|error| LlvmBackendError {
+        message: format!("failed to write temporary LLVM IR file: {error}"),
+    })?;
+
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|error| LlvmBackendError {
+            message: format!("failed to create `{}`: {error}", parent.display()),
+        })?;
+    }
+
+    let input_arg = input_path.to_string_lossy().into_owned();
+    let optimized_arg = optimized_path.to_string_lossy().into_owned();
+    let output_arg = output_path.to_string_lossy().into_owned();
+    run_llvm_tool(
+        target_triple,
+        "opt",
+        llvm_opt_args(target_triple, opt_level, &input_arg, &optimized_arg),
+    )?;
+    run_llvm_tool(
+        target_triple,
+        "llc",
+        llvm_codegen_args(target_triple, opt_level, filetype, &optimized_arg, &output_arg),
+    )?;
+
+    let _ = fs::remove_file(input_path);
+    let _ = fs::remove_file(optimized_path);
+    let _ = fs::remove_dir(temp_dir);
+    Ok(())
+}
+
+fn run_llvm_tool<S, I>(target_triple: &str, tool_name: &str, args: I) -> Result<(), LlvmBackendError>
+where
+    S: AsRef<str>,
+    I: IntoIterator<Item = S>,
+{
+    let tool = find_packaged_llvm_tool_for_target(tool_name, target_triple).ok_or_else(|| LlvmBackendError {
+        message: format!("packaged LLVM tool not found: {tool_name}"),
+    })?;
+    let args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .collect::<Vec<_>>();
+    let output = Command::new(&tool)
+        .args(&args)
+        .output()
+        .map_err(|error| LlvmBackendError {
+            message: format!("failed to run `{}`: {error}", tool.display()),
+        })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(LlvmBackendError {
+        message: format!(
+            "{} failed with exit code {}{}",
+            tool.display(),
+            output.status.code().unwrap_or(-1),
+            if output.stderr.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n{}", String::from_utf8_lossy(&output.stderr))
+            }
+        ),
+    })
+}
+
+fn llvm_codegen_args(
+    target_triple: &str,
+    opt_level: LlvmOptLevel,
+    filetype: &str,
+    input_arg: &str,
+    output_arg: &str,
+) -> Vec<String> {
+    let mut args = match target_triple {
+        "avr-atmega328p-arduino-uno" => {
+            vec!["-mtriple=avr".to_string(), "-mcpu=atmega328p".to_string()]
+        }
+        _ => vec![format!("-mtriple={target_triple}")],
+    };
+    args.push(format!("-filetype={filetype}"));
+    // AVR: keep -O2 (opt already ran Oz; llc at O2 gives better AVR scheduling
+    // than Oz which can pessimise instruction selection on this tiny ISA).
+    // Others: match the opt pipeline level so llc does not undo the trade-off
+    // chosen above.
+    args.push(match target_triple {
+        "avr-atmega328p-arduino-uno" => "-O2".to_string(),
+        _ => match opt_level {
+            LlvmOptLevel::Full => "-O3".to_string(),
+            LlvmOptLevel::MinSize => "-Oz".to_string(),
+        },
+    });
+    args.push(input_arg.to_string());
+    args.push("-o".to_string());
+    args.push(output_arg.to_string());
+    args
+}
+
+fn llvm_opt_args(
+    target_triple: &str,
+    opt_level: LlvmOptLevel,
+    input_arg: &str,
+    output_arg: &str,
+) -> Vec<String> {
+    // AVR always uses Oz regardless of opt_level: the ATmega328P has 32 KiB
+    // of flash so code size always takes priority over speed.
+    // All other targets run the full optimization pipeline first.
+    // Previously this passed only "verify" for non-AVR targets, which meant
+    // zero optimization before llc. Now we run the chosen pipeline so that
+    // dead-code elimination, inlining, constant propagation, and all other
+    // passes fire before instruction selection.
+    let pipeline = match target_triple {
+        "avr-atmega328p-arduino-uno" => "default<Oz>,verify".to_string(),
+        _ => match opt_level {
+            LlvmOptLevel::Full => "default<O3>,verify".to_string(),
+            LlvmOptLevel::MinSize => "default<Oz>,verify".to_string(),
+        },
+    };
+    vec![
+        "-S".to_string(),
+        format!("-passes={pipeline}"),
+        input_arg.to_string(),
+        "-o".to_string(),
+        output_arg.to_string(),
+    ]
+}
+
+fn create_temp_dir() -> Result<PathBuf, LlvmBackendError> {
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = env::temp_dir().join(format!("rune-llvm-{}-{stamp}-{unique}", std::process::id()));
+    fs::create_dir_all(&dir).map_err(|error| LlvmBackendError {
+        message: format!(
+            "failed to create temporary LLVM directory `{}`: {error}",
+            dir.display()
+        ),
+    })?;
+    Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LlvmOptLevel, llvm_codegen_args, llvm_opt_args};
+
+    #[test]
+    fn avr_codegen_args_use_exact_cpu_and_size_optimization() {
+        let args = llvm_codegen_args(
+            "avr-atmega328p-arduino-uno",
+            LlvmOptLevel::Full,
+            "obj",
+            "input.ll",
+            "output.o",
+        );
+        assert!(args.contains(&"-mtriple=avr".to_string()));
+        assert!(args.contains(&"-mcpu=atmega328p".to_string()));
+        assert!(args.contains(&"-O2".to_string()));
+    }
+
+    #[test]
+    fn avr_opt_args_use_size_pipeline_regardless_of_opt_level() {
+        let args_full = llvm_opt_args("avr-atmega328p-arduino-uno", LlvmOptLevel::Full, "input.ll", "output.ll");
+        assert!(args_full.contains(&"-passes=default<Oz>,verify".to_string()));
+        let args_min = llvm_opt_args("avr-atmega328p-arduino-uno", LlvmOptLevel::MinSize, "input.ll", "output.ll");
+        assert!(args_min.contains(&"-passes=default<Oz>,verify".to_string()));
+    }
+
+    #[test]
+    fn non_avr_full_opt_runs_real_optimization_pipeline() {
+        let args = llvm_opt_args("x86_64-unknown-linux-gnu", LlvmOptLevel::Full, "input.ll", "output.ll");
+        assert!(args.contains(&"-passes=default<O3>,verify".to_string()));
+        let codegen_args = llvm_codegen_args(
+            "x86_64-unknown-linux-gnu",
+            LlvmOptLevel::Full,
+            "obj",
+            "input.ll",
+            "output.o",
+        );
+        assert!(codegen_args.contains(&"-O3".to_string()));
+    }
+
+    #[test]
+    fn non_avr_minsize_uses_oz_pipeline() {
+        let args = llvm_opt_args("x86_64-unknown-linux-gnu", LlvmOptLevel::MinSize, "input.ll", "output.ll");
+        assert!(args.contains(&"-passes=default<Oz>,verify".to_string()));
+        let codegen_args = llvm_codegen_args(
+            "x86_64-unknown-linux-gnu",
+            LlvmOptLevel::MinSize,
+            "obj",
+            "input.ll",
+            "output.o",
+        );
+        assert!(codegen_args.contains(&"-Oz".to_string()));
+    }
+}
+
+// === avr_cbe_opt (merged from avr_cbe_opt.rs) ===
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArduinoUnoEntrypointKind {
+    Main,
+    SetupLoop,
+}
+
+pub fn rewrite_arduino_uno_cbe_llvm_ir(
+    llvm_ir: &str,
+    entrypoint: ArduinoUnoEntrypointKind,
+) -> String {
+    let mut rename_map = HashMap::new();
+    for line in llvm_ir.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("define ") {
+            continue;
+        }
+        let Some(at_index) = trimmed.find('@') else {
+            continue;
+        };
+        let name_start = at_index + 1;
+        let name_end = trimmed[name_start..]
+            .find('(')
+            .map(|index| name_start + index)
+            .unwrap_or(trimmed.len());
+        let name = &trimmed[name_start..name_end];
+        if name.starts_with("rune_rt_") {
+            continue;
+        }
+        if matches!(
+            (entrypoint, name),
+            (ArduinoUnoEntrypointKind::Main, "main")
+                | (ArduinoUnoEntrypointKind::SetupLoop, "setup")
+                | (ArduinoUnoEntrypointKind::SetupLoop, "loop")
+        ) {
+            continue;
+        }
+        rename_map.insert(name.to_string(), format!("rune_cbe_{name}"));
+    }
+
+    rewrite_llvm_global_identifiers(llvm_ir, &rename_map)
+}
+
+pub fn rewrite_arduino_uno_cbe_source(
+    c_source: &str,
+    entrypoint: ArduinoUnoEntrypointKind,
+) -> String {
+    let renamed = match entrypoint {
+        ArduinoUnoEntrypointKind::Main => {
+            c_source.replace("int main(void)", "int rune_entry_main(void)")
+        }
+        ArduinoUnoEntrypointKind::SetupLoop => c_source
+            .replace("void setup(void)", "void rune_entry_setup(void)")
+            .replace("void loop(void)", "void rune_entry_loop(void)"),
+    };
+    internalize_rune_cbe_c_functions(&renamed)
+}
+
+fn rewrite_llvm_global_identifiers(source: &str, rename_map: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(source.len());
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'@' {
+            let start = index + 1;
+            let mut end = start;
+            while end < bytes.len() {
+                let ch = bytes[end];
+                if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if end > start {
+                let name = &source[start..end];
+                if let Some(replacement) = rename_map.get(name) {
+                    out.push('@');
+                    out.push_str(replacement);
+                    index = end;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[index] as char);
+        index += 1;
+    }
+    out
+}
+
+fn internalize_rune_cbe_c_functions(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        let function_name_start = trimmed.find(" rune_cbe_");
+        let Some(function_name_start) = function_name_start else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
+        let function_name_start = function_name_start + 1;
+        let Some(paren_index) = trimmed[function_name_start..]
+            .find('(')
+            .map(|index| function_name_start + index)
+        else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
+        let is_function_decl_or_def = trimmed.ends_with('{')
+            || trimmed.ends_with(';')
+            || trimmed.ends_with(" ;")
+            || trimmed.contains("__FUNCTIONALIGN__");
+        if trimmed.starts_with("static ")
+            || trimmed.starts_with("/*")
+            || trimmed.contains('=')
+            || !is_function_decl_or_def
+            || !trimmed[function_name_start..paren_index].starts_with("rune_cbe_")
+        {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        let indent_len = line.len() - trimmed.len();
+        out.push_str(&line[..indent_len]);
+        out.push_str("static ");
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests_avr {
+    use super::{
+        rewrite_arduino_uno_cbe_llvm_ir, rewrite_arduino_uno_cbe_source,
+        ArduinoUnoEntrypointKind,
+    };
+
+    #[test]
+    fn rewrites_non_runtime_functions_for_main_entry() {
+        let llvm_ir = "\
+define i64 @main() {\n\
+  ret i64 0\n\
+}\n\
+define i64 @helper() {\n\
+  ret i64 1\n\
+}\n\
+define void @rune_rt_fail(i32 %code) {\n\
+  ret void\n\
+}\n";
+        let rewritten = rewrite_arduino_uno_cbe_llvm_ir(llvm_ir, ArduinoUnoEntrypointKind::Main);
+        assert!(rewritten.contains("@main()"));
+        assert!(rewritten.contains("@rune_cbe_helper()"));
+        assert!(rewritten.contains("@rune_rt_fail(i32 %code)"));
+    }
+
+    #[test]
+    fn preserves_setup_loop_entrypoints() {
+        let llvm_ir = "\
+define void @setup() {\n\
+  ret void\n\
+}\n\
+define void @loop() {\n\
+  ret void\n\
+}\n\
+define i64 @helper() {\n\
+  ret i64 1\n\
+}\n";
+        let rewritten =
+            rewrite_arduino_uno_cbe_llvm_ir(llvm_ir, ArduinoUnoEntrypointKind::SetupLoop);
+        assert!(rewritten.contains("@setup()"));
+        assert!(rewritten.contains("@loop()"));
+        assert!(rewritten.contains("@rune_cbe_helper()"));
+    }
+
+    #[test]
+    fn internalizes_rune_cbe_c_helpers() {
+        let c_source = "\
+void rune_cbe_helper(void) __FUNCTIONALIGN__(1) ;\n\
+\n\
+void rune_cbe_helper(void) {\n\
+}\n\
+\n\
+int main(void) {\n\
+  return 0;\n\
+}\n";
+        let rewritten = rewrite_arduino_uno_cbe_source(c_source, ArduinoUnoEntrypointKind::Main);
+        assert!(rewritten.contains("static void rune_cbe_helper(void) __FUNCTIONALIGN__(1) ;"));
+        assert!(rewritten.contains("static void rune_cbe_helper(void) {"));
+        assert!(rewritten.contains("int rune_entry_main(void) {"));
     }
 }
