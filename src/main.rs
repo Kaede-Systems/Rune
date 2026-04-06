@@ -393,6 +393,20 @@ fn run() -> Result<(), String> {
                     "--size" => {
                         build_options.opt_level = OptLevel::MinSize;
                     }
+                    "--obfuscate" => {
+                        let Some(value) = args.next() else {
+                            return Err("missing value after `--obfuscate` (expected 1-10)".to_string());
+                        };
+                        let level: u8 = value.parse().map_err(|_| {
+                            format!("`--obfuscate` expects a number 1-10, got `{value}`")
+                        })?;
+                        if level < 1 || level > 10 {
+                            return Err(format!(
+                                "`--obfuscate` level must be between 1 and 10, got {level}"
+                            ));
+                        }
+                        build_options.obfuscate_level = level;
+                    }
                     "-o" | "--output" => {
                         let Some(value) = args.next() else {
                             return Err("missing value after `-o`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [-o output]".to_string());
@@ -802,7 +816,7 @@ fn pretty_path(path: &Path) -> String {
 }
 
 fn usage() -> String {
-    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]\n  rune decompile <binary> [--target triple] [--format asm|c]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
+    "Usage:\n  rune version\n  rune lex <file.rn>\n  rune parse <file.rn>\n  rune check <file.rn>\n  rune emit-ir <file.rn>\n  rune emit-llvm-ir <file.rn>\n  rune emit-asm <file.rn> [--target triple]\n  rune emit-llvm-asm <file.rn> [--target triple]\n  rune emit-avr-precode <file.rn> [--target avr-atmega328p-arduino-uno]\n  rune emit-c-header <file.rn> [-o output.h]\n  rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [--obfuscate 1-10] [-o output]\n  rune decompile <binary> [--target triple] [--format asm|c]\n  rune run-wasm <file.wasm> [--host node|wasmtime] [program args...]\n  rune targets\n  rune toolchain\n  rune debug <file.rn> [--target triple] [-o output]".to_string()
 }
 
 fn display_kind(kind: &TokenKind) -> String {

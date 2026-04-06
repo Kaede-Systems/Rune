@@ -339,7 +339,8 @@ fn infer_expr_type(
     match &expr.kind {
         ExprKind::Identifier(name) => infos.get(name).map(|info| info.ty.specialized(true)),
         ExprKind::Integer(value) => {
-            if value.parse::<i32>().is_ok() {
+            let n = parse_integer_literal_str(value);
+            if n >= i64::from(i32::MIN) && n <= i64::from(i32::MAX) {
                 Some(IrType::I32)
             } else {
                 Some(IrType::I64)
@@ -1895,9 +1896,8 @@ fn fold_expr(expr: &mut Expr) {
             op: UnaryOp::Negate,
             expr: inner,
         } => {
-            if let ExprKind::Integer(value) = &inner.kind
-                && let Ok(number) = value.parse::<i64>()
-            {
+            if let ExprKind::Integer(value) = &inner.kind {
+                let number = parse_integer_literal_str(value);
                 expr.kind = ExprKind::Integer((-number).to_string());
             }
         }
@@ -2028,7 +2028,7 @@ fn fold_expr(expr: &mut Expr) {
 
 fn int_value(expr: &Expr) -> Option<i64> {
     match &expr.kind {
-        ExprKind::Integer(value) => value.parse::<i64>().ok(),
+        ExprKind::Integer(value) => Some(parse_integer_literal_str(value)),
         _ => None,
     }
 }

@@ -11,6 +11,7 @@ use crate::backend::llvm::{
 };
 use crate::backend::native::CodegenError;
 use crate::backend::llvm::{LlvmOptLevel, emit_object_file, emit_object_file_from_ir};
+use crate::backend::obfuscate::{obfuscate_llvm_ir, strip_binary};
 
 /// Re-exported for callers that only depend on `build`.
 pub use crate::backend::llvm::LlvmOptLevel as OptLevel;
@@ -39,6 +40,11 @@ pub struct BuildOptions {
     /// Defaults to `LlvmOptLevel::Full` (maximize both speed and binary quality).
     /// Pass `--size` on the CLI to select `LlvmOptLevel::MinSize`.
     pub opt_level: LlvmOptLevel,
+    /// Obfuscation level 0 (off) through 10 (maximum).
+    /// 0 means no obfuscation.
+    pub obfuscate_level: u8,
+    /// Seed for the obfuscation PRNG. When 0, a time-based seed is chosen.
+    pub obfuscate_seed: u64,
 }
 
 #[derive(Debug)]
@@ -2011,6 +2017,23 @@ fn build_executable_via_llvm(
     ))
 }
 
+/// Apply IR-level obfuscation if `options.obfuscate_level > 0`.
+fn apply_obfuscation(ir: String, options: &BuildOptions) -> String {
+    let level = options.obfuscate_level;
+    if level == 0 {
+        return ir;
+    }
+    let seed = if options.obfuscate_seed != 0 {
+        options.obfuscate_seed
+    } else {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0xdeadbeef_cafebabe)
+    };
+    obfuscate_llvm_ir(ir, level, seed)
+}
+
 fn build_windows_executable_via_llvm_rust_wrapper(
     program: &Program,
     output_path: &Path,
@@ -2043,6 +2066,7 @@ fn build_windows_executable_via_llvm_rust_wrapper(
         })
     })?;
     let llvm_ir = rename_llvm_main_symbol_for_native_entry(&llvm_ir);
+    let llvm_ir = apply_obfuscation(llvm_ir, options);
     emit_object_file_from_ir(&llvm_ir, target_spec.triple, &obj_path, options.opt_level).map_err(|error| {
         BuildError::Codegen(CodegenError {
             message: error.message,
@@ -2095,6 +2119,13 @@ fn build_windows_executable_via_llvm_rust_wrapper(
         });
     }
 
+    // Level 1+: strip all symbols from the final binary.
+    if options.obfuscate_level >= 1 {
+        if let Err(msg) = strip_binary(output_path) {
+            eprintln!("warning: obfuscation strip step: {msg}");
+        }
+    }
+
     let _ = fs::remove_file(obj_path);
     let _ = fs::remove_file(wrapper_path);
     let _ = fs::remove_dir(temp_dir);
@@ -2117,7 +2148,14 @@ fn build_unix_executable_via_packaged_clang(
     })?;
     compile_rust_object(&wrapper_path, &wrapper_obj_path)?;
 
-    emit_object_file(program, target_spec.triple, &obj_path, options.opt_level).map_err(|error| {
+    let llvm_ir_unix = emit_llvm_ir(program).map_err(|error| {
+        BuildError::Codegen(CodegenError {
+            message: error.message,
+            span: crate::lexer::Span { line: 1, column: 1 },
+        })
+    })?;
+    let llvm_ir_unix = apply_obfuscation(llvm_ir_unix, options);
+    emit_object_file_from_ir(&llvm_ir_unix, target_spec.triple, &obj_path, options.opt_level).map_err(|error| {
         BuildError::Codegen(CodegenError {
             message: error.message,
             span: crate::lexer::Span { line: 1, column: 1 },
@@ -2131,6 +2169,13 @@ fn build_unix_executable_via_packaged_clang(
     link_objects.push(wrapper_obj_path.clone());
     link_objects.extend(compiled_c_objects.iter().cloned());
     link_with_packaged_clang(target_spec, &link_objects, output_path, false, options)?;
+
+    // Level 1+: strip all symbols from the final binary.
+    if options.obfuscate_level >= 1 {
+        if let Err(msg) = strip_binary(output_path) {
+            eprintln!("warning: obfuscation strip step: {msg}");
+        }
+    }
 
     let _ = fs::remove_file(wrapper_path);
     let _ = fs::remove_file(wrapper_obj_path);
