@@ -10,6 +10,34 @@ use crate::llvm_ir::{LlvmIrError, emit_llvm_ir};
 use crate::parser::Program;
 use crate::toolchain::find_packaged_llvm_tool_for_target;
 
+/// Optimization level for LLVM-backed builds.
+///
+/// The default, `Full`, runs the complete LLVM optimization pipeline
+/// (`default<O3>`). This maximizes both execution speed and binary quality:
+/// the same passes that improve speed (inlining, dead-code elimination,
+/// constant propagation) also reduce the amount of code that ends up in the
+/// binary.
+///
+/// `MinSize` pushes further by switching LLVM to its size-first mode
+/// (`default<Oz>`), which trades some runtime performance for the smallest
+/// possible output. Use it when flash or disk space is the primary constraint.
+///
+/// AVR (`avr-atmega328p-arduino-uno`) always uses `default<Oz>` regardless of
+/// this setting because the ATmega328P has only 32 KiB of flash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LlvmOptLevel {
+    /// Full LLVM optimization pipeline. Uses `default<O3>` in opt and `-O3`
+    /// in llc. Dead-code elimination, inlining, and constant propagation all
+    /// run, which improves both speed and binary size simultaneously.
+    /// This is the default for all host and cross-compiled targets.
+    #[default]
+    Full,
+    /// Aggressive size-first optimization. Uses `default<Oz>` in opt and
+    /// `-Oz` in llc. Produces the smallest possible binary at the cost of
+    /// some runtime performance. Enabled with `--size` on the CLI.
+    MinSize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlvmBackendError {
     pub message: String,
@@ -35,9 +63,10 @@ pub fn emit_object_file(
     program: &Program,
     target_triple: &str,
     output_path: &Path,
+    opt_level: LlvmOptLevel,
 ) -> Result<String, LlvmBackendError> {
     let llvm_ir = emit_llvm_ir(program)?;
-    emit_object_file_from_ir(&llvm_ir, target_triple, output_path)?;
+    emit_object_file_from_ir(&llvm_ir, target_triple, output_path, opt_level)?;
     Ok(llvm_ir)
 }
 
@@ -45,9 +74,10 @@ pub fn emit_assembly_file(
     program: &Program,
     target_triple: &str,
     output_path: &Path,
+    opt_level: LlvmOptLevel,
 ) -> Result<String, LlvmBackendError> {
     let llvm_ir = emit_llvm_ir(program)?;
-    emit_assembly_file_from_ir(&llvm_ir, target_triple, output_path)?;
+    emit_assembly_file_from_ir(&llvm_ir, target_triple, output_path, opt_level)?;
     Ok(llvm_ir)
 }
 
@@ -55,16 +85,18 @@ pub fn emit_object_file_from_ir(
     llvm_ir: &str,
     target_triple: &str,
     output_path: &Path,
+    opt_level: LlvmOptLevel,
 ) -> Result<(), LlvmBackendError> {
-    emit_codegen_artifact_from_ir(llvm_ir, target_triple, output_path, "obj")
+    emit_codegen_artifact_from_ir(llvm_ir, target_triple, output_path, "obj", opt_level)
 }
 
 pub fn emit_assembly_file_from_ir(
     llvm_ir: &str,
     target_triple: &str,
     output_path: &Path,
+    opt_level: LlvmOptLevel,
 ) -> Result<(), LlvmBackendError> {
-    emit_codegen_artifact_from_ir(llvm_ir, target_triple, output_path, "asm")
+    emit_codegen_artifact_from_ir(llvm_ir, target_triple, output_path, "asm", opt_level)
 }
 
 fn emit_codegen_artifact_from_ir(
@@ -72,6 +104,7 @@ fn emit_codegen_artifact_from_ir(
     target_triple: &str,
     output_path: &Path,
     filetype: &str,
+    opt_level: LlvmOptLevel,
 ) -> Result<(), LlvmBackendError> {
     let temp_dir = create_temp_dir()?;
     let input_path = temp_dir.join("rune.ll");
@@ -95,12 +128,12 @@ fn emit_codegen_artifact_from_ir(
     run_llvm_tool(
         target_triple,
         "opt",
-        llvm_opt_args(target_triple, &input_arg, &optimized_arg),
+        llvm_opt_args(target_triple, opt_level, &input_arg, &optimized_arg),
     )?;
     run_llvm_tool(
         target_triple,
         "llc",
-        llvm_codegen_args(target_triple, filetype, &optimized_arg, &output_arg),
+        llvm_codegen_args(target_triple, opt_level, filetype, &optimized_arg, &output_arg),
     )?;
 
     let _ = fs::remove_file(input_path);
@@ -148,6 +181,7 @@ where
 
 fn llvm_codegen_args(
     target_triple: &str,
+    opt_level: LlvmOptLevel,
     filetype: &str,
     input_arg: &str,
     output_arg: &str,
@@ -159,9 +193,16 @@ fn llvm_codegen_args(
         _ => vec![format!("-mtriple={target_triple}")],
     };
     args.push(format!("-filetype={filetype}"));
+    // AVR: keep -O2 (opt already ran Oz; llc at O2 gives better AVR scheduling
+    // than Oz which can pessimise instruction selection on this tiny ISA).
+    // Others: match the opt pipeline level so llc does not undo the trade-off
+    // chosen above.
     args.push(match target_triple {
         "avr-atmega328p-arduino-uno" => "-O2".to_string(),
-        _ => "-O3".to_string(),
+        _ => match opt_level {
+            LlvmOptLevel::Full => "-O3".to_string(),
+            LlvmOptLevel::MinSize => "-Oz".to_string(),
+        },
     });
     args.push(input_arg.to_string());
     args.push("-o".to_string());
@@ -169,10 +210,25 @@ fn llvm_codegen_args(
     args
 }
 
-fn llvm_opt_args(target_triple: &str, input_arg: &str, output_arg: &str) -> Vec<String> {
+fn llvm_opt_args(
+    target_triple: &str,
+    opt_level: LlvmOptLevel,
+    input_arg: &str,
+    output_arg: &str,
+) -> Vec<String> {
+    // AVR always uses Oz regardless of opt_level: the ATmega328P has 32 KiB
+    // of flash so code size always takes priority over speed.
+    // All other targets run the full optimization pipeline first.
+    // Previously this passed only "verify" for non-AVR targets, which meant
+    // zero optimization before llc. Now we run the chosen pipeline so that
+    // dead-code elimination, inlining, constant propagation, and all other
+    // passes fire before instruction selection.
     let pipeline = match target_triple {
-        "avr-atmega328p-arduino-uno" => "default<Oz>,verify",
-        _ => "verify",
+        "avr-atmega328p-arduino-uno" => "default<Oz>,verify".to_string(),
+        _ => match opt_level {
+            LlvmOptLevel::Full => "default<O3>,verify".to_string(),
+            LlvmOptLevel::MinSize => "default<Oz>,verify".to_string(),
+        },
     };
     vec![
         "-S".to_string(),
@@ -202,12 +258,13 @@ fn create_temp_dir() -> Result<PathBuf, LlvmBackendError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{llvm_codegen_args, llvm_opt_args};
+    use super::{LlvmOptLevel, llvm_codegen_args, llvm_opt_args};
 
     #[test]
     fn avr_codegen_args_use_exact_cpu_and_size_optimization() {
         let args = llvm_codegen_args(
             "avr-atmega328p-arduino-uno",
+            LlvmOptLevel::Full,
             "obj",
             "input.ll",
             "output.o",
@@ -218,8 +275,38 @@ mod tests {
     }
 
     #[test]
-    fn avr_opt_args_use_size_pipeline() {
-        let args = llvm_opt_args("avr-atmega328p-arduino-uno", "input.ll", "output.ll");
+    fn avr_opt_args_use_size_pipeline_regardless_of_opt_level() {
+        let args_full = llvm_opt_args("avr-atmega328p-arduino-uno", LlvmOptLevel::Full, "input.ll", "output.ll");
+        assert!(args_full.contains(&"-passes=default<Oz>,verify".to_string()));
+        let args_min = llvm_opt_args("avr-atmega328p-arduino-uno", LlvmOptLevel::MinSize, "input.ll", "output.ll");
+        assert!(args_min.contains(&"-passes=default<Oz>,verify".to_string()));
+    }
+
+    #[test]
+    fn non_avr_full_opt_runs_real_optimization_pipeline() {
+        let args = llvm_opt_args("x86_64-unknown-linux-gnu", LlvmOptLevel::Full, "input.ll", "output.ll");
+        assert!(args.contains(&"-passes=default<O3>,verify".to_string()));
+        let codegen_args = llvm_codegen_args(
+            "x86_64-unknown-linux-gnu",
+            LlvmOptLevel::Full,
+            "obj",
+            "input.ll",
+            "output.o",
+        );
+        assert!(codegen_args.contains(&"-O3".to_string()));
+    }
+
+    #[test]
+    fn non_avr_minsize_uses_oz_pipeline() {
+        let args = llvm_opt_args("x86_64-unknown-linux-gnu", LlvmOptLevel::MinSize, "input.ll", "output.ll");
         assert!(args.contains(&"-passes=default<Oz>,verify".to_string()));
+        let codegen_args = llvm_codegen_args(
+            "x86_64-unknown-linux-gnu",
+            LlvmOptLevel::MinSize,
+            "obj",
+            "input.ll",
+            "output.o",
+        );
+        assert!(codegen_args.contains(&"-Oz".to_string()));
     }
 }

@@ -5,14 +5,14 @@ use std::process::Command;
 use std::process::ExitCode;
 
 use rune::build::{
-    BuildError, BuildOptions, build_executable, build_executable_with_options, build_object_file,
-    build_shared_library, build_static_library, emit_avr_precode, emit_c_header,
+    BuildError, BuildOptions, OptLevel, build_executable, build_executable_with_options,
+    build_object_file, build_shared_library, build_static_library, emit_avr_precode, emit_c_header,
     supported_targets, target_spec,
 };
 use rune::diagnostics::render_file_diagnostic;
 use rune::ir::lower_program;
 use rune::lexer::{TokenKind, lex};
-use rune::llvm_backend::emit_assembly_file;
+use rune::llvm_backend::{LlvmOptLevel, emit_assembly_file};
 use rune::llvm_ir::emit_llvm_ir;
 use rune::module_loader::{LoadedProgram, load_program_bundle_from_path};
 use rune::optimize::{optimize_program, prune_program_for_executable};
@@ -390,6 +390,9 @@ fn run() -> Result<(), String> {
                         };
                         build_options.flash_port = Some(value);
                     }
+                    "--size" => {
+                        build_options.opt_level = OptLevel::MinSize;
+                    }
                     "-o" | "--output" => {
                         let Some(value) = args.next() else {
                             return Err("missing value after `-o`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [-o output]".to_string());
@@ -397,7 +400,7 @@ fn run() -> Result<(), String> {
                         output = Some(PathBuf::from(value));
                     }
                     _ => {
-                        return Err("invalid arguments for `rune build`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [-o output]".to_string());
+                        return Err("invalid arguments for `rune build`\n\nUsage: rune build <file.rn> [--object | --lib | --static-lib] [--target triple] [--link-lib name] [--link-search dir] [--link-arg arg] [--link-c-source file.c] [--flash --port serial] [--size] [-o output]".to_string());
                     }
                 }
             }
@@ -843,7 +846,7 @@ fn emit_llvm_asm_text(path: &str, target: Option<&str>) -> Result<String, String
     fs::create_dir_all(&temp_dir)
         .map_err(|error| format!("failed to create `{}`: {error}", temp_dir.display()))?;
     let output_path = temp_dir.join("out.s");
-    emit_assembly_file(&program, target_info.triple, &output_path)
+    emit_assembly_file(&program, target_info.triple, &output_path, LlvmOptLevel::Full)
         .map_err(|error| render_llvm_backend_error(&bundle, &error.message))?;
     let asm = fs::read_to_string(&output_path)
         .map_err(|error| format!("failed to read `{}`: {error}", output_path.display()))?;

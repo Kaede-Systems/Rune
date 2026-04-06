@@ -490,6 +490,142 @@ fn optimize_function(function: &mut Function) {
         return;
     }
     optimize_block(&mut function.body);
+    eliminate_dead_pure_lets(&mut function.body);
+}
+
+// ---------------------------------------------------------------------------
+// Dead pure-let elimination
+//
+// Removes `let x = <pure-expr>` statements where `x` is never read anywhere
+// in the function body.  A pure expression is one with no function calls or
+// await expressions — all side effects come from calls, so if there are no
+// calls it is safe to drop an unused binding entirely.
+//
+// If the init expression contains a call (and therefore has observable side
+// effects) the binding is kept even when the name is never read, because the
+// call must still execute.
+// ---------------------------------------------------------------------------
+
+fn eliminate_dead_pure_lets(block: &mut Block) {
+    // Collect every name that is READ (appears in an expression context that
+    // is not a let-binding target) anywhere within this block tree.
+    let mut read_names: HashSet<String> = HashSet::new();
+    for stmt in &block.statements {
+        collect_reads_stmt(stmt, &mut read_names);
+    }
+
+    block.statements.retain(|stmt| {
+        if let Stmt::Let(let_stmt) = stmt {
+            if !read_names.contains(&let_stmt.name) && is_pure_expr(&let_stmt.value) {
+                return false;
+            }
+        }
+        true
+    });
+
+    // Recurse so that inner blocks also have their dead lets removed.
+    for stmt in &mut block.statements {
+        match stmt {
+            Stmt::Block(s) => eliminate_dead_pure_lets(&mut s.block),
+            Stmt::If(s) => {
+                eliminate_dead_pure_lets(&mut s.then_block);
+                for elif in &mut s.elif_blocks {
+                    eliminate_dead_pure_lets(&mut elif.block);
+                }
+                if let Some(b) = &mut s.else_block {
+                    eliminate_dead_pure_lets(b);
+                }
+            }
+            Stmt::While(s) => eliminate_dead_pure_lets(&mut s.body),
+            _ => {}
+        }
+    }
+}
+
+/// Returns `true` when the expression has no observable side effects (no
+/// `Call` or `Await` nodes anywhere in its tree).
+fn is_pure_expr(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Integer(_) | ExprKind::Bool(_) | ExprKind::String(_) => true,
+        ExprKind::Identifier(_) => true,
+        ExprKind::Unary { expr: inner, .. } => is_pure_expr(inner),
+        ExprKind::Binary { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
+        ExprKind::Field { base, .. } => is_pure_expr(base),
+        // Calls have observable side effects; treat them as impure.
+        ExprKind::Call { .. } | ExprKind::Await { .. } => false,
+    }
+}
+
+/// Collect all variable names that are *read* (appear in expression position,
+/// not as the target of a `let` or `assign`) within `stmt` and its children.
+fn collect_reads_stmt(stmt: &Stmt, reads: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Block(s) => {
+            for inner in &s.block.statements {
+                collect_reads_stmt(inner, reads);
+            }
+        }
+        Stmt::Let(s) => collect_reads_expr(&s.value, reads),
+        Stmt::Assign(s) => collect_reads_expr(&s.value, reads),
+        Stmt::Return(s) => {
+            if let Some(v) = &s.value {
+                collect_reads_expr(v, reads);
+            }
+        }
+        Stmt::If(s) => {
+            collect_reads_expr(&s.condition, reads);
+            for inner in &s.then_block.statements {
+                collect_reads_stmt(inner, reads);
+            }
+            for elif in &s.elif_blocks {
+                collect_reads_expr(&elif.condition, reads);
+                for inner in &elif.block.statements {
+                    collect_reads_stmt(inner, reads);
+                }
+            }
+            if let Some(b) = &s.else_block {
+                for inner in &b.statements {
+                    collect_reads_stmt(inner, reads);
+                }
+            }
+        }
+        Stmt::While(s) => {
+            collect_reads_expr(&s.condition, reads);
+            for inner in &s.body.statements {
+                collect_reads_stmt(inner, reads);
+            }
+        }
+        Stmt::Raise(s) => collect_reads_expr(&s.value, reads),
+        Stmt::Panic(s) => collect_reads_expr(&s.value, reads),
+        Stmt::Expr(s) => collect_reads_expr(&s.expr, reads),
+        Stmt::Break(_) | Stmt::Continue(_) => {}
+    }
+}
+
+fn collect_reads_expr(expr: &Expr, reads: &mut HashSet<String>) {
+    match &expr.kind {
+        ExprKind::Identifier(name) => {
+            reads.insert(name.clone());
+        }
+        ExprKind::Integer(_) | ExprKind::Bool(_) | ExprKind::String(_) => {}
+        ExprKind::Unary { expr: inner, .. } | ExprKind::Await { expr: inner } => {
+            collect_reads_expr(inner, reads);
+        }
+        ExprKind::Binary { left, right, .. } => {
+            collect_reads_expr(left, reads);
+            collect_reads_expr(right, reads);
+        }
+        ExprKind::Field { base, .. } => collect_reads_expr(base, reads),
+        ExprKind::Call { callee, args } => {
+            collect_reads_expr(callee, reads);
+            for arg in args {
+                match arg {
+                    CallArg::Positional(e) => collect_reads_expr(e, reads),
+                    CallArg::Keyword { value, .. } => collect_reads_expr(value, reads),
+                }
+            }
+        }
+    }
 }
 
 fn optimize_block(block: &mut Block) {
@@ -677,6 +813,11 @@ fn fold_expr(expr: &mut Expr) {
                         expr.kind = ExprKind::Integer("0".to_string());
                     }
                 }
+                BinaryOp::Divide => {
+                    if int_value(right) == Some(1) {
+                        expr.kind = left.kind.clone();
+                    }
+                }
                 BinaryOp::Modulo => {
                     if int_value(right) == Some(1) {
                         expr.kind = ExprKind::Integer("0".to_string());
@@ -754,8 +895,8 @@ fn fold_control_flow(stmt: Stmt) -> ControlFlowFold {
 
 #[cfg(test)]
 mod tests {
-    use super::{optimize_program, prune_program_to_entry_roots};
-    use crate::parser::{Item, parse_source};
+    use super::{eliminate_dead_pure_lets, optimize_program, prune_program_to_entry_roots};
+    use crate::parser::{Item, Stmt, parse_source};
 
     #[test]
     fn prunes_unreachable_functions_and_structs_from_entry_roots() {
@@ -810,5 +951,88 @@ def main() -> i32:
         assert!(!function_names.contains(&"dead_helper"));
         assert!(struct_names.contains(&"Used"));
         assert!(!struct_names.contains(&"Unused"));
+    }
+
+    #[test]
+    fn divide_by_one_folds_to_operand() {
+        let mut program = parse_source(
+            r"def main() -> i32:
+    return 42 / 1
+",
+        )
+        .expect("program should parse");
+        optimize_program(&mut program);
+        let Item::Function(main_fn) = &program.items[0] else {
+            panic!("expected function");
+        };
+        let Stmt::Return(ret) = &main_fn.body.statements[0] else {
+            panic!("expected return");
+        };
+        let value = ret.value.as_ref().expect("return should have a value");
+        assert_eq!(
+            format!("{value:?}"),
+            format!("{:?}", crate::parser::ExprKind::Integer("42".to_string())),
+            "42 / 1 should fold to 42"
+        );
+    }
+
+    #[test]
+    fn dead_pure_let_is_eliminated() {
+        let mut program = parse_source(
+            r"def main() -> i32:
+    let dead = 5 + 3
+    return 0
+",
+        )
+        .expect("program should parse");
+        optimize_program(&mut program);
+        let Item::Function(main_fn) = &program.items[0] else {
+            panic!("expected function");
+        };
+        // After elimination the body should contain only the return statement.
+        assert_eq!(
+            main_fn.body.statements.len(),
+            1,
+            "dead pure let should have been removed"
+        );
+        assert!(matches!(main_fn.body.statements[0], Stmt::Return(_)));
+    }
+
+    #[test]
+    fn dead_let_with_call_is_kept() {
+        let mut program = parse_source(
+            r"def main() -> i32:
+    let _x = some_side_effect()
+    return 0
+",
+        )
+        .expect("program should parse");
+        optimize_program(&mut program);
+        let Item::Function(main_fn) = &program.items[0] else {
+            panic!("expected function");
+        };
+        // The let must be preserved because the call may have side effects.
+        assert_eq!(
+            main_fn.body.statements.len(),
+            2,
+            "let with a call init must not be removed"
+        );
+    }
+
+    #[test]
+    fn used_let_is_not_eliminated() {
+        let mut program = parse_source(
+            r"def main() -> i32:
+    let x = 10
+    return x
+",
+        )
+        .expect("program should parse");
+        optimize_program(&mut program);
+        let Item::Function(main_fn) = &program.items[0] else {
+            panic!("expected function");
+        };
+        // `x` is read by the return, so the let must stay.
+        assert_eq!(main_fn.body.statements.len(), 2, "used let must not be removed");
     }
 }
