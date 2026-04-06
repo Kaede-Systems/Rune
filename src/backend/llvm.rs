@@ -5145,14 +5145,14 @@ mod tests {
 // === avr_cbe_opt (merged from avr_cbe_opt.rs) ===
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArduinoUnoEntrypointKind {
+pub enum AvrEntrypointKind {
     Main,
     SetupLoop,
 }
 
-pub fn rewrite_arduino_uno_cbe_llvm_ir(
+pub fn rewrite_avr_cbe_llvm_ir(
     llvm_ir: &str,
-    entrypoint: ArduinoUnoEntrypointKind,
+    entrypoint: AvrEntrypointKind,
 ) -> String {
     let mut rename_map = HashMap::new();
     for line in llvm_ir.lines() {
@@ -5174,9 +5174,9 @@ pub fn rewrite_arduino_uno_cbe_llvm_ir(
         }
         if matches!(
             (entrypoint, name),
-            (ArduinoUnoEntrypointKind::Main, "main")
-                | (ArduinoUnoEntrypointKind::SetupLoop, "setup")
-                | (ArduinoUnoEntrypointKind::SetupLoop, "loop")
+            (AvrEntrypointKind::Main, "main")
+                | (AvrEntrypointKind::SetupLoop, "setup")
+                | (AvrEntrypointKind::SetupLoop, "loop")
         ) {
             continue;
         }
@@ -5186,15 +5186,15 @@ pub fn rewrite_arduino_uno_cbe_llvm_ir(
     rewrite_llvm_global_identifiers(llvm_ir, &rename_map)
 }
 
-pub fn rewrite_arduino_uno_cbe_source(
+pub fn rewrite_avr_cbe_source(
     c_source: &str,
-    entrypoint: ArduinoUnoEntrypointKind,
+    entrypoint: AvrEntrypointKind,
 ) -> String {
     let renamed = match entrypoint {
-        ArduinoUnoEntrypointKind::Main => {
+        AvrEntrypointKind::Main => {
             c_source.replace("int main(void)", "int rune_entry_main(void)")
         }
-        ArduinoUnoEntrypointKind::SetupLoop => c_source
+        AvrEntrypointKind::SetupLoop => c_source
             .replace("void setup(void)", "void rune_entry_setup(void)")
             .replace("void loop(void)", "void rune_entry_loop(void)"),
     };
@@ -5278,8 +5278,8 @@ fn internalize_rune_cbe_c_functions(source: &str) -> String {
 #[cfg(test)]
 mod tests_avr {
     use super::{
-        rewrite_arduino_uno_cbe_llvm_ir, rewrite_arduino_uno_cbe_source,
-        ArduinoUnoEntrypointKind,
+        rewrite_avr_cbe_llvm_ir, rewrite_avr_cbe_source,
+        AvrEntrypointKind,
     };
 
     #[test]
@@ -5294,7 +5294,7 @@ define i64 @helper() {\n\
 define void @rune_rt_fail(i32 %code) {\n\
   ret void\n\
 }\n";
-        let rewritten = rewrite_arduino_uno_cbe_llvm_ir(llvm_ir, ArduinoUnoEntrypointKind::Main);
+        let rewritten = rewrite_avr_cbe_llvm_ir(llvm_ir, AvrEntrypointKind::Main);
         assert!(rewritten.contains("@main()"));
         assert!(rewritten.contains("@rune_cbe_helper()"));
         assert!(rewritten.contains("@rune_rt_fail(i32 %code)"));
@@ -5313,7 +5313,7 @@ define i64 @helper() {\n\
   ret i64 1\n\
 }\n";
         let rewritten =
-            rewrite_arduino_uno_cbe_llvm_ir(llvm_ir, ArduinoUnoEntrypointKind::SetupLoop);
+            rewrite_avr_cbe_llvm_ir(llvm_ir, AvrEntrypointKind::SetupLoop);
         assert!(rewritten.contains("@setup()"));
         assert!(rewritten.contains("@loop()"));
         assert!(rewritten.contains("@rune_cbe_helper()"));
@@ -5330,7 +5330,7 @@ void rune_cbe_helper(void) {\n\
 int main(void) {\n\
   return 0;\n\
 }\n";
-        let rewritten = rewrite_arduino_uno_cbe_source(c_source, ArduinoUnoEntrypointKind::Main);
+        let rewritten = rewrite_avr_cbe_source(c_source, AvrEntrypointKind::Main);
         assert!(rewritten.contains("static void rune_cbe_helper(void) __FUNCTIONALIGN__(1) ;"));
         assert!(rewritten.contains("static void rune_cbe_helper(void) {"));
         assert!(rewritten.contains("int rune_entry_main(void) {"));

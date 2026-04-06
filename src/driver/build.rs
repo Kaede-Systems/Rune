@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::llvm::{
-    rewrite_arduino_uno_cbe_llvm_ir, rewrite_arduino_uno_cbe_source, ArduinoUnoEntrypointKind,
+    rewrite_avr_cbe_llvm_ir, rewrite_avr_cbe_source, AvrEntrypointKind,
 };
 use crate::backend::native::CodegenError;
 use crate::backend::llvm::{LlvmOptLevel, emit_object_file, emit_object_file_from_ir};
@@ -646,7 +646,8 @@ fn emit_avr_precode_artifacts(program: &Program, board_spec: &'static AvrBoardSp
 
 fn detect_avr_entrypoint_kind(
     program: &Program,
-) -> Result<ArduinoUnoEntrypointKind, CodegenError> {
+    board_spec: &AvrBoardSpec,
+) -> Result<AvrEntrypointKind, CodegenError> {
     let main = program.items.iter().find_map(|item| match item {
         Item::Function(function) if function.name == "main" => Some(function),
         _ => None,
@@ -662,30 +663,34 @@ fn detect_avr_entrypoint_kind(
 
     if main.is_some() && (setup_fn.is_some() || loop_fn.is_some()) {
         return Err(CodegenError {
-            message: "Arduino Uno target expects either `main()` or `setup()`/`loop()`, not both"
-                .into(),
+            message: format!(
+                "{} target expects either `main()` or `setup()`/`loop()`, not both",
+                board_spec.board_name
+            ),
             span: main.expect("checked above").span,
         });
     }
 
     if let Some(main) = main {
-        validate_arduino_uno_entry_fn(main, "main")?;
-        return Ok(ArduinoUnoEntrypointKind::Main);
+        validate_avr_entry_fn(main, "main", board_spec)?;
+        return Ok(AvrEntrypointKind::Main);
     }
 
     if let Some(setup_fn) = setup_fn {
-        validate_arduino_uno_entry_fn(setup_fn, "setup")?;
+        validate_avr_entry_fn(setup_fn, "setup", board_spec)?;
     }
     if let Some(loop_fn) = loop_fn {
-        validate_arduino_uno_entry_fn(loop_fn, "loop")?;
+        validate_avr_entry_fn(loop_fn, "loop", board_spec)?;
     }
 
     if setup_fn.is_some() || loop_fn.is_some() {
-        Ok(ArduinoUnoEntrypointKind::SetupLoop)
+        Ok(AvrEntrypointKind::SetupLoop)
     } else {
         Err(CodegenError {
-            message: "Arduino Uno target requires `main()` or at least one of `setup()`/`loop()`"
-                .into(),
+            message: format!(
+                "{} target requires `main()` or at least one of `setup()`/`loop()`",
+                board_spec.board_name
+            ),
             span: crate::lexer::Span { line: 1, column: 1 },
         })
     }
@@ -885,7 +890,7 @@ fn build_avr_hex_via_llvm_cbe(
     Ok(())
 }
 
-struct ArduinoUnoPrecodeArtifacts {
+struct AvrPrecodeArtifacts {
     llvm_ir: String,
     c_source: String,
     runtime_header: String,
@@ -893,7 +898,7 @@ struct ArduinoUnoPrecodeArtifacts {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ArduinoUnoRuntimeProfile {
+struct AvrRuntimeProfile {
     input_buffer_size: usize,
     string_slot_count: usize,
     string_slot_size: usize,
@@ -913,14 +918,14 @@ struct ArduinoUnoRuntimeProfile {
 fn emit_avr_precode_via_llvm_cbe(
     program: &Program,
     board_spec: &'static AvrBoardSpec,
-) -> Result<ArduinoUnoPrecodeArtifacts, BuildError> {
+) -> Result<AvrPrecodeArtifacts, BuildError> {
     let llvm_cbe = find_packaged_llvm_cbe().ok_or_else(|| {
         BuildError::ToolNotFound("packaged LLVM C backend tool not found".into())
     })?;
     let runtime_header_path = find_arduino_avr_runtime_header().ok_or_else(|| {
         BuildError::ToolNotFound("packaged Rune Arduino AVR runtime header not found".into())
     })?;
-    let entrypoint = detect_avr_entrypoint_kind(program).map_err(BuildError::Codegen)?;
+    let entrypoint = detect_avr_entrypoint_kind(program, board_spec).map_err(BuildError::Codegen)?;
     let include_servo_sources = program_uses_arduino_servo(program);
     let llvm_ir = emit_llvm_ir(program).map_err(|error| {
         BuildError::Codegen(CodegenError {
@@ -928,7 +933,7 @@ fn emit_avr_precode_via_llvm_cbe(
             span: crate::lexer::Span { line: 1, column: 1 },
         })
     })?;
-    let llvm_ir = rewrite_arduino_uno_cbe_llvm_ir(&llvm_ir, entrypoint);
+    let llvm_ir = rewrite_avr_cbe_llvm_ir(&llvm_ir, entrypoint);
 
     let temp_dir = create_temp_dir()?;
     let llvm_ir_path = temp_dir.join("rune_arduino_uno.ll");
@@ -981,7 +986,7 @@ fn emit_avr_precode_via_llvm_cbe(
         context: format!("failed to read `{}`", c_path.display()),
         source,
     })?;
-    let c_source = rewrite_arduino_uno_cbe_source(&c_source, entrypoint);
+    let c_source = rewrite_avr_cbe_source(&c_source, entrypoint);
     let runtime_header = fs::read_to_string(&runtime_header_path).map_err(|source| BuildError::Io {
         context: format!("failed to read `{}`", runtime_header_path.display()),
         source,
@@ -999,7 +1004,7 @@ fn emit_avr_precode_via_llvm_cbe(
     let _ = fs::remove_file(&c_path);
     let _ = fs::remove_dir(temp_dir);
 
-    Ok(ArduinoUnoPrecodeArtifacts {
+    Ok(AvrPrecodeArtifacts {
         llvm_ir,
         c_source,
         runtime_header,
@@ -1008,14 +1013,14 @@ fn emit_avr_precode_via_llvm_cbe(
 }
 
 fn emit_avr_cbe_runtime_cpp_with_features(
-    entrypoint: ArduinoUnoEntrypointKind,
+    entrypoint: AvrEntrypointKind,
     enable_servo: bool,
-    runtime_profile: ArduinoUnoRuntimeProfile,
+    runtime_profile: AvrRuntimeProfile,
     board_spec: &'static AvrBoardSpec,
 ) -> String {
     let mut defines = vec![match entrypoint {
-        ArduinoUnoEntrypointKind::Main => "#define RUNE_ARDUINO_ENTRY_MAIN 1",
-        ArduinoUnoEntrypointKind::SetupLoop => "#define RUNE_ARDUINO_ENTRY_SETUP_LOOP 1",
+        AvrEntrypointKind::Main => "#define RUNE_ARDUINO_ENTRY_MAIN 1",
+        AvrEntrypointKind::SetupLoop => "#define RUNE_ARDUINO_ENTRY_SETUP_LOOP 1",
     }
     .to_string()];
     defines.push(format!("#define RUNE_AVR_TARGET_TRIPLE \"{}\"", board_spec.triple));
@@ -1179,16 +1184,16 @@ fn flash_avr_hex(hex_path: &Path, port: Option<&str>, board_spec: &'static AvrBo
     }
     Ok(())
 }
-fn validate_arduino_uno_entry_fn(function: &crate::parser::Function, name: &str) -> Result<(), CodegenError> {
+fn validate_avr_entry_fn(function: &crate::parser::Function, name: &str, board_spec: &AvrBoardSpec) -> Result<(), CodegenError> {
     if function.is_extern || function.is_async {
         return Err(CodegenError {
-            message: format!("Arduino Uno target does not support extern or async `{name}`"),
+            message: format!("{} target does not support extern or async `{name}`", board_spec.board_name),
             span: function.span,
         });
     }
     if !function.params.is_empty() {
         return Err(CodegenError {
-            message: format!("Arduino Uno target requires `{name}()` with no parameters"),
+            message: format!("{} target requires `{name}()` with no parameters", board_spec.board_name),
             span: function.span,
         });
     }
@@ -1333,7 +1338,7 @@ fn program_uses_arduino_serial_read(program: &Program) -> bool {
     program.items.iter().any(item_uses_arduino_serial_read)
 }
 
-fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> ArduinoUnoRuntimeProfile {
+fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> AvrRuntimeProfile {
     let uses_serial_read = program_uses_arduino_serial_read(program);
     let _uses_string_heavy_runtime = program_uses_arduino_string_heavy_runtime(program);
     let uses_runtime_symbol = |name: &str| llvm_ir.contains(&format!("@{name}"));
@@ -1482,7 +1487,7 @@ fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> ArduinoUnoRuntimePro
         32
     };
 
-    ArduinoUnoRuntimeProfile {
+    AvrRuntimeProfile {
         input_buffer_size,
         string_slot_count,
         string_slot_size,
@@ -3617,8 +3622,8 @@ char* rune_rt_system_arch(void) {
 #endif
 }
 char* rune_rt_system_target(void) {
-#if defined(__AVR_ATmega328P__)
-    return rune_rt_store_copied_string("avr-atmega328p-arduino-uno");
+#if defined(RUNE_AVR_TARGET_TRIPLE)
+    return rune_rt_store_copied_string(RUNE_AVR_TARGET_TRIPLE);
 #elif defined(__wasi__)
     return rune_rt_store_copied_string("wasm32-wasip1");
 #elif defined(__wasm32__)
@@ -3640,8 +3645,8 @@ char* rune_rt_system_target(void) {
 #endif
 }
 char* rune_rt_system_board(void) {
-#if defined(__AVR_ATmega328P__)
-    return rune_rt_store_copied_string("arduino-uno");
+#if defined(RUNE_AVR_BOARD_NAME)
+    return rune_rt_store_copied_string(RUNE_AVR_BOARD_NAME);
 #elif defined(__wasi__) || defined(__wasm32__)
     return rune_rt_store_copied_string("wasm");
 #else
