@@ -70,6 +70,10 @@ fn collect_locals_and_uses_in_block(
                 used.insert(stmt.name.clone());
                 collect_used_identifiers_in_expr(&stmt.value, used);
             }
+            Stmt::FieldAssign(stmt) => {
+                used.insert(stmt.base.clone());
+                collect_used_identifiers_in_expr(&stmt.value, used);
+            }
             Stmt::Return(stmt) => {
                 if let Some(expr) = &stmt.value {
                     collect_used_identifiers_in_expr(expr, used);
@@ -104,6 +108,7 @@ fn collect_calls_in_block(block: &crate::parser::Block, called: &mut BTreeSet<St
             Stmt::Block(stmt) => collect_calls_in_block(&stmt.block, called),
             Stmt::Let(stmt) => collect_calls_in_expr(&stmt.value, called),
             Stmt::Assign(stmt) => collect_calls_in_expr(&stmt.value, called),
+            Stmt::FieldAssign(stmt) => collect_calls_in_expr(&stmt.value, called),
             Stmt::Return(stmt) => {
                 if let Some(expr) = &stmt.value {
                     collect_calls_in_expr(expr, called);

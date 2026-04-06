@@ -78,6 +78,7 @@ pub enum Stmt {
     Block(BlockStmt),
     Let(LetStmt),
     Assign(AssignStmt),
+    FieldAssign(FieldAssignStmt),
     Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
@@ -105,6 +106,17 @@ pub struct LetStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignStmt {
     pub name: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// Assignment to a struct/class field: `base.field = value` or `base.a.b = value`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldAssignStmt {
+    /// The root variable name (e.g. `"point"` in `point.x = 5`).
+    pub base: String,
+    /// Path of field names from the root (e.g. `["x"]` or `["inner", "y"]`).
+    pub fields: Vec<String>,
     pub value: Expr,
     pub span: Span,
 }
@@ -203,6 +215,7 @@ pub enum ExprKind {
 pub enum UnaryOp {
     Negate,
     Not,
+    BitwiseNot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,6 +233,11 @@ pub enum BinaryOp {
     GreaterEqual,
     Less,
     LessEqual,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -570,8 +588,9 @@ impl Parser {
         match self.peek().kind.clone() {
             TokenKind::For => self.parse_for_stmt(),
             TokenKind::Let => Ok(Stmt::Let(self.parse_let_stmt()?)),
-            TokenKind::Identifier(_) if self.peek_is_identifier_eq() => {
-                Ok(Stmt::Assign(self.parse_assign_stmt()?))
+            TokenKind::Assert => self.parse_assert_stmt(),
+            TokenKind::Identifier(_) if self.peek_is_ident_assignment() => {
+                self.parse_ident_assignment_stmt()
             }
             TokenKind::Return => Ok(Stmt::Return(self.parse_return_stmt()?)),
             TokenKind::If => Ok(Stmt::If(self.parse_if_stmt()?)),
@@ -582,6 +601,134 @@ impl Parser {
             TokenKind::Panic => Ok(Stmt::Panic(self.parse_panic_stmt()?)),
             _ => Ok(Stmt::Expr(self.parse_expr_stmt()?)),
         }
+    }
+
+    /// Returns true when the current token is an identifier followed by any assignment operator
+    /// or a field-path assignment (`ident.field ... = value`).
+    fn peek_is_ident_assignment(&self) -> bool {
+        if !matches!(self.tokens[self.index].kind, TokenKind::Identifier(_)) {
+            return false;
+        }
+        // Walk forward past dots and identifiers to find an assignment operator.
+        let mut i = self.index + 1;
+        loop {
+            let kind = self.tokens.get(i).map(|t| &t.kind);
+            match kind {
+                Some(TokenKind::Equal) => return true,
+                Some(
+                    TokenKind::PlusEqual
+                    | TokenKind::MinusEqual
+                    | TokenKind::StarEqual
+                    | TokenKind::SlashEqual
+                    | TokenKind::PercentEqual
+                    | TokenKind::AmpersandEqual
+                    | TokenKind::PipeEqual
+                    | TokenKind::CaretEqual,
+                ) => return true,
+                // Allow dots for field-path assignment
+                Some(TokenKind::Dot) => {
+                    i += 1;
+                    // Must be followed by an identifier
+                    match self.tokens.get(i).map(|t| &t.kind) {
+                        Some(TokenKind::Identifier(_)) => {
+                            i += 1;
+                        }
+                        _ => return false,
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    fn parse_ident_assignment_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.peek().span;
+        let (name, _) = self.expect_identifier("expected assignment target")?;
+
+        // Collect optional field path: .field1.field2...
+        let mut fields: Vec<String> = Vec::new();
+        while self.check(&TokenKind::Dot) {
+            self.advance();
+            let (field, _) = self.expect_identifier("expected field name after `.`")?;
+            fields.push(field);
+        }
+
+        // Determine the assignment operator
+        let op_token = self.peek().kind.clone();
+        self.advance();
+
+        let rhs = self.parse_expr()?;
+        self.expect_simple(TokenKind::Newline, "expected newline after assignment")?;
+
+        // For augmented operators, build `name op rhs` (or `base.fields op rhs`)
+        let value = match op_token {
+            TokenKind::Equal => rhs,
+            ref aug => {
+                let bin_op = match aug {
+                    TokenKind::PlusEqual => BinaryOp::Add,
+                    TokenKind::MinusEqual => BinaryOp::Subtract,
+                    TokenKind::StarEqual => BinaryOp::Multiply,
+                    TokenKind::SlashEqual => BinaryOp::Divide,
+                    TokenKind::PercentEqual => BinaryOp::Modulo,
+                    TokenKind::AmpersandEqual => BinaryOp::BitwiseAnd,
+                    TokenKind::PipeEqual => BinaryOp::BitwiseOr,
+                    TokenKind::CaretEqual => BinaryOp::BitwiseXor,
+                    _ => unreachable!("peek_is_ident_assignment only returns true for known ops"),
+                };
+                // Build the current-value expression (name or name.field.field...)
+                let current = if fields.is_empty() {
+                    ident_expr(&name, span)
+                } else {
+                    let mut base = ident_expr(&name, span);
+                    for f in &fields {
+                        base = Expr {
+                            kind: ExprKind::Field {
+                                base: Box::new(base),
+                                name: f.clone(),
+                            },
+                            span,
+                        };
+                    }
+                    base
+                };
+                binary_expr(current, bin_op, rhs, span)
+            }
+        };
+
+        if fields.is_empty() {
+            Ok(Stmt::Assign(AssignStmt { name, value, span }))
+        } else {
+            Ok(Stmt::FieldAssign(FieldAssignStmt { base: name, fields, value, span }))
+        }
+    }
+
+    fn parse_assert_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.expect_simple(TokenKind::Assert, "expected `assert`")?;
+        let condition = self.parse_expr()?;
+        // Optional message: assert expr, "msg"
+        let message = if self.check(&TokenKind::Comma) {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        self.expect_simple(TokenKind::Newline, "expected newline after assert")?;
+
+        // Desugar: if not condition: panic(message)
+        let msg_expr = message.unwrap_or_else(|| string_expr("assertion failed", span));
+        let negated = Expr {
+            kind: ExprKind::Unary { op: UnaryOp::Not, expr: Box::new(condition) },
+            span,
+        };
+        Ok(Stmt::If(IfStmt {
+            condition: negated,
+            then_block: Block {
+                statements: vec![Stmt::Panic(PanicStmt { value: msg_expr, span })],
+            },
+            elif_blocks: Vec::new(),
+            else_block: None,
+            span,
+        }))
     }
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -705,14 +852,6 @@ impl Parser {
         })
     }
 
-    fn parse_assign_stmt(&mut self) -> Result<AssignStmt, ParseError> {
-        let span = self.peek().span;
-        let (name, _) = self.expect_identifier("expected assignment target")?;
-        self.expect_simple(TokenKind::Equal, "expected `=` in assignment")?;
-        let value = self.parse_expr()?;
-        self.expect_simple(TokenKind::Newline, "expected newline after assignment")?;
-        Ok(AssignStmt { name, value, span })
-    }
 
     fn parse_return_stmt(&mut self) -> Result<ReturnStmt, ParseError> {
         let span = self.expect_simple(TokenKind::Return, "expected `return`")?;
@@ -846,11 +985,11 @@ impl Parser {
     }
 
     fn parse_and(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_comparison()?;
+        let mut expr = self.parse_bitwise_or()?;
 
         while self.match_simple(&TokenKind::And) {
             let span = self.previous().span;
-            let right = self.parse_comparison()?;
+            let right = self.parse_bitwise_or()?;
             expr = Expr {
                 kind: ExprKind::Binary {
                     left: Box::new(expr),
@@ -861,6 +1000,79 @@ impl Parser {
             };
         }
 
+        Ok(expr)
+    }
+
+    fn parse_bitwise_or(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_bitwise_xor()?;
+        while self.check(&TokenKind::Pipe) {
+            let span = self.advance().span;
+            let right = self.parse_bitwise_xor()?;
+            expr = Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(expr),
+                    op: BinaryOp::BitwiseOr,
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_bitwise_and()?;
+        while self.check(&TokenKind::Caret) {
+            let span = self.advance().span;
+            let right = self.parse_bitwise_and()?;
+            expr = Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(expr),
+                    op: BinaryOp::BitwiseXor,
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_shift()?;
+        while self.check(&TokenKind::Ampersand) {
+            let span = self.advance().span;
+            let right = self.parse_shift()?;
+            expr = Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(expr),
+                    op: BinaryOp::BitwiseAnd,
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_comparison()?;
+        loop {
+            let op = match self.peek().kind {
+                TokenKind::ShiftLeft => BinaryOp::ShiftLeft,
+                TokenKind::ShiftRight => BinaryOp::ShiftRight,
+                _ => break,
+            };
+            let span = self.advance().span;
+            let right = self.parse_comparison()?;
+            expr = Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(expr),
+                    op,
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
         Ok(expr)
     }
 
@@ -977,6 +1189,18 @@ impl Parser {
             });
         }
 
+        if self.match_simple(&TokenKind::Tilde) {
+            let span = self.previous().span;
+            let expr = self.parse_unary()?;
+            return Ok(Expr {
+                kind: ExprKind::Unary {
+                    op: UnaryOp::BitwiseNot,
+                    expr: Box::new(expr),
+                },
+                span,
+            });
+        }
+
         self.parse_postfix()
     }
 
@@ -988,7 +1212,7 @@ impl Parser {
                 let mut args = Vec::new();
                 if !self.check(&TokenKind::RParen) {
                     loop {
-                        if self.peek_is_identifier_eq() {
+                        if self.peek_is_keyword_arg() {
                             let (name, span) =
                                 self.expect_identifier("expected keyword argument name")?;
                             self.expect_simple(
@@ -1138,12 +1362,14 @@ impl Parser {
         )
     }
 
-    fn peek_is_identifier_eq(&self) -> bool {
-        matches!(self.peek().kind, TokenKind::Identifier(_))
+
+    /// Returns true for `ident =` in a call argument list (keyword argument syntax).
+    fn peek_is_keyword_arg(&self) -> bool {
+        matches!(self.tokens[self.index].kind, TokenKind::Identifier(_))
             && self
                 .tokens
                 .get(self.index + 1)
-                .is_some_and(|token| token.kind == TokenKind::Equal)
+                .is_some_and(|t| t.kind == TokenKind::Equal)
     }
 
     fn advance(&mut self) -> &Token {
@@ -1251,6 +1477,7 @@ impl Stmt {
             Stmt::Block(stmt) => stmt.span,
             Stmt::Let(stmt) => stmt.span,
             Stmt::Assign(stmt) => stmt.span,
+            Stmt::FieldAssign(stmt) => stmt.span,
             Stmt::Return(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
             Stmt::While(stmt) => stmt.span,

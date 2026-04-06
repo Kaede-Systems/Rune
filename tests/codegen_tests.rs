@@ -484,3 +484,67 @@ fn lowers_internal_string_returning_functions() {
     assert!(asm.contains("call read_line"));
     assert!(asm.contains("call rune_rt_print_str"));
 }
+
+#[test]
+fn emits_bitwise_and_or_xor() {
+    let asm = emit_asm_source(
+        "def f(a: i64, b: i64) -> i64:\n    let x: i64 = a & b\n    let y: i64 = x | b\n    let z: i64 = y ^ a\n    return z\n",
+    )
+    .expect("bitwise ops should generate");
+
+    assert!(asm.contains("and ") || asm.contains("and\t"));
+    assert!(asm.contains("or ") || asm.contains("or\t"));
+    assert!(asm.contains("xor ") || asm.contains("xor\t"));
+}
+
+#[test]
+fn emits_shift_operations() {
+    let asm = emit_asm_source(
+        "def f(a: i64) -> i64:\n    let x: i64 = a << 2\n    let y: i64 = x >> 1\n    return y\n",
+    )
+    .expect("shift ops should generate");
+
+    assert!(asm.contains("shl") || asm.contains("sal"));
+    assert!(asm.contains("sar") || asm.contains("shr"));
+}
+
+#[test]
+fn emits_bitwise_not() {
+    let asm = emit_asm_source(
+        "def f(a: i64) -> i64:\n    let x: i64 = ~a\n    return x\n",
+    )
+    .expect("bitwise not should generate");
+
+    assert!(asm.contains("not ") || asm.contains("not\t"));
+}
+
+#[test]
+fn emits_hex_integer_literal() {
+    let asm = emit_asm_source(
+        "def f() -> i64:\n    return 0xFF\n",
+    )
+    .expect("hex literal should generate");
+
+    assert!(asm.contains("255") || asm.contains("0xff") || asm.contains("0xFF"));
+}
+
+#[test]
+fn emits_binary_integer_literal() {
+    let asm = emit_asm_source(
+        "def f() -> i64:\n    return 0b1010\n",
+    )
+    .expect("binary literal should generate");
+
+    assert!(asm.contains("10") || asm.contains("0b1010"));
+}
+
+#[test]
+fn emits_augmented_assignment() {
+    let asm = emit_asm_source(
+        "def f(x: i64) -> i64:\n    x += 5\n    x -= 2\n    return x\n",
+    )
+    .expect("augmented assignment should generate");
+
+    assert!(asm.contains("add ") || asm.contains("add\t"));
+    assert!(asm.contains("sub ") || asm.contains("sub\t"));
+}

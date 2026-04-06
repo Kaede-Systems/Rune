@@ -1515,6 +1515,7 @@ fn scan_stmt_string_metrics(stmt: &Stmt, max_len: &mut usize, op_count: &mut usi
         Stmt::Block(block) => scan_block_string_metrics(&block.block, max_len, op_count),
         Stmt::Let(let_stmt) => scan_expr_string_metrics(&let_stmt.value, max_len, op_count),
         Stmt::Assign(assign_stmt) => scan_expr_string_metrics(&assign_stmt.value, max_len, op_count),
+        Stmt::FieldAssign(assign_stmt) => scan_expr_string_metrics(&assign_stmt.value, max_len, op_count),
         Stmt::Return(return_stmt) => {
             if let Some(value) = &return_stmt.value {
                 scan_expr_string_metrics(value, max_len, op_count);
@@ -1645,6 +1646,7 @@ fn stmt_uses_arduino_servo(stmt: &Stmt) -> bool {
         Stmt::Block(block) => block_uses_arduino_servo(&block.block),
         Stmt::Let(let_stmt) => expr_uses_arduino_servo(&let_stmt.value),
         Stmt::Assign(assign_stmt) => expr_uses_arduino_servo(&assign_stmt.value),
+        Stmt::FieldAssign(assign_stmt) => expr_uses_arduino_servo(&assign_stmt.value),
         Stmt::Return(return_stmt) => return_stmt
             .value
             .as_ref()
@@ -1680,6 +1682,7 @@ fn stmt_uses_arduino_string_heavy_runtime(stmt: &Stmt) -> bool {
         Stmt::Block(block) => block_uses_arduino_string_heavy_runtime(&block.block),
         Stmt::Let(let_stmt) => expr_uses_arduino_string_heavy_runtime(&let_stmt.value),
         Stmt::Assign(assign_stmt) => expr_uses_arduino_string_heavy_runtime(&assign_stmt.value),
+        Stmt::FieldAssign(assign_stmt) => expr_uses_arduino_string_heavy_runtime(&assign_stmt.value),
         Stmt::Return(return_stmt) => return_stmt
             .value
             .as_ref()
@@ -1778,6 +1781,7 @@ fn stmt_uses_arduino_serial_read(stmt: &Stmt) -> bool {
         Stmt::Block(block) => block_uses_arduino_serial_read(&block.block),
         Stmt::Let(let_stmt) => expr_uses_arduino_serial_read(&let_stmt.value),
         Stmt::Assign(assign_stmt) => expr_uses_arduino_serial_read(&assign_stmt.value),
+        Stmt::FieldAssign(assign_stmt) => expr_uses_arduino_serial_read(&assign_stmt.value),
         Stmt::Return(return_stmt) => return_stmt.value.as_ref().is_some_and(expr_uses_arduino_serial_read),
         Stmt::If(if_stmt) => {
             expr_uses_arduino_serial_read(&if_stmt.condition)

@@ -419,3 +419,95 @@ fn parses_fstrings_as_string_expressions() {
         other => panic!("expected call expression, found {other:?}"),
     }
 }
+
+#[test]
+fn parses_augmented_assignment() {
+    let program = parse_source(
+        "def f() -> unit:\n    let x: i64 = 0\n    x += 5\n    x -= 2\n    x *= 3\n",
+    )
+    .expect("augmented assignment should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    // augmented assignments desugar to plain assigns at parse time
+    // x += 5 becomes x = x + 5
+    let Stmt::Assign(a) = &func.body.statements[1] else {
+        panic!("expected assign statement for x += 5, got {:?}", func.body.statements[1]);
+    };
+    assert_eq!(a.name, "x");
+    // value should be a binary add
+    match &a.value.kind {
+        ExprKind::Binary { op, .. } => {
+            assert_eq!(format!("{op:?}"), "Add");
+        }
+        other => panic!("expected Binary(Add), got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_field_assignment() {
+    let program = parse_source(
+        "def f() -> unit:\n    obj.x = 10\n",
+    )
+    .expect("field assignment should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    let Stmt::FieldAssign(fa) = &func.body.statements[0] else {
+        panic!("expected FieldAssign, got {:?}", func.body.statements[0]);
+    };
+    assert_eq!(fa.base, "obj");
+    assert_eq!(fa.fields, vec!["x"]);
+}
+
+#[test]
+fn parses_assert_desugars_to_if() {
+    let program = parse_source(
+        "def f() -> unit:\n    assert x > 0\n",
+    )
+    .expect("assert should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    // assert desugars to if not (cond): panic(...)
+    let Stmt::If(_) = &func.body.statements[0] else {
+        panic!("assert should desugar to if, got {:?}", func.body.statements[0]);
+    };
+}
+
+#[test]
+fn parses_bitwise_binary_ops() {
+    let program = parse_source(
+        "def f() -> unit:\n    let a = x & y\n    let b = x | y\n    let c = x ^ y\n    let d = x << 2\n    let e = x >> 1\n",
+    )
+    .expect("bitwise ops should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+
+    let ops: Vec<String> = func.body.statements.iter().filter_map(|s| {
+        if let Stmt::Let(ls) = s {
+            if let ExprKind::Binary { op, .. } = &ls.value.kind {
+                return Some(format!("{op:?}"));
+            }
+        }
+        None
+    }).collect();
+
+    assert!(ops.contains(&"BitwiseAnd".to_string()), "missing BitwiseAnd, got {ops:?}");
+    assert!(ops.contains(&"BitwiseOr".to_string()), "missing BitwiseOr");
+    assert!(ops.contains(&"BitwiseXor".to_string()), "missing BitwiseXor");
+    assert!(ops.contains(&"ShiftLeft".to_string()), "missing ShiftLeft");
+    assert!(ops.contains(&"ShiftRight".to_string()), "missing ShiftRight");
+}
+
+#[test]
+fn parses_bitwise_not_unary() {
+    let program = parse_source(
+        "def f() -> unit:\n    let a = ~x\n",
+    )
+    .expect("bitwise not should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    let Stmt::Let(ls) = &func.body.statements[0] else { panic!() };
+    match &ls.value.kind {
+        ExprKind::Unary { op, .. } => assert_eq!(format!("{op:?}"), "BitwiseNot"),
+        other => panic!("expected Unary(BitwiseNot), got {other:?}"),
+    }
+}

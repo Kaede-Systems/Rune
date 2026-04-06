@@ -3,8 +3,9 @@ use std::fmt;
 
 use crate::lexer::Span;
 use crate::parser::{
-    AssignStmt, BinaryOp, Block, CallArg, Expr, ExprKind, Function, Item, LetStmt, PanicStmt,
-    ParseError, Program, RaiseStmt, ReturnStmt, Stmt, StructDecl, TypeRef, UnaryOp, WhileStmt,
+    AssignStmt, BinaryOp, Block, CallArg, Expr, ExprKind, FieldAssignStmt, Function, Item,
+    LetStmt, PanicStmt, ParseError, Program, RaiseStmt, ReturnStmt, Stmt, StructDecl, TypeRef,
+    UnaryOp, WhileStmt,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -712,6 +713,7 @@ impl<'a> Analyzer<'a> {
             }
             Stmt::Let(stmt) => self.check_let(stmt, scope, in_async),
             Stmt::Assign(stmt) => self.check_assign(stmt, scope, in_async),
+            Stmt::FieldAssign(stmt) => self.check_field_assign(stmt, scope, in_async),
             Stmt::Return(stmt) => self.check_return(stmt, scope, expected_return, in_async),
             Stmt::If(stmt) => {
                 let cond_ty = self.check_expr(&stmt.condition, scope, in_async)?;
@@ -796,6 +798,11 @@ impl<'a> Analyzer<'a> {
             }
             Stmt::Assign(assign_stmt) => {
                 if let Err(error) = self.check_assign(assign_stmt, scope, in_async) {
+                    errors.push(error);
+                }
+            }
+            Stmt::FieldAssign(stmt) => {
+                if let Err(error) = self.check_field_assign(stmt, scope, in_async) {
                     errors.push(error);
                 }
             }
@@ -985,6 +992,60 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    fn check_field_assign(
+        &self,
+        stmt: &FieldAssignStmt,
+        scope: &mut Scope,
+        in_async: bool,
+    ) -> Result<(), SemanticError> {
+        // Resolve the base variable type.
+        let base_binding = scope.values.get(&stmt.base).cloned().ok_or_else(|| SemanticError {
+            message: format!("cannot assign to unknown variable `{}`", stmt.base),
+            span: stmt.span,
+        })?;
+        // Walk field path to determine the target field type.
+        let mut current_ty = base_binding.ty.clone();
+        for field_name in &stmt.fields {
+            current_ty = match &current_ty {
+                Type::Struct(struct_name) => {
+                    let sig = self.structs.get(struct_name).ok_or_else(|| SemanticError {
+                        message: format!("unknown struct `{struct_name}`"),
+                        span: stmt.span,
+                    })?;
+                    sig.fields
+                        .get(field_name)
+                        .cloned()
+                        .ok_or_else(|| SemanticError {
+                            message: format!(
+                                "`{struct_name}` has no field `{field_name}`"
+                            ),
+                            span: stmt.span,
+                        })?
+                }
+                Type::Dynamic => Type::Dynamic,
+                other => {
+                    return Err(SemanticError {
+                        message: format!(
+                            "cannot access field `{field_name}` on `{}`",
+                            other.name()
+                        ),
+                        span: stmt.span,
+                    });
+                }
+            };
+        }
+        let value_ty = self.check_expr(&stmt.value, scope, in_async)?;
+        self.expect_type(&value_ty, &current_ty, stmt.value.span, "field assignment value")
+            .or_else(|_| {
+                // Allow dynamic coercion
+                if matches!(current_ty, Type::Dynamic) {
+                    Ok(())
+                } else {
+                    self.expect_type(&value_ty, &current_ty, stmt.value.span, "field assignment value")
+                }
+            })
+    }
+
     fn check_return(
         &self,
         stmt: &ReturnStmt,
@@ -1128,6 +1189,19 @@ impl<'a> Analyzer<'a> {
                             })
                         }
                     }
+                    UnaryOp::BitwiseNot => {
+                        if matches!(inner_ty, Type::I32 | Type::I64) {
+                            Ok(inner_ty)
+                        } else {
+                            Err(SemanticError {
+                                message: format!(
+                                    "unary `~` requires an integer, found `{}`",
+                                    inner_ty.name()
+                                ),
+                                span: expr.span,
+                            })
+                        }
+                    }
                 }
             }
             ExprKind::Binary { left, op, right } => {
@@ -1246,6 +1320,38 @@ impl<'a> Analyzer<'a> {
                     Err(SemanticError {
                         message: format!(
                             "binary arithmetic requires matching integer types or supported dynamic numeric operands, found `{}` and `{}`",
+                            left.name(),
+                            right.name()
+                        ),
+                        span,
+                    })
+                }
+            }
+            BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor => {
+                if left == right && matches!(left, Type::I32 | Type::I64) {
+                    Ok(left.clone())
+                } else if self.is_integer_pair(left, right) {
+                    Ok(Type::I64)
+                } else {
+                    Err(SemanticError {
+                        message: format!(
+                            "bitwise operation requires integer operands, found `{}` and `{}`",
+                            left.name(),
+                            right.name()
+                        ),
+                        span,
+                    })
+                }
+            }
+            BinaryOp::ShiftLeft | BinaryOp::ShiftRight => {
+                if left == right && matches!(left, Type::I32 | Type::I64) {
+                    Ok(left.clone())
+                } else if self.is_integer_pair(left, right) {
+                    Ok(Type::I64)
+                } else {
+                    Err(SemanticError {
+                        message: format!(
+                            "shift operation requires integer operands, found `{}` and `{}`",
                             left.name(),
                             right.name()
                         ),

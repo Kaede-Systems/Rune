@@ -5,8 +5,8 @@ use crate::ir::{IrType, lower_program};
 use crate::lexer::Span;
 use crate::optimize::optimize_program;
 use crate::parser::{
-    AssignStmt, BinaryOp, Block, CallArg, Expr, ExprKind, Function, Item, LetStmt, Program, Stmt,
-    StructDecl, UnaryOp, parse_source,
+    AssignStmt, BinaryOp, Block, CallArg, Expr, ExprKind, FieldAssignStmt, Function, Item,
+    LetStmt, Program, Stmt, StructDecl, UnaryOp, parse_source,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -913,6 +913,7 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str(&format!("    jmp {continue_label}\n"));
                 Ok(())
             }
+            Stmt::FieldAssign(stmt) => self.emit_field_assign(out, stmt),
             Stmt::Expr(stmt) => self.emit_expr_stmt(out, &stmt.expr),
             Stmt::Raise(stmt) => self.emit_raise(out, stmt),
             Stmt::Panic(stmt) => self.emit_panic(out, stmt),
@@ -1087,6 +1088,40 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
+    fn emit_field_assign(
+        &mut self,
+        out: &mut String,
+        stmt: &FieldAssignStmt,
+    ) -> Result<(), CodegenError> {
+        // Build a synthetic Field expression for the target: base.fields[0].fields[1]...
+        let dummy_span = stmt.span;
+        let base_expr = Expr {
+            kind: ExprKind::Identifier(stmt.base.clone()),
+            span: dummy_span,
+        };
+        let mut field_expr = base_expr;
+        for field_name in &stmt.fields {
+            field_expr = Expr {
+                kind: ExprKind::Field {
+                    base: Box::new(field_expr),
+                    name: field_name.clone(),
+                },
+                span: dummy_span,
+            };
+        }
+        let field_binding =
+            self.resolve_field_binding(&field_expr)
+                .ok_or_else(|| CodegenError {
+                    message: format!(
+                        "field path `{}.{}` could not be resolved in native backend",
+                        stmt.base,
+                        stmt.fields.join(".")
+                    ),
+                    span: stmt.span,
+                })?;
+        self.store_value_into_binding(out, &field_binding, &stmt.value, stmt.span)
+    }
+
     fn emit_expr(&mut self, out: &mut String, expr: &Expr) -> Result<(), CodegenError> {
         match &expr.kind {
             ExprKind::Identifier(name) => {
@@ -1143,6 +1178,11 @@ impl<'a> FunctionEmitter<'a> {
                     self.emit_condition(out, inner)?;
                     out.push_str("    sete al\n");
                     out.push_str("    movzx rax, al\n");
+                    Ok(())
+                }
+                UnaryOp::BitwiseNot => {
+                    self.emit_expr(out, inner)?;
+                    out.push_str("    not rax\n");
                     Ok(())
                 }
             },
@@ -1284,6 +1324,11 @@ impl<'a> FunctionEmitter<'a> {
                         out.push_str("    setle al\n");
                         out.push_str("    movzx rax, al\n");
                     }
+                    BinaryOp::BitwiseAnd => out.push_str("    and rax, rcx\n"),
+                    BinaryOp::BitwiseOr => out.push_str("    or rax, rcx\n"),
+                    BinaryOp::BitwiseXor => out.push_str("    xor rax, rcx\n"),
+                    BinaryOp::ShiftLeft => out.push_str("    shl rax, cl\n"),
+                    BinaryOp::ShiftRight => out.push_str("    sar rax, cl\n"),
                 }
                 Ok(())
             }
@@ -3670,6 +3715,10 @@ impl<'a> FunctionEmitter<'a> {
                 }
             }
             BinaryOp::Divide | BinaryOp::Modulo => return Ok(false),
+            BinaryOp::BitwiseAnd => self.emit_binary_op(out, "and", &right_operand),
+            BinaryOp::BitwiseOr => self.emit_binary_op(out, "or", &right_operand),
+            BinaryOp::BitwiseXor => self.emit_binary_op(out, "xor", &right_operand),
+            BinaryOp::ShiftLeft | BinaryOp::ShiftRight => return Ok(false),
             BinaryOp::EqualEqual
             | BinaryOp::NotEqual
             | BinaryOp::Greater
@@ -4648,6 +4697,10 @@ impl<'a> FunctionEmitter<'a> {
             ExprKind::Unary {
                 op: UnaryOp::Not, ..
             } => Some(IrType::Bool),
+            ExprKind::Unary {
+                op: UnaryOp::BitwiseNot,
+                expr,
+            } => self.infer_expr_type(expr),
             ExprKind::Binary { left, op, right } => {
                 let left_ty = self.infer_expr_type(left)?;
                 let right_ty = self.infer_expr_type(right)?;
@@ -4713,6 +4766,17 @@ impl<'a> FunctionEmitter<'a> {
                     | BinaryOp::GreaterEqual
                     | BinaryOp::Less
                     | BinaryOp::LessEqual => Some(IrType::Bool),
+                    BinaryOp::BitwiseAnd
+                    | BinaryOp::BitwiseOr
+                    | BinaryOp::BitwiseXor
+                    | BinaryOp::ShiftLeft
+                    | BinaryOp::ShiftRight => {
+                        if left_ty == right_ty && matches!(left_ty, IrType::I32 | IrType::I64) {
+                            Some(left_ty)
+                        } else {
+                            None
+                        }
+                    }
                 }
             }
             ExprKind::Call { callee, .. } => {
@@ -5673,6 +5737,11 @@ fn binary_op_name(op: &BinaryOp) -> &'static str {
         BinaryOp::GreaterEqual => ">=",
         BinaryOp::Less => "<",
         BinaryOp::LessEqual => "<=",
+        BinaryOp::BitwiseAnd => "&",
+        BinaryOp::BitwiseOr => "|",
+        BinaryOp::BitwiseXor => "^",
+        BinaryOp::ShiftLeft => "<<",
+        BinaryOp::ShiftRight => ">>",
     }
 }
 
