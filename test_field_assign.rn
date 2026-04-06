@@ -17,16 +17,19 @@ def area(r: Rectangle) -> i64:
     return r.w * r.h
 
 def main() -> i32:
-    let p = Point(x=3, y=4)
+    # positional construction
+    let p = Point(3, 4)
     p.x = 10
     p.y = 20
     println(p.x)
     println(p.y)
 
-    let p2 = translate(Point(x=1, y=1), 5, 7)
+    # positional in function call
+    let p2 = translate(Point(1, 1), 5, 7)
     println(p2.x)
     println(p2.y)
 
+    # keyword construction still works
     let r = Rectangle(x=0, y=0, w=8, h=5)
     println(area(r))
 

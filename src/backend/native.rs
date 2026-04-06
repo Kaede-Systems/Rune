@@ -5175,22 +5175,44 @@ impl<'a> FunctionEmitter<'a> {
                         span,
                     });
                 }
-                for (field_name, field_binding) in fields {
-                    let value_expr = args
-                        .iter()
-                        .find_map(|arg| match arg {
-                            CallArg::Keyword { name, value, .. } if name == field_name => {
-                                Some(value)
-                            }
-                            _ => None,
-                        })
+                let all_positional = args.iter().all(|a| matches!(a, CallArg::Positional(_)));
+                if all_positional {
+                    // Map by declaration order from struct_layouts
+                    let layout = self
+                        .struct_layouts
+                        .get(name)
                         .ok_or_else(|| CodegenError {
-                            message: format!(
-                                "struct `{name}` constructor is missing field `{field_name}`"
-                            ),
+                            message: format!("unknown struct `{name}`"),
                             span,
                         })?;
-                    self.store_value_into_binding(out, field_binding, value_expr, span)?;
+                    for ((field_name_layout, _), arg) in layout.iter().zip(args.iter()) {
+                        let field_binding = fields.get(field_name_layout).ok_or_else(|| {
+                            CodegenError {
+                                message: format!("struct `{name}` missing field `{field_name_layout}`"),
+                                span,
+                            }
+                        })?;
+                        let CallArg::Positional(value_expr) = arg else { unreachable!() };
+                        self.store_value_into_binding(out, field_binding, value_expr, span)?;
+                    }
+                } else {
+                    for (field_name, field_binding) in fields {
+                        let value_expr = args
+                            .iter()
+                            .find_map(|arg| match arg {
+                                CallArg::Keyword { name, value, .. } if name == field_name => {
+                                    Some(value)
+                                }
+                                _ => None,
+                            })
+                            .ok_or_else(|| CodegenError {
+                                message: format!(
+                                    "struct `{name}` constructor is missing field `{field_name}`"
+                                ),
+                                span,
+                            })?;
+                        self.store_value_into_binding(out, field_binding, value_expr, span)?;
+                    }
                 }
                 Ok(())
             }
@@ -5538,20 +5560,32 @@ impl<'a> FunctionEmitter<'a> {
                             span,
                         })?
                         .clone();
+                    let all_positional = args.iter().all(|a| matches!(a, CallArg::Positional(_)));
                     let mut offset = 0i32;
-                    for (field_name, field_ty) in &layout {
-                        let value_expr = args
-                            .iter()
-                            .find_map(|arg| match arg {
-                                CallArg::Keyword { name, value, .. } if name == field_name => Some(value),
-                                _ => None,
-                            })
-                            .ok_or_else(|| CodegenError {
-                                message: format!(
-                                    "struct `{struct_name}` constructor is missing field `{field_name}`"
-                                ),
-                                span,
-                            })?;
+                    for (idx, (field_name, field_ty)) in layout.iter().enumerate() {
+                        let value_expr = if all_positional {
+                            match args.get(idx) {
+                                Some(CallArg::Positional(v)) => v,
+                                _ => return Err(CodegenError {
+                                    message: format!(
+                                        "struct `{struct_name}` constructor missing positional arg {idx}"
+                                    ),
+                                    span,
+                                }),
+                            }
+                        } else {
+                            args.iter()
+                                .find_map(|arg| match arg {
+                                    CallArg::Keyword { name, value, .. } if name == field_name => Some(value),
+                                    _ => None,
+                                })
+                                .ok_or_else(|| CodegenError {
+                                    message: format!(
+                                        "struct `{struct_name}` constructor is missing field `{field_name}`"
+                                    ),
+                                    span,
+                                })?
+                        };
                         self.emit_write_field_expr_to_ptr(
                             out, value_expr, field_ty, ptr_reg, offset, span,
                         )?;

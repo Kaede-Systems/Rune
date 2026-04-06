@@ -110,6 +110,7 @@ struct FunctionSig {
 #[derive(Debug, Clone)]
 struct StructSig {
     fields: HashMap<String, Type>,
+    field_order: Vec<String>,
     methods: HashMap<String, FunctionSig>,
 }
 
@@ -315,6 +316,7 @@ impl<'a> Analyzer<'a> {
                 decl.name.clone(),
                 StructSig {
                     fields: HashMap::new(),
+                    field_order: Vec::new(),
                     methods: HashMap::new(),
                 },
             );
@@ -328,9 +330,11 @@ impl<'a> Analyzer<'a> {
                 continue;
             };
             let fields = self.collect_struct_fields(decl)?;
+            let field_order: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
             let methods = self.collect_struct_methods(decl)?;
             let sig = self.structs.get_mut(&decl.name).expect("struct should exist");
             sig.fields = fields;
+            sig.field_order = field_order;
             sig.methods = methods;
         }
         Ok(())
@@ -1677,44 +1681,55 @@ impl<'a> Analyzer<'a> {
                     if args.len() != struct_sig.fields.len() {
                         return Err(SemanticError {
                             message: format!(
-                                "struct `{name}` expects {} keyword arguments but got {}",
+                                "struct `{name}` expects {} arguments but got {}",
                                 struct_sig.fields.len(),
                                 args.len()
                             ),
                             span,
                         });
                     }
-                    let mut seen = BTreeSet::new();
-                    for arg in args {
-                        let CallArg::Keyword {
-                            name: field_name,
-                            value,
-                            span: field_span,
-                        } = arg
-                        else {
-                            return Err(SemanticError {
-                                message: format!(
-                                    "struct `{name}` construction requires keyword arguments"
-                                ),
-                                span,
-                            });
-                        };
-                        let Some(expected_ty) = struct_sig.fields.get(field_name) else {
-                            return Err(SemanticError {
-                                message: format!("struct `{name}` has no field `{field_name}`"),
-                                span: *field_span,
-                            });
-                        };
-                        if !seen.insert(field_name.clone()) {
-                            return Err(SemanticError {
-                                message: format!(
-                                    "field `{field_name}` was provided more than once for struct `{name}`"
-                                ),
-                                span: *field_span,
-                            });
+                    let all_positional = args.iter().all(|a| matches!(a, CallArg::Positional(_)));
+                    let all_keyword = args.iter().all(|a| matches!(a, CallArg::Keyword { .. }));
+                    if !all_positional && !all_keyword {
+                        return Err(SemanticError {
+                            message: format!(
+                                "struct `{name}` construction must use either all positional or all keyword arguments"
+                            ),
+                            span,
+                        });
+                    }
+                    if all_positional {
+                        // Map positional args to fields by declaration order
+                        for (arg, field_name) in args.iter().zip(&struct_sig.field_order.clone()) {
+                            let CallArg::Positional(value) = arg else { unreachable!() };
+                            let expected_ty = struct_sig.fields.get(field_name).expect("field in order");
+                            let actual = self.check_expr(value, scope, in_async)?;
+                            self.expect_type(&actual, expected_ty, value.span, "struct field")?;
                         }
-                        let actual = self.check_expr(value, scope, in_async)?;
-                        self.expect_type(&actual, expected_ty, value.span, "struct field")?;
+                    } else {
+                        // Keyword args — validate field names and types
+                        let mut seen = BTreeSet::new();
+                        for arg in args {
+                            let CallArg::Keyword { name: field_name, value, span: field_span } = arg else {
+                                unreachable!()
+                            };
+                            let Some(expected_ty) = struct_sig.fields.get(field_name) else {
+                                return Err(SemanticError {
+                                    message: format!("struct `{name}` has no field `{field_name}`"),
+                                    span: *field_span,
+                                });
+                            };
+                            if !seen.insert(field_name.clone()) {
+                                return Err(SemanticError {
+                                    message: format!(
+                                        "field `{field_name}` was provided more than once for struct `{name}`"
+                                    ),
+                                    span: *field_span,
+                                });
+                            }
+                            let actual = self.check_expr(value, scope, in_async)?;
+                            self.expect_type(&actual, expected_ty, value.span, "struct field")?;
+                        }
                     }
                     Ok(Type::Struct(name.to_string()))
                 }

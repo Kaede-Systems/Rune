@@ -1160,21 +1160,27 @@ impl<'a> FunctionEmitter<'a> {
 
         if self.struct_layouts.contains_key(callee) {
             let layout = self.struct_layouts.get(callee).expect("checked above");
-            if args.len() != layout.len() || args.iter().any(|arg| arg.name.is_none()) {
+            if args.len() != layout.len() {
                 return Err(LlvmIrError {
                     message: format!("constructor call shape for `{callee}` is not yet supported by the current LLVM IR backend"),
                 });
             }
+            let all_positional = args.iter().all(|arg| arg.name.is_none());
             let aggregate_ty =
                 llvm_internal_type(&IrType::Struct(callee.to_string()), self.struct_layouts)?;
             let mut aggregate = "poison".to_string();
             for (index, (field_name, field_ty)) in layout.iter().enumerate() {
-                let arg = args
-                    .iter()
-                    .find(|arg| arg.name.as_deref() == Some(field_name))
-                    .ok_or_else(|| LlvmIrError {
-                        message: format!("missing constructor field `{field_name}` for `{callee}`"),
-                    })?;
+                let arg = if all_positional {
+                    args.get(index).ok_or_else(|| LlvmIrError {
+                        message: format!("missing positional arg {index} for `{callee}`"),
+                    })?
+                } else {
+                    args.iter()
+                        .find(|arg| arg.name.as_deref() == Some(field_name))
+                        .ok_or_else(|| LlvmIrError {
+                            message: format!("missing constructor field `{field_name}` for `{callee}`"),
+                        })?
+                };
                 let value = self.resolve_value(&arg.value, field_ty, out)?;
                 let field_value = match field_ty {
                     IrType::String => {
