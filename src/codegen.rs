@@ -1501,6 +1501,13 @@ impl<'a> FunctionEmitter<'a> {
         args: &[CallArg],
         span: Span,
     ) -> Result<(), CodegenError> {
+        // Handle string method calls before the general dispatch path.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if self.infer_expr_type(base) == Some(IrType::String) {
+                return self.emit_string_method_call(out, base, name, args, span);
+            }
+        }
+
         let (name, owned_args) = self.resolve_call_target(callee, args, span)?;
         let args = owned_args.as_slice();
 
@@ -3555,6 +3562,88 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
+    fn emit_string_method_call(
+        &mut self,
+        out: &mut String,
+        base: &Expr,
+        method: &str,
+        args: &[CallArg],
+        span: Span,
+    ) -> Result<(), CodegenError> {
+        match method {
+            "len" => {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message: "`String.len` takes no arguments".to_string(),
+                        span,
+                    });
+                }
+                // Push string (ptr, len) into rcx/rdx then call rune_rt_string_len -> rax (i64)
+                self.emit_string_arg(out, base, "rcx", "rdx", "String.len receiver")?;
+                out.push_str("    call rune_rt_string_len\n");
+                Ok(())
+            }
+            "upper" | "lower" | "strip" => {
+                if !args.is_empty() {
+                    return Err(CodegenError {
+                        message: format!("`String.{method}` takes no arguments"),
+                        span,
+                    });
+                }
+                self.emit_string_arg(out, base, "rcx", "rdx", &format!("String.{method} receiver"))?;
+                out.push_str(&format!("    call rune_rt_string_{method}\n"));
+                Ok(())
+            }
+            "contains" | "starts_with" | "ends_with" => {
+                let [CallArg::Positional(arg_expr)] = args else {
+                    return Err(CodegenError {
+                        message: format!("`String.{method}` expects 1 positional argument"),
+                        span,
+                    });
+                };
+                self.emit_string_arg(out, base, "rcx", "rdx", &format!("String.{method} receiver"))?;
+                self.emit_string_arg(out, arg_expr, "r8", "r9", &format!("String.{method} argument"))?;
+                out.push_str(&format!("    call rune_rt_string_{method}\n"));
+                out.push_str("    movzx eax, al\n");
+                Ok(())
+            }
+            "replace" => {
+                match args {
+                    [CallArg::Positional(from_expr), CallArg::Positional(to_expr)] => {
+                        // replace needs 3 string args (6 registers) but we only have 4.
+                        // Use stack-based approach: push args in reverse.
+                        self.emit_string_arg(out, to_expr, "rax", "rcx", "String.replace `to` argument")?;
+                        out.push_str("    push rcx\n");
+                        out.push_str("    push rax\n");
+                        self.emit_string_arg(out, from_expr, "rax", "rcx", "String.replace `from` argument")?;
+                        out.push_str("    push rcx\n");
+                        out.push_str("    push rax\n");
+                        self.emit_string_arg(out, base, "rax", "rcx", "String.replace receiver")?;
+                        out.push_str("    push rcx\n");
+                        out.push_str("    push rax\n");
+                        out.push_str("    pop rcx\n");
+                        out.push_str("    pop rdx\n");
+                        out.push_str("    pop r8\n");
+                        out.push_str("    pop r9\n");
+                        // to_ptr and to_len go on stack for the 5th and 6th args (Windows x64 ABI)
+                        // Stack is now: [to_ptr, to_len] (to_ptr at lower address)
+                        out.push_str("    call rune_rt_string_replace\n");
+                        out.push_str("    add rsp, 16\n");
+                        Ok(())
+                    }
+                    _ => Err(CodegenError {
+                        message: "`String.replace` expects 2 positional arguments".to_string(),
+                        span,
+                    }),
+                }
+            }
+            _ => Err(CodegenError {
+                message: format!("String has no method `{method}` in the current native backend"),
+                span,
+            }),
+        }
+    }
+
     fn resolve_call_target(
         &self,
         callee: &Expr,
@@ -4509,6 +4598,20 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        // String method calls that return String (upper, lower, replace, strip).
+        if let ExprKind::Call { callee, args } = &expr.kind
+            && let ExprKind::Field { base, name } = &callee.kind
+            && self.infer_expr_type(base) == Some(IrType::String)
+            && matches!(
+                name.as_str(),
+                "upper" | "lower" | "strip" | "replace"
+            )
+        {
+            self.emit_string_method_call(out, base, name, args, expr.span)?;
+            self.capture_runtime_string_result(out, ptr_reg, len_reg);
+            return Ok(());
+        }
+
         if let ExprKind::Call { callee, args } = &expr.kind
         {
             let (target_name, owned_args) = self.resolve_call_target(callee, args, expr.span)?;
@@ -4780,16 +4883,23 @@ impl<'a> FunctionEmitter<'a> {
                 }
             }
             ExprKind::Call { callee, .. } => {
-                let ExprKind::Identifier(name) = &callee.kind else {
-                    return None;
-                };
-                builtin_return_type(name)
-                    .or_else(|| {
-                        self.struct_layouts
-                            .contains_key(name)
-                            .then(|| IrType::Struct(name.clone()))
-                    })
-                    .or_else(|| self.function_returns.get(name).cloned())
+                match &callee.kind {
+                    ExprKind::Identifier(name) => builtin_return_type(name)
+                        .or_else(|| {
+                            self.struct_layouts
+                                .contains_key(name)
+                                .then(|| IrType::Struct(name.clone()))
+                        })
+                        .or_else(|| self.function_returns.get(name).cloned()),
+                    ExprKind::Field { base, name } => {
+                        if self.infer_expr_type(base) == Some(IrType::String) {
+                            builtin_return_type(&format!("rune_rt_string_{name}"))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
             }
             ExprKind::Await { .. } => None,
             ExprKind::Field { base, name } => {
@@ -5761,6 +5871,14 @@ fn type_ref_to_ir_type(ty: Option<&crate::parser::TypeRef>) -> IrType {
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
+        "rune_rt_string_len" => Some(IrType::I64),
+        "rune_rt_string_upper"
+        | "rune_rt_string_lower"
+        | "rune_rt_string_replace"
+        | "rune_rt_string_strip" => Some(IrType::String),
+        "rune_rt_string_contains"
+        | "rune_rt_string_starts_with"
+        | "rune_rt_string_ends_with" => Some(IrType::Bool),
         "input"
         | "__rune_builtin_arduino_read_line"
         | "__rune_builtin_serial_read_line"

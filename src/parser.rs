@@ -589,6 +589,7 @@ impl Parser {
             TokenKind::For => self.parse_for_stmt(),
             TokenKind::Let => Ok(Stmt::Let(self.parse_let_stmt()?)),
             TokenKind::Assert => self.parse_assert_stmt(),
+            TokenKind::Match => self.parse_match_stmt(),
             TokenKind::Identifier(_) if self.peek_is_ident_assignment() => {
                 self.parse_ident_assignment_stmt()
             }
@@ -727,6 +728,157 @@ impl Parser {
             },
             elif_blocks: Vec::new(),
             else_block: None,
+            span,
+        }))
+    }
+
+    fn parse_match_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let span = self.expect_simple(TokenKind::Match, "expected `match`")?;
+        let value = self.parse_expr()?;
+        self.expect_simple(TokenKind::Colon, "expected `:` after match expression")?;
+        self.expect_simple(TokenKind::Newline, "expected newline after match expression")?;
+        self.expect_simple(TokenKind::Indent, "expected indented match body")?;
+
+        // Each arm: case <pattern>: NEWLINE INDENT <stmts> DEDENT
+        struct Arm {
+            pattern: Option<Expr>, // None means wildcard
+            body: Block,
+        }
+
+        let mut arms: Vec<Arm> = Vec::new();
+
+        while self.check(&TokenKind::Case) {
+            self.advance(); // consume `case`
+            let pattern: Option<Expr> = match self.peek().kind.clone() {
+                TokenKind::Integer(ref raw) => {
+                    let s = raw.clone();
+                    let tok_span = self.peek().span;
+                    self.advance();
+                    Some(integer_expr(&s, tok_span))
+                }
+                TokenKind::Minus => {
+                    // Negative integer literal
+                    let tok_span = self.peek().span;
+                    self.advance(); // consume `-`
+                    match self.peek().kind.clone() {
+                        TokenKind::Integer(ref raw) => {
+                            let s = format!("-{}", raw);
+                            self.advance();
+                            Some(integer_expr(&s, tok_span))
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                message: "expected integer literal after `-` in case pattern"
+                                    .to_string(),
+                                span: self.peek().span,
+                            });
+                        }
+                    }
+                }
+                TokenKind::String(ref s) => {
+                    let s = s.clone();
+                    let tok_span = self.peek().span;
+                    self.advance();
+                    Some(string_expr(&s, tok_span))
+                }
+                TokenKind::Identifier(ref name) if name == "_" => {
+                    self.advance(); // consume `_`
+                    None // wildcard
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "expected integer literal, string literal, or `_` in case pattern"
+                            .to_string(),
+                        span: self.peek().span,
+                    });
+                }
+            };
+
+            self.expect_simple(TokenKind::Colon, "expected `:` after case pattern")?;
+            self.expect_simple(TokenKind::Newline, "expected newline after case pattern")?;
+            let body = self.parse_block()?;
+            self.skip_newlines();
+
+            arms.push(Arm { pattern, body });
+        }
+
+        self.expect_simple(TokenKind::Dedent, "expected end of match body")?;
+
+        if arms.is_empty() {
+            return Err(ParseError {
+                message: "match statement must have at least one case arm".to_string(),
+                span,
+            });
+        }
+
+        // Desugar to if/elif/else:
+        // First arm becomes `if value == pattern:`
+        // Middle arms become elif blocks
+        // Wildcard arm becomes else block
+        // Split arms into non-wildcard and optional wildcard (must be last)
+        let wildcard_pos = arms.iter().position(|a| a.pattern.is_none());
+        if let Some(pos) = wildcard_pos {
+            if pos != arms.len() - 1 {
+                return Err(ParseError {
+                    message: "wildcard `_` case must be the last arm in a match statement"
+                        .to_string(),
+                    span,
+                });
+            }
+        }
+
+        // Build equality condition: value == pattern
+        // We need to compare `value` against each pattern — clone value expr for each arm.
+        let mut arms_iter = arms.into_iter();
+        let first_arm = arms_iter.next().expect("at least one arm checked above");
+
+        let (first_condition, first_body, first_else) = if first_arm.pattern.is_none() {
+            // Only arm is wildcard — degenerate: just an unconditional else block.
+            // Represent as `if true:` with the body, no elif, no else.
+            // Actually, the cleanest desugar: emit if true: <body>
+            (
+                Expr {
+                    kind: ExprKind::Bool(true),
+                    span,
+                },
+                first_arm.body,
+                None::<Block>,
+            )
+        } else {
+            let cond = binary_expr(
+                value.clone(),
+                BinaryOp::EqualEqual,
+                first_arm.pattern.unwrap(),
+                span,
+            );
+            (cond, first_arm.body, None)
+        };
+
+        let mut elif_blocks: Vec<ElifBlock> = Vec::new();
+        let mut else_block: Option<Block> = first_else;
+
+        for arm in arms_iter {
+            match arm.pattern {
+                None => {
+                    // wildcard → else
+                    else_block = Some(arm.body);
+                }
+                Some(pat) => {
+                    let cond = binary_expr(value.clone(), BinaryOp::EqualEqual, pat, span);
+                    elif_blocks.push(ElifBlock {
+                        condition: cond,
+                        block: arm.body,
+                        span,
+                    });
+                }
+            }
+        }
+
+        Ok(Stmt::If(IfStmt {
+            condition: first_condition,
+            then_block: first_body,
+            elif_blocks,
+            else_block,
             span,
         }))
     }
@@ -1346,6 +1498,7 @@ impl Parser {
             TokenKind::Let
                 | TokenKind::Return
                 | TokenKind::If
+                | TokenKind::Match
                 | TokenKind::While
                 | TokenKind::Raise
                 | TokenKind::Panic

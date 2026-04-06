@@ -498,6 +498,139 @@ fn parses_bitwise_binary_ops() {
 }
 
 #[test]
+fn parses_match_with_int_cases() {
+    // match with two integer arms and no wildcard — desugars to if/elif with no else.
+    let src = concat!(
+        "def check(x: i64) -> i64:\n",
+        "    match x:\n",
+        "        case 1:\n",
+        "            return 10\n",
+        "        case 2:\n",
+        "            return 20\n",
+        "    return 0\n",
+    );
+
+    let program = parse_source(src).expect("program should parse");
+
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function item");
+    };
+
+    // First statement is the desugared if/elif
+    let Stmt::If(if_stmt) = &function.body.statements[0] else {
+        panic!("expected if statement from match desugar");
+    };
+
+    // First arm desugars to `if x == 1`
+    match &if_stmt.condition.kind {
+        ExprKind::Binary { op, right, .. } => {
+            assert_eq!(format!("{op:?}"), "EqualEqual");
+            assert_eq!(format!("{:?}", right.kind), r#"Integer("1")"#);
+        }
+        other => panic!("unexpected condition kind: {other:?}"),
+    }
+
+    // Second arm desugars to elif `x == 2`
+    assert_eq!(if_stmt.elif_blocks.len(), 1);
+    match &if_stmt.elif_blocks[0].condition.kind {
+        ExprKind::Binary { op, right, .. } => {
+            assert_eq!(format!("{op:?}"), "EqualEqual");
+            assert_eq!(format!("{:?}", right.kind), r#"Integer("2")"#);
+        }
+        other => panic!("unexpected elif condition: {other:?}"),
+    }
+
+    // No wildcard → no else block
+    assert!(if_stmt.else_block.is_none());
+}
+
+#[test]
+fn parses_match_with_string_cases() {
+    // match with string literal arms — desugars to if/elif.
+    let src = concat!(
+        "def greet(name: str) -> i64:\n",
+        "    match name:\n",
+        "        case \"alice\":\n",
+        "            return 1\n",
+        "        case \"bob\":\n",
+        "            return 2\n",
+        "    return 0\n",
+    );
+
+    let program = parse_source(src).expect("program should parse");
+
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function item");
+    };
+
+    let Stmt::If(if_stmt) = &function.body.statements[0] else {
+        panic!("expected if statement from match desugar");
+    };
+
+    match &if_stmt.condition.kind {
+        ExprKind::Binary { op, right, .. } => {
+            assert_eq!(format!("{op:?}"), "EqualEqual");
+            assert_eq!(format!("{:?}", right.kind), r#"String("alice")"#);
+        }
+        other => panic!("unexpected condition kind: {other:?}"),
+    }
+
+    assert_eq!(if_stmt.elif_blocks.len(), 1);
+    match &if_stmt.elif_blocks[0].condition.kind {
+        ExprKind::Binary { op, right, .. } => {
+            assert_eq!(format!("{op:?}"), "EqualEqual");
+            assert_eq!(format!("{:?}", right.kind), r#"String("bob")"#);
+        }
+        other => panic!("unexpected elif condition: {other:?}"),
+    }
+
+    assert!(if_stmt.else_block.is_none());
+}
+
+#[test]
+fn parses_match_with_wildcard_default() {
+    // match with a wildcard arm — desugars to if/elif/else.
+    let src = concat!(
+        "def label(x: i64) -> i64:\n",
+        "    match x:\n",
+        "        case 1:\n",
+        "            return 100\n",
+        "        case 2:\n",
+        "            return 200\n",
+        "        case _:\n",
+        "            return 0\n",
+        "    return -1\n",
+    );
+
+    let program = parse_source(src).expect("program should parse");
+
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function item");
+    };
+
+    let Stmt::If(if_stmt) = &function.body.statements[0] else {
+        panic!("expected if statement from match desugar");
+    };
+
+    // First arm: if x == 1
+    match &if_stmt.condition.kind {
+        ExprKind::Binary { op, right, .. } => {
+            assert_eq!(format!("{op:?}"), "EqualEqual");
+            assert_eq!(format!("{:?}", right.kind), r#"Integer("1")"#);
+        }
+        other => panic!("unexpected condition: {other:?}"),
+    }
+
+    // Second arm: elif x == 2
+    assert_eq!(if_stmt.elif_blocks.len(), 1);
+
+    // Wildcard arm becomes else block
+    assert!(if_stmt.else_block.is_some());
+    let else_block = if_stmt.else_block.as_ref().unwrap();
+    assert_eq!(else_block.statements.len(), 1);
+}
+
+#[test]
 fn parses_bitwise_not_unary() {
     let program = parse_source(
         "def f() -> unit:\n    let a = ~x\n",

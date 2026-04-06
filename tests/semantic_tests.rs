@@ -426,3 +426,102 @@ fn checks_field_assignment_on_struct() {
     )
     .expect("field assignment should check on struct");
 }
+
+#[test]
+fn checks_string_len_returns_i64() {
+    let checked = check_source(
+        "def f(s: String) -> i64:\n    return s.len()\n",
+    )
+    .expect("String.len() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::I64);
+}
+
+#[test]
+fn checks_string_upper_returns_string() {
+    let checked = check_source(
+        "def f(s: String) -> String:\n    return s.upper()\n",
+    )
+    .expect("String.upper() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::String);
+}
+
+#[test]
+fn checks_string_lower_returns_string() {
+    let checked = check_source(
+        "def f(s: String) -> String:\n    return s.lower()\n",
+    )
+    .expect("String.lower() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::String);
+}
+
+#[test]
+fn checks_string_strip_returns_string() {
+    let checked = check_source(
+        "def f(s: String) -> String:\n    return s.strip()\n",
+    )
+    .expect("String.strip() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::String);
+}
+
+#[test]
+fn checks_string_contains_returns_bool() {
+    let checked = check_source(
+        "def f(s: String) -> bool:\n    return s.contains(\"world\")\n",
+    )
+    .expect("String.contains() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::Bool);
+}
+
+#[test]
+fn checks_string_starts_with_returns_bool() {
+    let checked = check_source(
+        "def f(s: String) -> bool:\n    return s.starts_with(\"he\")\n",
+    )
+    .expect("String.starts_with() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::Bool);
+}
+
+#[test]
+fn checks_string_ends_with_returns_bool() {
+    let checked = check_source(
+        "def f(s: String) -> bool:\n    return s.ends_with(\"ld\")\n",
+    )
+    .expect("String.ends_with() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::Bool);
+}
+
+#[test]
+fn checks_string_replace_returns_string() {
+    let checked = check_source(
+        "def f(s: String) -> String:\n    return s.replace(\"hello\", \"hi\")\n",
+    )
+    .expect("String.replace() should type-check");
+    assert_eq!(checked.functions[0].return_type, Type::String);
+}
+
+#[test]
+fn rejects_string_method_wrong_arg_count() {
+    let error = check_source(
+        "def f(s: String) -> i64:\n    return s.len(\"extra\")\n",
+    )
+    .expect_err("String.len with args should fail");
+    assert!(error.message.contains("len"));
+}
+
+#[test]
+fn rejects_string_contains_wrong_arg_type() {
+    let error = check_source(
+        "def f(s: String) -> bool:\n    return s.contains(42)\n",
+    )
+    .expect_err("String.contains with i64 arg should fail");
+    assert!(error.message.contains("contains") || error.message.contains("String"));
+}
+
+#[test]
+fn rejects_unknown_string_method() {
+    let error = check_source(
+        "def f(s: String) -> i64:\n    return s.nonexistent()\n",
+    )
+    .expect_err("unknown String method should fail");
+    assert!(error.message.contains("nonexistent") || error.message.contains("method"));
+}

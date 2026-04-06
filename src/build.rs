@@ -1344,6 +1344,14 @@ fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> ArduinoUnoRuntimePro
         "rune_rt_system_board",
         "rune_rt_env_get_string",
         "rune_rt_env_arg",
+        "rune_rt_string_len",
+        "rune_rt_string_upper",
+        "rune_rt_string_lower",
+        "rune_rt_string_contains",
+        "rune_rt_string_starts_with",
+        "rune_rt_string_ends_with",
+        "rune_rt_string_replace",
+        "rune_rt_string_strip",
     ]
     .iter()
     .any(|name| uses_runtime_symbol(name));
@@ -2712,6 +2720,30 @@ function createHost(options = {{}}) {{
       rune_rt_string_to_i64(ptr, len) {{
         return runeStringToI64(ptr, len);
       }},
+      rune_rt_string_len(ptr, len) {{
+        return len;
+      }},
+      rune_rt_string_upper(ptr, len) {{
+        return allocString(readString(ptr, len).toUpperCase());
+      }},
+      rune_rt_string_lower(ptr, len) {{
+        return allocString(readString(ptr, len).toLowerCase());
+      }},
+      rune_rt_string_contains(ptr, len, needlePtr, needleLen) {{
+        return readString(ptr, len).includes(readString(needlePtr, needleLen)) ? 1 : 0;
+      }},
+      rune_rt_string_starts_with(ptr, len, prefixPtr, prefixLen) {{
+        return readString(ptr, len).startsWith(readString(prefixPtr, prefixLen)) ? 1 : 0;
+      }},
+      rune_rt_string_ends_with(ptr, len, suffixPtr, suffixLen) {{
+        return readString(ptr, len).endsWith(readString(suffixPtr, suffixLen)) ? 1 : 0;
+      }},
+      rune_rt_string_replace(ptr, len, fromPtr, fromLen, toPtr, toLen) {{
+        return allocString(readString(ptr, len).split(readString(fromPtr, fromLen)).join(readString(toPtr, toLen)));
+      }},
+      rune_rt_string_strip(ptr, len) {{
+        return allocString(readString(ptr, len).trim());
+      }},
       rune_rt_dynamic_to_string(tag, payload, extra) {{
         return runeDynamicToString(tag, payload, extra);
       }},
@@ -3400,6 +3432,112 @@ char* rune_rt_string_from_i64(int64_t value) {
 }
 char* rune_rt_string_from_bool(_Bool value) {
     return rune_rt_store_copied_string(value ? "true" : "false");
+}
+int64_t rune_rt_string_len(const char* ptr, int64_t len) {
+    (void)ptr;
+    return len;
+}
+char* rune_rt_string_upper(const char* ptr, int64_t len) {
+    char* out = (char*)malloc((size_t)len + 1);
+    if (!out) {
+        fprintf(stderr, "Rune runtime: failed to allocate string upper buffer\n");
+        exit(111);
+    }
+    for (int64_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)ptr[i];
+        out[i] = (char)(c >= 'a' && c <= 'z' ? c - 32 : c);
+    }
+    return rune_rt_store_heap_string(out, (size_t)len);
+}
+char* rune_rt_string_lower(const char* ptr, int64_t len) {
+    char* out = (char*)malloc((size_t)len + 1);
+    if (!out) {
+        fprintf(stderr, "Rune runtime: failed to allocate string lower buffer\n");
+        exit(111);
+    }
+    for (int64_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)ptr[i];
+        out[i] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    }
+    return rune_rt_store_heap_string(out, (size_t)len);
+}
+_Bool rune_rt_string_contains(const char* ptr, int64_t len, const char* needle_ptr, int64_t needle_len) {
+    if (needle_len == 0) return 1;
+    if (needle_len > len) return 0;
+    for (int64_t i = 0; i <= len - needle_len; i++) {
+        if (memcmp(ptr + i, needle_ptr, (size_t)needle_len) == 0) return 1;
+    }
+    return 0;
+}
+_Bool rune_rt_string_starts_with(const char* ptr, int64_t len, const char* prefix_ptr, int64_t prefix_len) {
+    if (prefix_len > len) return 0;
+    return memcmp(ptr, prefix_ptr, (size_t)prefix_len) == 0;
+}
+_Bool rune_rt_string_ends_with(const char* ptr, int64_t len, const char* suffix_ptr, int64_t suffix_len) {
+    if (suffix_len > len) return 0;
+    return memcmp(ptr + len - suffix_len, suffix_ptr, (size_t)suffix_len) == 0;
+}
+char* rune_rt_string_replace(const char* ptr, int64_t len, const char* from_ptr, int64_t from_len, const char* to_ptr, int64_t to_len) {
+    if (from_len == 0) {
+        return rune_rt_store_heap_string((char*)memcpy(malloc((size_t)len + 1), ptr, (size_t)len), (size_t)len);
+    }
+    size_t capacity = (size_t)len + 64;
+    char* out = (char*)malloc(capacity);
+    if (!out) {
+        fprintf(stderr, "Rune runtime: failed to allocate string replace buffer\n");
+        exit(111);
+    }
+    size_t out_len = 0;
+    int64_t i = 0;
+    while (i <= len - from_len) {
+        if (memcmp(ptr + i, from_ptr, (size_t)from_len) == 0) {
+            if (out_len + (size_t)to_len + 1 > capacity) {
+                capacity = capacity * 2 + (size_t)to_len;
+                char* new_out = (char*)realloc(out, capacity);
+                if (!new_out) { free(out); fprintf(stderr, "Rune runtime: realloc failed in replace\n"); exit(111); }
+                out = new_out;
+            }
+            memcpy(out + out_len, to_ptr, (size_t)to_len);
+            out_len += (size_t)to_len;
+            i += from_len;
+        } else {
+            if (out_len + 2 > capacity) {
+                capacity = capacity * 2;
+                char* new_out = (char*)realloc(out, capacity);
+                if (!new_out) { free(out); fprintf(stderr, "Rune runtime: realloc failed in replace\n"); exit(111); }
+                out = new_out;
+            }
+            out[out_len++] = ptr[i++];
+        }
+    }
+    while (i < len) {
+        if (out_len + 2 > capacity) {
+            capacity = capacity * 2;
+            char* new_out = (char*)realloc(out, capacity);
+            if (!new_out) { free(out); fprintf(stderr, "Rune runtime: realloc failed in replace\n"); exit(111); }
+            out = new_out;
+        }
+        out[out_len++] = ptr[i++];
+    }
+    return rune_rt_store_heap_string(out, out_len);
+}
+char* rune_rt_string_strip(const char* ptr, int64_t len) {
+    int64_t start = 0;
+    int64_t end = len;
+    while (start < end && ((unsigned char)ptr[start] == ' ' || (unsigned char)ptr[start] == '\t' || (unsigned char)ptr[start] == '\n' || (unsigned char)ptr[start] == '\r')) {
+        start++;
+    }
+    while (end > start && ((unsigned char)ptr[end - 1] == ' ' || (unsigned char)ptr[end - 1] == '\t' || (unsigned char)ptr[end - 1] == '\n' || (unsigned char)ptr[end - 1] == '\r')) {
+        end--;
+    }
+    size_t new_len = (size_t)(end - start);
+    char* out = (char*)malloc(new_len + 1);
+    if (!out) {
+        fprintf(stderr, "Rune runtime: failed to allocate string strip buffer\n");
+        exit(111);
+    }
+    memcpy(out, ptr + start, new_len);
+    return rune_rt_store_heap_string(out, new_len);
 }
 char* rune_rt_system_platform(void) {
 #if defined(_WIN32)
@@ -5349,6 +5487,92 @@ pub extern "C" fn rune_rt_string_from_i64(value: i64) -> *const u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn rune_rt_string_from_bool(value: bool) -> *const u8 {
     rune_rt_store_string(value.to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_len(_ptr: *const u8, len: i64) -> i64 {
+    len
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_upper(ptr: *const u8, len: i64) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    rune_rt_store_string(text.to_uppercase())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_lower(ptr: *const u8, len: i64) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    rune_rt_store_string(text.to_lowercase())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_contains(
+    ptr: *const u8,
+    len: i64,
+    needle_ptr: *const u8,
+    needle_len: i64,
+) -> bool {
+    let haystack = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let needle = unsafe { std::slice::from_raw_parts(needle_ptr, needle_len as usize) };
+    let h = std::str::from_utf8(haystack).expect("Rune string must be valid UTF-8");
+    let n = std::str::from_utf8(needle).expect("Rune needle must be valid UTF-8");
+    h.contains(n)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_starts_with(
+    ptr: *const u8,
+    len: i64,
+    prefix_ptr: *const u8,
+    prefix_len: i64,
+) -> bool {
+    let s = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let p = unsafe { std::slice::from_raw_parts(prefix_ptr, prefix_len as usize) };
+    let s = std::str::from_utf8(s).expect("Rune string must be valid UTF-8");
+    let p = std::str::from_utf8(p).expect("Rune prefix must be valid UTF-8");
+    s.starts_with(p)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_ends_with(
+    ptr: *const u8,
+    len: i64,
+    suffix_ptr: *const u8,
+    suffix_len: i64,
+) -> bool {
+    let s = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let sf = unsafe { std::slice::from_raw_parts(suffix_ptr, suffix_len as usize) };
+    let s = std::str::from_utf8(s).expect("Rune string must be valid UTF-8");
+    let sf = std::str::from_utf8(sf).expect("Rune suffix must be valid UTF-8");
+    s.ends_with(sf)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_replace(
+    ptr: *const u8,
+    len: i64,
+    from_ptr: *const u8,
+    from_len: i64,
+    to_ptr: *const u8,
+    to_len: i64,
+) -> *const u8 {
+    let s = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let from = unsafe { std::slice::from_raw_parts(from_ptr, from_len as usize) };
+    let to = unsafe { std::slice::from_raw_parts(to_ptr, to_len as usize) };
+    let s = std::str::from_utf8(s).expect("Rune string must be valid UTF-8");
+    let from = std::str::from_utf8(from).expect("Rune replace-from must be valid UTF-8");
+    let to = std::str::from_utf8(to).expect("Rune replace-to must be valid UTF-8");
+    rune_rt_store_string(s.replace(from, to))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_strip(ptr: *const u8, len: i64) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    rune_rt_store_string(text.trim().to_string())
 }
 
 #[unsafe(no_mangle)]
