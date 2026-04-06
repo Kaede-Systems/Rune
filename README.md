@@ -35,8 +35,8 @@ Rune is aiming at:
 - cross-target native builds
 - WASM and WASI support
 - freestanding embedded object/static-library output for supported LLVM targets
-- packaged Arduino Uno AVR builds for the current embedded slice using the packaged Arduino AVR core and AVR GCC/G++
-- common `gpio` stdlib surface for embedded pin/timing access on the current Uno backend
+- packaged Arduino AVR builds for the current embedded slice (Uno, Mega 2560, Nano) using the packaged Arduino AVR core and AVR GCC/G++
+- common `gpio` stdlib surface for embedded pin/timing access on all AVR targets
 
 ## What Works Now
 
@@ -179,16 +179,29 @@ cargo run -- build calculator.rn --target wasm32-wasip1 -o calculator_wasi.wasm
 cargo run -- run-wasm calculator_wasi.wasm --host wasmtime
 ```
 
-Build Arduino Uno firmware (`.hex`) through the packaged Arduino AVR core and AVR toolchain:
+Build Arduino firmware (`.hex`) through the packaged Arduino AVR core and AVR toolchain:
 
 ```powershell
+# Arduino Uno
 cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-uno -o hello_arduino.hex
+
+# Arduino Mega 2560
+cargo run -- build hello_arduino.rn --target avr-atmega2560-arduino-mega -o hello_arduino.hex
+
+# Arduino Nano
+cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-nano -o hello_arduino.hex
 ```
 
 Build and flash to a serial port:
 
 ```powershell
 cargo run -- build hello_arduino.rn --target avr-atmega328p-arduino-uno --flash --port COM5 -o hello_arduino.hex
+```
+
+Build with size optimization (minimizes binary size):
+
+```powershell
+cargo run -- build calculator.rn --size -o calculator.exe
 ```
 
 Arduino Uno builds now also print an Arduino-style usage summary after the ELF is linked:
@@ -227,9 +240,10 @@ rune check file.rn
 rune emit-ir file.rn
 rune emit-asm file.rn
 rune emit-llvm-ir file.rn
-rune emit-avr-precode file.rn
+rune emit-avr-precode file.rn [--target <avr-triple>]
 rune emit-c-header file.rn -o file.h
 rune build file.rn
+rune build file.rn --size                              # minimize output size (Oz)
 rune build file.rn --object --target thumbv6m-none-eabi -o firmware.o
 rune build file.rn --target <triple> -o output
 rune build file.rn --lib -o library
@@ -252,7 +266,7 @@ For embedded targets, Rune currently supports freestanding object/static-library
 - `thumbv7em-none-eabihf`
 - `riscv32-unknown-elf`
 
-Arduino Uno is implemented through the packaged Arduino AVR core plus AVR GCC/G++/objcopy/avrdude toolchain path. Xtensa ESP32 is not claimed as implemented yet.
+Three Arduino AVR boards are implemented: Uno (`avr-atmega328p-arduino-uno`), Mega 2560 (`avr-atmega2560-arduino-mega`), and Nano (`avr-atmega328p-arduino-nano`). All use the packaged Arduino AVR core plus AVR GCC/G++/objcopy/avrdude. Xtensa ESP32 is not claimed as implemented yet.
 Rune now also prunes unreachable functions, methods, and structs from the Uno program slice before precode/CBE/toolchain compilation, so unused Rune items do not survive into the firmware build path.
 
 When the packaged LLVM C backend is available, the Uno path now goes through:
@@ -362,18 +376,18 @@ On pushes to the `release` branch, CI now:
 
 Versioning details are documented in [Docs/VERSIONING.md](Docs/VERSIONING.md).
 
-## Arduino Uno Notes
+## Arduino AVR Notes
 
-The current Arduino Uno slice now supports:
+The current Arduino AVR slice supports three boards: Uno, Mega 2560, and Nano. All boards share the same feature set:
 
-- `main()` firmware entry
-- or Arduino-style `setup()` / `loop()` entrypoints
+- `main()` firmware entry, or Arduino-style `setup()` / `loop()` entrypoints
 - packaged `arduino` stdlib resolution from `stdlib/arduino.rn`
 - serial I/O through the normal Rune surface: `print`, `println`, and `input`
-- lower-level serial control through `uart_*` helpers when byte-oriented hardware control is needed
+- lower-level serial control through `uart_*` helpers
 - pin/timing helpers like `pin_mode`, `digital_write`, `analog_write`, `delay_ms`, `millis`, and board constants
-- the shared `gpio` stdlib layer with `pin`, `pwm`, and `analog` aliases for simple cross-target pin code
+- the shared `gpio` stdlib layer with `pin`, `pwm`, and `analog` aliases
 - real `.hex` generation and flashing with packaged AVR tools
+- post-build size report with the correct flash/SRAM totals for the selected board
 
 Example:
 
@@ -386,7 +400,7 @@ from arduino import (
 
 def setup() -> unit:
     pin_mode(led_builtin(), mode_output())
-    println("Rune on Uno!")
+    println("Rune on AVR!")
 
 def loop() -> unit:
     return
