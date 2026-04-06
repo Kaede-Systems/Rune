@@ -1,0 +1,27 @@
+def main() -> i32:
+    let x: i64 = 10
+    x += 5
+    x -= 2
+    x *= 3
+    println(x)
+
+    let flags: i64 = 0b1111
+    flags &= 0b1010
+    println(flags)
+
+    let mask: i64 = 0x0F
+    mask |= 0xF0
+    println(mask)
+
+    let bits: i64 = 0xFF
+    bits ^= 0x0F
+    println(bits)
+
+    let val: i64 = 4
+    val <<= 2
+    println(val)
+
+    val >>= 1
+    println(val)
+
+    return 0

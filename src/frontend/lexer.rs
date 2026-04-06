@@ -83,6 +83,8 @@ pub enum TokenKind {
     AmpersandEqual,
     PipeEqual,
     CaretEqual,
+    ShiftLeftEqual,
+    ShiftRightEqual,
     Arrow,
     Eof,
 }
@@ -456,7 +458,12 @@ impl<'a> Lexer<'a> {
                         self.push(TokenKind::GreaterEqual, column);
                     } else if let Some((_, '>')) = chars.peek().copied() {
                         chars.next();
-                        self.push(TokenKind::ShiftRight, column);
+                        if let Some((_, '=')) = chars.peek().copied() {
+                            chars.next();
+                            self.push(TokenKind::ShiftRightEqual, column);
+                        } else {
+                            self.push(TokenKind::ShiftRight, column);
+                        }
                     } else {
                         self.push(TokenKind::Greater, column);
                     }
@@ -467,7 +474,12 @@ impl<'a> Lexer<'a> {
                         self.push(TokenKind::LessEqual, column);
                     } else if let Some((_, '<')) = chars.peek().copied() {
                         chars.next();
-                        self.push(TokenKind::ShiftLeft, column);
+                        if let Some((_, '=')) = chars.peek().copied() {
+                            chars.next();
+                            self.push(TokenKind::ShiftLeftEqual, column);
+                        } else {
+                            self.push(TokenKind::ShiftLeft, column);
+                        }
                     } else {
                         self.push(TokenKind::Less, column);
                     }

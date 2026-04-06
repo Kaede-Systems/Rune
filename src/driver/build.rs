@@ -6,21 +6,21 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::avr_cbe_opt::{
+use crate::backend::llvm::{
     rewrite_arduino_uno_cbe_llvm_ir, rewrite_arduino_uno_cbe_source, ArduinoUnoEntrypointKind,
 };
-use crate::codegen::CodegenError;
-use crate::llvm_backend::{LlvmOptLevel, emit_object_file, emit_object_file_from_ir};
+use crate::backend::native::CodegenError;
+use crate::backend::llvm::{LlvmOptLevel, emit_object_file, emit_object_file_from_ir};
 
 /// Re-exported for callers that only depend on `build`.
-pub use crate::llvm_backend::LlvmOptLevel as OptLevel;
+pub use crate::backend::llvm::LlvmOptLevel as OptLevel;
 use crate::ir::{lower_program, IrType};
-use crate::llvm_ir::emit_llvm_ir;
-use crate::module_loader::load_program_from_path;
-use crate::optimize::{optimize_program, prune_program_for_executable};
-use crate::parser::{BinaryOp, CallArg, Expr, ExprKind, Item, Program, Stmt, TypeRef};
-use crate::semantic::check_program;
-use crate::toolchain::{
+use crate::backend::llvm::emit_llvm_ir;
+use crate::stdlib::load_program_from_path;
+use crate::ir::{optimize_program, prune_program_for_executable};
+use crate::frontend::parser::{BinaryOp, CallArg, Expr, ExprKind, Item, Program, Stmt, TypeRef};
+use crate::frontend::semantic::check_program;
+use crate::driver::toolchain::{
     find_arduino_avr_avrdude_conf, find_arduino_avrdude, find_arduino_avr_core_root,
     find_arduino_avr_gcc, find_arduino_avr_gpp, find_arduino_avr_objcopy, find_arduino_avr_size,
     find_arduino_avr_runtime_header, find_arduino_avr_servo_library_root,

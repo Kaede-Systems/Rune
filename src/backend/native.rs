@@ -2,9 +2,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use crate::ir::{IrType, lower_program};
-use crate::lexer::Span;
-use crate::optimize::optimize_program;
-use crate::parser::{
+use crate::frontend::lexer::Span;
+use crate::ir::optimize_program;
+use crate::frontend::parser::{
     AssignStmt, BinaryOp, Block, CallArg, Expr, ExprKind, FieldAssignStmt, Function, Item,
     LetStmt, Program, Stmt, StructDecl, UnaryOp, parse_source,
 };
@@ -32,6 +32,21 @@ impl fmt::Display for CodegenError {
 }
 
 impl std::error::Error for CodegenError {}
+
+/// Parse a Rune integer literal string (decimal, 0x hex, 0o octal, 0b binary,
+/// with optional `_` separators) and return its i64 value.
+pub fn parse_integer_literal(s: &str) -> i64 {
+    let clean = s.replace('_', "");
+    if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16).unwrap_or(0)
+    } else if let Some(oct) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
+        i64::from_str_radix(oct, 8).unwrap_or(0)
+    } else if let Some(bin) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
+        i64::from_str_radix(bin, 2).unwrap_or(0)
+    } else {
+        clean.parse::<i64>().unwrap_or(0)
+    }
+}
 
 pub fn emit_asm_source(source: &str) -> Result<String, CodegenError> {
     let mut program = parse_source(source).map_err(|error| CodegenError {
@@ -1155,7 +1170,8 @@ impl<'a> FunctionEmitter<'a> {
                 }
             }
             ExprKind::Integer(value) => {
-                out.push_str(&format!("    mov rax, {value}\n"));
+                let n = parse_integer_literal(value);
+                out.push_str(&format!("    mov rax, {n}\n"));
                 Ok(())
             }
             ExprKind::String(_) => Err(CodegenError {
@@ -4771,7 +4787,7 @@ impl<'a> FunctionEmitter<'a> {
                     .project_constructor_field_expr(expr)
                     .and_then(|projected| self.simple_operand(projected)),
             },
-            ExprKind::Integer(value) => Some(SimpleOperand::Immediate(value.clone())),
+            ExprKind::Integer(value) => Some(SimpleOperand::Immediate(parse_integer_literal(value).to_string())),
             ExprKind::Bool(value) => Some(SimpleOperand::Immediate(if *value {
                 "1".to_string()
             } else {
@@ -4785,7 +4801,8 @@ impl<'a> FunctionEmitter<'a> {
         match &expr.kind {
             ExprKind::Identifier(name) => self.offsets.get(name).map(LocalBinding::ir_type),
             ExprKind::Integer(value) => {
-                if value.parse::<i32>().is_ok() {
+                let n = parse_integer_literal(value);
+                if n >= i32::MIN as i64 && n <= i32::MAX as i64 {
                     Some(IrType::I32)
                 } else {
                     Some(IrType::I64)
