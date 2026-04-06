@@ -461,7 +461,7 @@ impl<'a> Generator<'a> {
         registered_name: &str,
     ) -> Result<(), CodegenError> {
         let mut locals = BTreeSet::new();
-        collect_locals(&function.body, &mut locals)?;
+        collect_locals(&function.body, &mut locals);
         let local_types = self
             .function_locals
             .get(registered_name)
@@ -704,36 +704,30 @@ fn method_owner_from_registered_name(name: &str) -> Option<String> {
     (!owner.is_empty()).then(|| owner.to_string())
 }
 
-fn collect_locals(block: &Block, locals: &mut BTreeSet<String>) -> Result<(), CodegenError> {
+fn collect_locals(block: &Block, locals: &mut BTreeSet<String>) {
     for stmt in &block.statements {
         match stmt {
-            Stmt::Block(stmt) => collect_locals(&stmt.block, locals)?,
+            Stmt::Block(stmt) => collect_locals(&stmt.block, locals),
+            // Semantic analysis already rejects true duplicates (same name, same flat scope).
+            // Here we just accumulate — the same name in different branches (if/else) gets a
+            // single shared stack slot, which is correct since the branches are exclusive.
             Stmt::Let(let_stmt) => {
-                if !locals.insert(let_stmt.name.clone()) {
-                    return Err(CodegenError {
-                        message: format!(
-                            "duplicate local `{}` is not supported by the current native backend",
-                            let_stmt.name
-                        ),
-                        span: let_stmt.span,
-                    });
-                }
+                locals.insert(let_stmt.name.clone());
             }
             Stmt::If(if_stmt) => {
-                collect_locals(&if_stmt.then_block, locals)?;
+                collect_locals(&if_stmt.then_block, locals);
                 for elif in &if_stmt.elif_blocks {
-                    collect_locals(&elif.block, locals)?;
+                    collect_locals(&elif.block, locals);
                 }
                 if let Some(block) = &if_stmt.else_block {
-                    collect_locals(block, locals)?;
+                    collect_locals(block, locals);
                 }
             }
-            Stmt::While(while_stmt) => collect_locals(&while_stmt.body, locals)?,
+            Stmt::While(while_stmt) => collect_locals(&while_stmt.body, locals),
             Stmt::Break(_) | Stmt::Continue(_) => {}
             _ => {}
         }
     }
-    Ok(())
 }
 
 struct FunctionEmitter<'a> {
