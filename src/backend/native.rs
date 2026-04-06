@@ -3647,6 +3647,39 @@ impl<'a> FunctionEmitter<'a> {
                     }),
                 }
             }
+            "find" => {
+                let [CallArg::Positional(needle_expr)] = args else {
+                    return Err(CodegenError {
+                        message: "`String.find` expects 1 positional argument".to_string(),
+                        span,
+                    });
+                };
+                self.emit_string_arg(out, base, "rcx", "rdx", "String.find receiver")?;
+                self.emit_string_arg(out, needle_expr, "r8", "r9", "String.find argument")?;
+                out.push_str("    call rune_rt_string_find\n");
+                Ok(())
+            }
+            "slice" => {
+                match args {
+                    [CallArg::Positional(start_expr), CallArg::Positional(end_expr)] => {
+                        // slice needs receiver string (2 regs) + start i64 + end i64.
+                        // Save start and end on stack first, then emit receiver safely.
+                        self.emit_expr(out, end_expr)?;
+                        out.push_str("    push rax\n");
+                        self.emit_expr(out, start_expr)?;
+                        out.push_str("    push rax\n");
+                        self.emit_string_arg(out, base, "rcx", "rdx", "String.slice receiver")?;
+                        out.push_str("    pop r8\n");
+                        out.push_str("    pop r9\n");
+                        out.push_str("    call rune_rt_string_slice\n");
+                        Ok(())
+                    }
+                    _ => Err(CodegenError {
+                        message: "`String.slice` expects 2 positional arguments".to_string(),
+                        span,
+                    }),
+                }
+            }
             _ => Err(CodegenError {
                 message: format!("String has no method `{method}` in the current native backend"),
                 span,
@@ -4608,13 +4641,13 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
-        // String method calls that return String (upper, lower, replace, strip).
+        // String method calls that return String (upper, lower, replace, strip, slice).
         if let ExprKind::Call { callee, args } = &expr.kind
             && let ExprKind::Field { base, name } = &callee.kind
             && self.infer_expr_type(base) == Some(IrType::String)
             && matches!(
                 name.as_str(),
-                "upper" | "lower" | "strip" | "replace"
+                "upper" | "lower" | "strip" | "replace" | "slice"
             )
         {
             self.emit_string_method_call(out, base, name, args, expr.span)?;
@@ -5916,11 +5949,12 @@ fn type_ref_to_ir_type(ty: Option<&crate::parser::TypeRef>) -> IrType {
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
-        "rune_rt_string_len" => Some(IrType::I64),
+        "rune_rt_string_len" | "rune_rt_string_find" => Some(IrType::I64),
         "rune_rt_string_upper"
         | "rune_rt_string_lower"
         | "rune_rt_string_replace"
-        | "rune_rt_string_strip" => Some(IrType::String),
+        | "rune_rt_string_strip"
+        | "rune_rt_string_slice" => Some(IrType::String),
         "rune_rt_string_contains"
         | "rune_rt_string_starts_with"
         | "rune_rt_string_ends_with" => Some(IrType::Bool),

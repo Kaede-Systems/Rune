@@ -1071,11 +1071,12 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
-        "rune_rt_string_len" => Some(IrType::I64),
+        "rune_rt_string_len" | "rune_rt_string_find" => Some(IrType::I64),
         "rune_rt_string_upper"
         | "rune_rt_string_lower"
         | "rune_rt_string_replace"
-        | "rune_rt_string_strip" => Some(IrType::String),
+        | "rune_rt_string_strip"
+        | "rune_rt_string_slice" => Some(IrType::String),
         "rune_rt_string_contains"
         | "rune_rt_string_starts_with"
         | "rune_rt_string_ends_with" => Some(IrType::Bool),

@@ -525,3 +525,55 @@ fn rejects_unknown_string_method() {
     .expect_err("unknown String method should fail");
     assert!(error.message.contains("nonexistent") || error.message.contains("method"));
 }
+
+#[test]
+fn accepts_string_find_returns_i64() {
+    check_source(
+        "def f(s: String) -> i64:\n    return s.find(\"lo\")\n",
+    )
+    .expect("String.find should type-check and return i64");
+}
+
+#[test]
+fn rejects_string_find_wrong_arg_count() {
+    let error = check_source(
+        "def f(s: String) -> i64:\n    return s.find(\"a\", \"b\")\n",
+    )
+    .expect_err("String.find with 2 args should fail");
+    assert!(error.message.contains("find"));
+}
+
+#[test]
+fn rejects_string_find_non_string_arg() {
+    let error = check_source(
+        "def f(s: String) -> i64:\n    return s.find(42)\n",
+    )
+    .expect_err("String.find with i64 arg should fail");
+    assert!(error.message.contains("find") || error.message.contains("String"));
+}
+
+#[test]
+fn accepts_string_slice_returns_string() {
+    check_source(
+        "def f(s: String) -> String:\n    let start: i64 = 0\n    let end: i64 = 3\n    return s.slice(start, end)\n",
+    )
+    .expect("String.slice should type-check and return String");
+}
+
+#[test]
+fn rejects_string_slice_wrong_arg_count() {
+    let error = check_source(
+        "def f(s: String) -> String:\n    return s.slice(0)\n",
+    )
+    .expect_err("String.slice with 1 arg should fail");
+    assert!(error.message.contains("slice"));
+}
+
+#[test]
+fn rejects_string_slice_non_i64_arg() {
+    let error = check_source(
+        "def f(s: String) -> String:\n    return s.slice(\"a\", \"b\")\n",
+    )
+    .expect_err("String.slice with string args should fail");
+    assert!(error.message.contains("slice") || error.message.contains("i64"));
+}

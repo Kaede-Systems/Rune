@@ -1363,6 +1363,8 @@ fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> AvrRuntimeProfile {
         "rune_rt_string_ends_with",
         "rune_rt_string_replace",
         "rune_rt_string_strip",
+        "rune_rt_string_find",
+        "rune_rt_string_slice",
     ]
     .iter()
     .any(|name| uses_runtime_symbol(name));
@@ -2794,6 +2796,12 @@ function createHost(options = {{}}) {{
       rune_rt_string_strip(ptr, len) {{
         return allocString(readString(ptr, len).trim());
       }},
+      rune_rt_string_find(ptr, len, needlePtr, needleLen) {{
+        return BigInt(readString(ptr, len).indexOf(readString(needlePtr, needleLen)));
+      }},
+      rune_rt_string_slice(ptr, len, start, end) {{
+        return allocString(readString(ptr, len).slice(Number(start), Number(end)));
+      }},
       rune_rt_dynamic_to_string(tag, payload, extra) {{
         return runeDynamicToString(tag, payload, extra);
       }},
@@ -3584,6 +3592,27 @@ char* rune_rt_string_strip(const char* ptr, int64_t len) {
     char* out = (char*)malloc(new_len + 1);
     if (!out) {
         fprintf(stderr, "Rune runtime: failed to allocate string strip buffer\n");
+        exit(111);
+    }
+    memcpy(out, ptr + start, new_len);
+    return rune_rt_store_heap_string(out, new_len);
+}
+int64_t rune_rt_string_find(const char* ptr, int64_t len, const char* needle_ptr, int64_t needle_len) {
+    if (needle_len == 0) return 0;
+    if (needle_len > len) return -1;
+    for (int64_t i = 0; i <= len - needle_len; i++) {
+        if (memcmp(ptr + i, needle_ptr, (size_t)needle_len) == 0) return i;
+    }
+    return -1;
+}
+char* rune_rt_string_slice(const char* ptr, int64_t len, int64_t start, int64_t end) {
+    if (start < 0) start = 0;
+    if (end > len) end = len;
+    if (start > end) start = end;
+    size_t new_len = (size_t)(end - start);
+    char* out = (char*)malloc(new_len + 1);
+    if (!out) {
+        fprintf(stderr, "Rune runtime: failed to allocate string slice buffer\n");
         exit(111);
     }
     memcpy(out, ptr + start, new_len);
@@ -5623,6 +5652,38 @@ pub extern "C" fn rune_rt_string_strip(ptr: *const u8, len: i64) -> *const u8 {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
     rune_rt_store_string(text.trim().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_find(
+    ptr: *const u8,
+    len: i64,
+    needle_ptr: *const u8,
+    needle_len: i64,
+) -> i64 {
+    let haystack = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let needle = unsafe { std::slice::from_raw_parts(needle_ptr, needle_len as usize) };
+    let h = std::str::from_utf8(haystack).expect("Rune string must be valid UTF-8");
+    let n = std::str::from_utf8(needle).expect("Rune needle must be valid UTF-8");
+    match h.find(n) {
+        Some(idx) => idx as i64,
+        None => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_slice(
+    ptr: *const u8,
+    len: i64,
+    start: i64,
+    end: i64,
+) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    let start = (start.max(0) as usize).min(text.len());
+    let end = (end.max(0) as usize).min(text.len());
+    let start = start.min(end);
+    rune_rt_store_string(text[start..end].to_string())
 }
 
 #[unsafe(no_mangle)]

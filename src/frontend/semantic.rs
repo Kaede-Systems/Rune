@@ -1507,6 +1507,48 @@ impl<'a> Analyzer<'a> {
                 self.expect_type(&to_ty, &Type::String, to_expr.span, "String.replace `to` argument")?;
                 Ok(Type::String)
             }
+            "find" => {
+                if args.len() != 1 {
+                    return Err(SemanticError {
+                        message: "`String.find` expects 1 argument".to_string(),
+                        span,
+                    });
+                }
+                let CallArg::Positional(arg_expr) = &args[0] else {
+                    return Err(SemanticError {
+                        message: "`String.find` does not accept keyword arguments".to_string(),
+                        span,
+                    });
+                };
+                let arg_ty = self.check_expr(arg_expr, scope, in_async)?;
+                self.expect_type(&arg_ty, &Type::String, arg_expr.span, "String.find argument")?;
+                Ok(Type::I64)
+            }
+            "slice" => {
+                if args.len() != 2 {
+                    return Err(SemanticError {
+                        message: "`String.slice` expects 2 arguments".to_string(),
+                        span,
+                    });
+                }
+                let CallArg::Positional(start_expr) = &args[0] else {
+                    return Err(SemanticError {
+                        message: "`String.slice` does not accept keyword arguments".to_string(),
+                        span,
+                    });
+                };
+                let CallArg::Positional(end_expr) = &args[1] else {
+                    return Err(SemanticError {
+                        message: "`String.slice` does not accept keyword arguments".to_string(),
+                        span,
+                    });
+                };
+                let start_ty = self.check_expr(start_expr, scope, in_async)?;
+                self.expect_type(&start_ty, &Type::I64, start_expr.span, "String.slice `start` argument")?;
+                let end_ty = self.check_expr(end_expr, scope, in_async)?;
+                self.expect_type(&end_ty, &Type::I64, end_expr.span, "String.slice `end` argument")?;
+                Ok(Type::String)
+            }
             _ => Err(SemanticError {
                 message: format!("String has no method `{method}`"),
                 span: method_span,
