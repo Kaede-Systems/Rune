@@ -1684,6 +1684,115 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "abs" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let x = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_abs_i64(i64)\n".into());
+                out.push_str(&format!("  {reg} = call i64 @rune_rt_abs_i64(i64 {x})\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "min" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let a = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let b = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_min_i64(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_min_i64(i64 {a}, i64 {b})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "max" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let a = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let b = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_max_i64(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_max_i64(i64 {a}, i64 {b})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "pow" => {
+                self.expect_plain_arity(callee, args, 2)?;
+                let base = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let exp = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_pow_i64(i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_pow_i64(i64 {base}, i64 {exp})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "clamp" => {
+                self.expect_plain_arity(callee, args, 3)?;
+                let x = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let lo = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                let hi = self.resolve_value(&args[2].value, &IrType::I64, out)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_clamp_i64(i64, i64, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_clamp_i64(i64 {x}, i64 {lo}, i64 {hi})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "chr" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let n = self.resolve_value(&args[0].value, &IrType::I64, out)?;
+                let ptr_reg = self.next_reg();
+                let len_reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_chr(i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                out.push_str(&format!("  {ptr_reg} = call ptr @rune_rt_chr(i64 {n})\n"));
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(
+                        dst.clone(),
+                        format!("ptr {ptr_reg}, i64 {len_reg}"),
+                    );
+                }
+                return Ok(());
+            }
+            "ord" => {
+                self.expect_plain_arity(callee, args, 1)?;
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (s_ptr, s_len) = split_string_value(&rendered)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_ord(ptr, i64)\n".into());
+                out.push_str(&format!(
+                    "  {reg} = call i64 @rune_rt_ord({s_ptr}, {s_len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_system_pid" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
@@ -4564,7 +4673,14 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_arduino_micros"
         | "__rune_builtin_arduino_random_i64"
         | "__rune_builtin_arduino_random_range"
-        | "__rune_builtin_sum_range" => Some(IrType::I64),
+        | "__rune_builtin_sum_range"
+        | "abs"
+        | "min"
+        | "max"
+        | "pow"
+        | "clamp"
+        | "ord" => Some(IrType::I64),
+        "chr" => Some(IrType::String),
         "__rune_builtin_json_get" | "__rune_builtin_json_index" => Some(IrType::Json),
         "__rune_builtin_time_now_unix"
         | "__rune_builtin_time_monotonic_ms"

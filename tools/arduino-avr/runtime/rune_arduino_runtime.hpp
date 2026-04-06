@@ -411,6 +411,25 @@ extern "C" int64_t rune_rt_sum_range(int64_t start, int64_t stop, int64_t step) 
     return total;
 }
 
+extern "C" int64_t rune_rt_abs_i64(int64_t x) { return x < 0 ? -x : x; }
+extern "C" int64_t rune_rt_min_i64(int64_t a, int64_t b) { return a < b ? a : b; }
+extern "C" int64_t rune_rt_max_i64(int64_t a, int64_t b) { return a > b ? a : b; }
+extern "C" int64_t rune_rt_clamp_i64(int64_t x, int64_t lo, int64_t hi) { return x < lo ? lo : (x > hi ? hi : x); }
+extern "C" int64_t rune_rt_pow_i64(int64_t base, int64_t exp) {
+    if (exp < 0) return 0;
+    int64_t result = 1;
+    while (exp > 0) { if (exp & 1) result *= base; base *= base; exp >>= 1; }
+    return result;
+}
+extern "C" int64_t rune_rt_ord(const char* ptr, int64_t len) {
+    if (len <= 0) return 0;
+    unsigned char c = (unsigned char)ptr[0];
+    if (c < 0x80) return (int64_t)c;
+    if ((c & 0xE0) == 0xC0 && len >= 2) return (int64_t)(((c & 0x1F) << 6) | (((unsigned char)ptr[1]) & 0x3F));
+    if ((c & 0xF0) == 0xE0 && len >= 3) return (int64_t)(((c & 0x0F) << 12) | ((((unsigned char)ptr[1]) & 0x3F) << 6) | (((unsigned char)ptr[2]) & 0x3F));
+    return (int64_t)c;
+}
+
 #if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" void rune_rt_dynamic_binary(const int64_t* left, const int64_t* right, int64_t* out, int64_t op) {
     int64_t left_tag = left[0];

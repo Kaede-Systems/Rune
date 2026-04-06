@@ -171,6 +171,8 @@ Return types:
 - Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are implemented.
 - Integer literals: decimal, `0x` hex, `0o` octal, `0b` binary are all supported.
 - String methods: `len`, `upper`, `lower`, `strip`, `trim_start`, `trim_end`, `repeat`, `contains`, `starts_with`, `ends_with`, `find`, `replace`, `slice` are all implemented across all backends.
+- Integer math builtins: `abs(x: i64) -> i64`, `min(a: i64, b: i64) -> i64`, `max(a: i64, b: i64) -> i64`, `clamp(x: i64, lo: i64, hi: i64) -> i64`, `pow(base: i64, exp: i64) -> i64` are implemented across all backends.
+- Character builtins: `chr(n: i64) -> String` (codepoint to UTF-8 string), `ord(s: String) -> i64` (first codepoint of string) are implemented across all backends.
 - Struct/class declarations, constructor calls, and field reads are implemented for the current static native slice.
 - Class methods declared inside the class body are implemented for the semantic checker, native executable path, and LLVM executable path.
 - Current struct limitations:

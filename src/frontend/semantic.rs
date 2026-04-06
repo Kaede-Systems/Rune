@@ -1735,6 +1735,101 @@ impl<'a> Analyzer<'a> {
                         })
                     }
                 }
+                "abs" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`abs` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let CallArg::Positional(expr) = &args[0] else {
+                        return Err(SemanticError {
+                            message: "`abs` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let actual = self.check_expr(expr, scope, in_async)?;
+                    self.expect_integer_type(&actual, expr.span, "`abs` argument")?;
+                    Ok(Type::I64)
+                }
+                "clamp" => {
+                    if args.len() != 3 {
+                        return Err(SemanticError {
+                            message: "`clamp` expects 3 arguments: clamp(x, lo, hi)".to_string(),
+                            span,
+                        });
+                    }
+                    for arg in args {
+                        let CallArg::Positional(expr) = arg else {
+                            return Err(SemanticError {
+                                message: "`clamp` does not accept keyword arguments".to_string(),
+                                span,
+                            });
+                        };
+                        let actual = self.check_expr(expr, scope, in_async)?;
+                        self.expect_integer_type(&actual, expr.span, "`clamp` argument")?;
+                    }
+                    Ok(Type::I64)
+                }
+                "chr" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`chr` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let CallArg::Positional(expr) = &args[0] else {
+                        return Err(SemanticError {
+                            message: "`chr` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let actual = self.check_expr(expr, scope, in_async)?;
+                    self.expect_integer_type(&actual, expr.span, "`chr` argument")?;
+                    Ok(Type::String)
+                }
+                "ord" => {
+                    if args.len() != 1 {
+                        return Err(SemanticError {
+                            message: "`ord` expects 1 argument".to_string(),
+                            span,
+                        });
+                    }
+                    let CallArg::Positional(expr) = &args[0] else {
+                        return Err(SemanticError {
+                            message: "`ord` does not accept keyword arguments".to_string(),
+                            span,
+                        });
+                    };
+                    let actual = self.check_expr(expr, scope, in_async)?;
+                    self.expect_type(&actual, &Type::String, expr.span, "`ord` argument")?;
+                    Ok(Type::I64)
+                }
+                "min" | "max" | "pow" => {
+                    if args.len() != 2 {
+                        return Err(SemanticError {
+                            message: format!("`{name}` expects 2 arguments"),
+                            span,
+                        });
+                    }
+                    let CallArg::Positional(a) = &args[0] else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let CallArg::Positional(b) = &args[1] else {
+                        return Err(SemanticError {
+                            message: format!("`{name}` does not accept keyword arguments"),
+                            span,
+                        });
+                    };
+                    let ta = self.check_expr(a, scope, in_async)?;
+                    let tb = self.check_expr(b, scope, in_async)?;
+                    self.expect_integer_type(&ta, a.span, &format!("`{name}` first argument"))?;
+                    self.expect_integer_type(&tb, b.span, &format!("`{name}` second argument"))?;
+                    Ok(Type::I64)
+                }
                 name if self.structs.contains_key(name) => {
                     let struct_sig = self.structs.get(name).expect("checked above");
                     if args.len() != struct_sig.fields.len() {
@@ -4198,6 +4293,8 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "__rune_builtin_terminal_set_title" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_audio_bell" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_sum_range" => Some(Type::I64),
+        "abs" | "min" | "max" | "pow" | "clamp" | "ord" => Some(Type::I64),
+        "chr" => Some(Type::String),
         "range" => Some(Type::Unknown("builtin".to_string())),
         _ => None,
     }

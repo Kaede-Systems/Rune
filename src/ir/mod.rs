@@ -1172,6 +1172,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_fs_file_size"
         | "__rune_builtin_json_len"
         | "__rune_builtin_json_to_i64" => Some(IrType::I64),
+        "abs" | "min" | "max" | "pow" | "clamp" | "ord" => Some(IrType::I64),
+        "chr" => Some(IrType::String),
         _ => None,
     }
 }

@@ -237,3 +237,43 @@ fn emits_string_method_runtime_decls() {
     assert!(ir.contains("declare ptr @rune_rt_string_slice(ptr, i64, i64, i64)"));
     assert!(ir.contains("declare i64 @rune_rt_last_string_len()"));
 }
+
+#[test]
+fn emits_llvm_ir_for_abs_min_max() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i64:\n    let x: i64 = -5\n    let a: i64 = 3\n    let b: i64 = 7\n    return abs(x) + min(a, b) + max(a, b)\n",
+    )
+    .expect("llvm ir should generate for abs/min/max");
+
+    assert!(ir.contains("declare i64 @rune_rt_abs_i64(i64)"), "expected abs decl: {ir}");
+    assert!(ir.contains("declare i64 @rune_rt_min_i64(i64, i64)"), "expected min decl: {ir}");
+    assert!(ir.contains("declare i64 @rune_rt_max_i64(i64, i64)"), "expected max decl: {ir}");
+    assert!(ir.contains("call i64 @rune_rt_abs_i64"), "expected abs call: {ir}");
+    assert!(ir.contains("call i64 @rune_rt_min_i64"), "expected min call: {ir}");
+    assert!(ir.contains("call i64 @rune_rt_max_i64"), "expected max call: {ir}");
+}
+
+#[test]
+fn emits_llvm_ir_for_pow() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i64:\n    return pow(2, 10)\n",
+    )
+    .expect("llvm ir should generate for pow");
+    assert!(ir.contains("declare i64 @rune_rt_pow_i64(i64, i64)"), "expected pow decl: {ir}");
+    assert!(ir.contains("call i64 @rune_rt_pow_i64"), "expected pow call: {ir}");
+}
+
+#[test]
+fn emits_llvm_ir_for_clamp_chr_ord() {
+    let ir = emit_llvm_ir_source(
+        "def main(s: String) -> i64:\n    let x: i64 = clamp(ord(s), 32, 126)\n    println(chr(x))\n    return x\n",
+    )
+    .expect("llvm ir should generate for clamp/chr/ord");
+
+    assert!(ir.contains("declare i64 @rune_rt_clamp_i64(i64, i64, i64)"), "expected clamp decl: {ir}");
+    assert!(ir.contains("declare ptr @rune_rt_chr(i64)"), "expected chr decl: {ir}");
+    assert!(ir.contains("declare i64 @rune_rt_ord(ptr, i64)"), "expected ord decl: {ir}");
+    assert!(ir.contains("call i64 @rune_rt_clamp_i64"), "expected clamp call: {ir}");
+    assert!(ir.contains("call ptr @rune_rt_chr"), "expected chr call: {ir}");
+    assert!(ir.contains("call i64 @rune_rt_ord"), "expected ord call: {ir}");
+}

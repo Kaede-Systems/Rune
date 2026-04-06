@@ -698,3 +698,66 @@ fn emits_string_slice_call() {
 
     assert!(asm.contains("rune_rt_string_slice"), "expected call to rune_rt_string_slice");
 }
+
+#[test]
+fn emits_abs_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let x: i64 = -5\n    return abs(x)\n",
+    )
+    .expect("abs() should generate assembly");
+    assert!(asm.contains("rune_rt_abs_i64"), "expected call to rune_rt_abs_i64");
+}
+
+#[test]
+fn emits_min_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let a: i64 = 3\n    let b: i64 = 7\n    return min(a, b)\n",
+    )
+    .expect("min() should generate assembly");
+    assert!(asm.contains("rune_rt_min_i64"), "expected call to rune_rt_min_i64");
+}
+
+#[test]
+fn emits_max_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let a: i64 = 3\n    let b: i64 = 7\n    return max(a, b)\n",
+    )
+    .expect("max() should generate assembly");
+    assert!(asm.contains("rune_rt_max_i64"), "expected call to rune_rt_max_i64");
+}
+
+#[test]
+fn emits_clamp_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let x: i64 = 15\n    let lo: i64 = 0\n    let hi: i64 = 10\n    return clamp(x, lo, hi)\n",
+    )
+    .expect("clamp() should generate assembly");
+    assert!(asm.contains("rune_rt_clamp_i64"), "expected call to rune_rt_clamp_i64");
+}
+
+#[test]
+fn emits_chr_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let n: i64 = 65\n    println(chr(n))\n    return 0\n",
+    )
+    .expect("chr() should generate assembly");
+    assert!(asm.contains("rune_rt_chr"), "expected call to rune_rt_chr");
+}
+
+#[test]
+fn emits_ord_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"A\"\n    return ord(s)\n",
+    )
+    .expect("ord() should generate assembly");
+    assert!(asm.contains("rune_rt_ord"), "expected call to rune_rt_ord");
+}
+
+#[test]
+fn emits_pow_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let base: i64 = 2\n    let exp: i64 = 10\n    return pow(base, exp)\n",
+    )
+    .expect("pow() should generate assembly");
+    assert!(asm.contains("rune_rt_pow_i64"), "expected call to rune_rt_pow_i64");
+}

@@ -602,3 +602,101 @@ fn rejects_string_slice_non_i64_arg() {
     .expect_err("String.slice with string args should fail");
     assert!(error.message.contains("slice") || error.message.contains("i64"));
 }
+
+#[test]
+fn accepts_abs_returns_i64() {
+    check_source("def f(x: i64) -> i64:\n    return abs(x)\n")
+        .expect("abs(i64) should type-check");
+}
+
+#[test]
+fn rejects_abs_wrong_arity() {
+    let error = check_source("def f() -> i64:\n    return abs(1, 2)\n")
+        .expect_err("abs with 2 args should fail");
+    assert!(error.message.contains("abs"));
+}
+
+#[test]
+fn rejects_abs_string_arg() {
+    let error = check_source("def f(s: String) -> i64:\n    return abs(s)\n")
+        .expect_err("abs(String) should fail");
+    assert!(error.message.contains("abs") || error.message.contains("integer"));
+}
+
+#[test]
+fn accepts_min_returns_i64() {
+    check_source("def f(a: i64, b: i64) -> i64:\n    return min(a, b)\n")
+        .expect("min(i64, i64) should type-check");
+}
+
+#[test]
+fn accepts_max_returns_i64() {
+    check_source("def f(a: i64, b: i64) -> i64:\n    return max(a, b)\n")
+        .expect("max(i64, i64) should type-check");
+}
+
+#[test]
+fn rejects_min_wrong_arity() {
+    let error = check_source("def f(a: i64) -> i64:\n    return min(a)\n")
+        .expect_err("min with 1 arg should fail");
+    assert!(error.message.contains("min"));
+}
+
+#[test]
+fn rejects_max_string_arg() {
+    let error = check_source("def f(a: String, b: String) -> i64:\n    return max(a, b)\n")
+        .expect_err("max(String, String) should fail");
+    assert!(error.message.contains("max") || error.message.contains("integer"));
+}
+
+#[test]
+fn accepts_clamp_returns_i64() {
+    check_source("def f(x: i64, lo: i64, hi: i64) -> i64:\n    return clamp(x, lo, hi)\n")
+        .expect("clamp(i64, i64, i64) should type-check");
+}
+
+#[test]
+fn rejects_clamp_wrong_arity() {
+    let error = check_source("def f(x: i64, lo: i64) -> i64:\n    return clamp(x, lo)\n")
+        .expect_err("clamp with 2 args should fail");
+    assert!(error.message.contains("clamp"));
+}
+
+#[test]
+fn accepts_chr_returns_string() {
+    check_source("def f(n: i64) -> String:\n    return chr(n)\n")
+        .expect("chr(i64) should return String");
+}
+
+#[test]
+fn rejects_chr_string_arg() {
+    let error = check_source("def f(s: String) -> String:\n    return chr(s)\n")
+        .expect_err("chr(String) should fail");
+    assert!(error.message.contains("chr") || error.message.contains("integer"));
+}
+
+#[test]
+fn accepts_ord_returns_i64() {
+    check_source("def f(s: String) -> i64:\n    return ord(s)\n")
+        .expect("ord(String) should return i64");
+}
+
+#[test]
+fn rejects_ord_integer_arg() {
+    let error = check_source("def f(n: i64) -> i64:\n    return ord(n)\n")
+        .expect_err("ord(i64) should fail");
+    assert!(error.message.contains("ord") || error.message.contains("String"));
+}
+
+#[test]
+fn accepts_pow_returns_i64() {
+    check_source("def f(base: i64, exp: i64) -> i64:\n    return pow(base, exp)\n")
+        .expect("pow(i64, i64) should type-check");
+}
+
+#[test]
+fn rejects_pow_wrong_arity() {
+    let error = check_source("def f(x: i64) -> i64:\n    return pow(x)\n")
+        .expect_err("pow with 1 arg should fail");
+    assert!(error.message.contains("pow"));
+}
