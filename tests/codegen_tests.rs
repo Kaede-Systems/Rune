@@ -589,3 +589,43 @@ fn emits_for_range_three_args_loop() {
         "expected while loop labels in asm"
     );
 }
+
+#[test]
+fn emits_string_len_call() {
+    let asm = emit_asm_source(
+        "def f(s: String) -> i64:\n    return s.len()\n\ndef main() -> i64:\n    return f(\"hello\")\n",
+    )
+    .expect("String.len() should generate assembly");
+
+    assert!(asm.contains("rune_rt_string_len"), "expected call to rune_rt_string_len");
+}
+
+#[test]
+fn emits_string_upper_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"hello\"\n    println(s.upper())\n    return 0\n",
+    )
+    .expect("String.upper() should generate assembly");
+
+    assert!(asm.contains("rune_rt_string_upper"), "expected call to rune_rt_string_upper");
+}
+
+#[test]
+fn emits_string_lower_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"HELLO\"\n    println(s.lower())\n    return 0\n",
+    )
+    .expect("String.lower() should generate assembly");
+
+    assert!(asm.contains("rune_rt_string_lower"), "expected call to rune_rt_string_lower");
+}
+
+#[test]
+fn emits_string_contains_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"hello world\"\n    let has: bool = s.contains(\"world\")\n    return 0\n",
+    )
+    .expect("String.contains() should generate assembly");
+
+    assert!(asm.contains("rune_rt_string_contains"), "expected call to rune_rt_string_contains");
+}

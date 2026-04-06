@@ -819,7 +819,9 @@ impl Lowerer {
                             &self.struct_methods,
                             &self.function_returns,
                         );
-                        let callee_name = if let Some(IrType::Struct(struct_name)) = base_expr_ty {
+                        let callee_name = if base_expr_ty == Some(IrType::String) {
+                            string_method_symbol(name)
+                        } else if let Some(IrType::Struct(struct_name)) = base_expr_ty {
                             if self
                                 .struct_methods
                                 .get(&struct_name)
@@ -1042,6 +1044,10 @@ fn struct_method_symbol(struct_name: &str, method_name: &str) -> String {
     format!("{struct_name}__{method_name}")
 }
 
+fn string_method_symbol(method_name: &str) -> String {
+    format!("rune_rt_string_{method_name}")
+}
+
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
@@ -1049,6 +1055,14 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
+        "rune_rt_string_len" => Some(IrType::I64),
+        "rune_rt_string_upper"
+        | "rune_rt_string_lower"
+        | "rune_rt_string_replace"
+        | "rune_rt_string_strip" => Some(IrType::String),
+        "rune_rt_string_contains"
+        | "rune_rt_string_starts_with"
+        | "rune_rt_string_ends_with" => Some(IrType::Bool),
         "__rune_builtin_time_has_wall_clock" => Some(IrType::Bool),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
         "__rune_builtin_gpio_mode_input"

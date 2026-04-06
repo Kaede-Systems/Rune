@@ -3386,6 +3386,98 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "rune_rt_string_len" => {
+                if args.len() != 1 {
+                    return Err(LlvmIrError {
+                        message: "`rune_rt_string_len` expects 1 argument".into(),
+                    });
+                }
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (_, len) = split_string_value(&rendered)?;
+                // len is already `i64 <value>` — extract just the value token
+                let len_val = len.trim_start_matches("i64 ");
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), len_val.to_string());
+                }
+                return Ok(());
+            }
+            "rune_rt_string_upper" | "rune_rt_string_lower" | "rune_rt_string_strip" => {
+                if args.len() != 1 {
+                    return Err(LlvmIrError {
+                        message: format!("`{callee}` expects 1 argument"),
+                    });
+                }
+                let rendered = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (ptr, len) = split_string_value(&rendered)?;
+                self.declared_runtime
+                    .insert(format!("declare ptr @{callee}(ptr, i64)\n"));
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!("  {ptr_reg} = call ptr @{callee}({ptr}, {len})\n"));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "rune_rt_string_contains"
+            | "rune_rt_string_starts_with"
+            | "rune_rt_string_ends_with" => {
+                if args.len() != 2 {
+                    return Err(LlvmIrError {
+                        message: format!("`{callee}` expects 2 arguments"),
+                    });
+                }
+                let s = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (s_ptr, s_len) = split_string_value(&s)?;
+                let needle = self.resolve_value(&args[1].value, &IrType::String, out)?;
+                let (n_ptr, n_len) = split_string_value(&needle)?;
+                self.declared_runtime
+                    .insert(format!("declare i1 @{callee}(ptr, i64, ptr, i64)\n"));
+                let reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {reg} = call i1 @{callee}({s_ptr}, {s_len}, {n_ptr}, {n_len})\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
+            "rune_rt_string_replace" => {
+                if args.len() != 3 {
+                    return Err(LlvmIrError {
+                        message: "`rune_rt_string_replace` expects 3 arguments".into(),
+                    });
+                }
+                let s = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (s_ptr, s_len) = split_string_value(&s)?;
+                let from = self.resolve_value(&args[1].value, &IrType::String, out)?;
+                let (f_ptr, f_len) = split_string_value(&from)?;
+                let to = self.resolve_value(&args[2].value, &IrType::String, out)?;
+                let (t_ptr, t_len) = split_string_value(&to)?;
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_string_replace(ptr, i64, ptr, i64, ptr, i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_string_replace({s_ptr}, {s_len}, {f_ptr}, {f_len}, {t_ptr}, {t_len})\n"
+                ));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
             _ => {}
         }
 
@@ -4316,6 +4408,14 @@ fn field_call_return_type(
 fn builtin_return_type(name: &str) -> Option<IrType> {
     match name {
         "print" | "println" | "eprint" | "eprintln" | "flush" | "eflush" => Some(IrType::Unit),
+        "rune_rt_string_len" => Some(IrType::I64),
+        "rune_rt_string_upper"
+        | "rune_rt_string_lower"
+        | "rune_rt_string_replace"
+        | "rune_rt_string_strip" => Some(IrType::String),
+        "rune_rt_string_contains"
+        | "rune_rt_string_starts_with"
+        | "rune_rt_string_ends_with" => Some(IrType::Bool),
         "input"
         | "__rune_builtin_arduino_read_line"
         | "__rune_builtin_serial_read_line"

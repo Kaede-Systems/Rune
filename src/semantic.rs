@@ -1416,6 +1416,100 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    fn check_string_method_call(
+        &self,
+        method: &str,
+        args: &[CallArg],
+        span: Span,
+        method_span: Span,
+        scope: &Scope,
+        in_async: bool,
+    ) -> Result<Type, SemanticError> {
+        let positional_args: Vec<&Expr> = args
+            .iter()
+            .filter_map(|a| {
+                if let CallArg::Positional(e) = a {
+                    Some(e)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let keyword_count = args.len() - positional_args.len();
+        if keyword_count > 0 {
+            return Err(SemanticError {
+                message: format!("String method `{method}` does not accept keyword arguments"),
+                span,
+            });
+        }
+        match method {
+            "len" => {
+                if !args.is_empty() {
+                    return Err(SemanticError {
+                        message: "`String.len` takes no arguments".to_string(),
+                        span,
+                    });
+                }
+                Ok(Type::I64)
+            }
+            "upper" | "lower" | "strip" => {
+                if !args.is_empty() {
+                    return Err(SemanticError {
+                        message: format!("`String.{method}` takes no arguments"),
+                        span,
+                    });
+                }
+                Ok(Type::String)
+            }
+            "contains" | "starts_with" | "ends_with" => {
+                if args.len() != 1 {
+                    return Err(SemanticError {
+                        message: format!("`String.{method}` expects 1 argument"),
+                        span,
+                    });
+                }
+                let CallArg::Positional(arg_expr) = &args[0] else {
+                    return Err(SemanticError {
+                        message: format!("`String.{method}` does not accept keyword arguments"),
+                        span,
+                    });
+                };
+                let arg_ty = self.check_expr(arg_expr, scope, in_async)?;
+                self.expect_type(&arg_ty, &Type::String, arg_expr.span, &format!("String.{method} argument"))?;
+                Ok(Type::Bool)
+            }
+            "replace" => {
+                if args.len() != 2 {
+                    return Err(SemanticError {
+                        message: "`String.replace` expects 2 arguments".to_string(),
+                        span,
+                    });
+                }
+                let CallArg::Positional(from_expr) = &args[0] else {
+                    return Err(SemanticError {
+                        message: "`String.replace` does not accept keyword arguments".to_string(),
+                        span,
+                    });
+                };
+                let CallArg::Positional(to_expr) = &args[1] else {
+                    return Err(SemanticError {
+                        message: "`String.replace` does not accept keyword arguments".to_string(),
+                        span,
+                    });
+                };
+                let from_ty = self.check_expr(from_expr, scope, in_async)?;
+                self.expect_type(&from_ty, &Type::String, from_expr.span, "String.replace `from` argument")?;
+                let to_ty = self.check_expr(to_expr, scope, in_async)?;
+                self.expect_type(&to_ty, &Type::String, to_expr.span, "String.replace `to` argument")?;
+                Ok(Type::String)
+            }
+            _ => Err(SemanticError {
+                message: format!("String has no method `{method}`"),
+                span: method_span,
+            }),
+        }
+    }
+
     fn check_call(
         &self,
         callee: &Expr,
@@ -1427,6 +1521,9 @@ impl<'a> Analyzer<'a> {
         match &callee.kind {
             ExprKind::Field { base, name } => {
                 let base_ty = self.check_expr(base, scope, in_async)?;
+                if base_ty == Type::String {
+                    return self.check_string_method_call(name, args, span, callee.span, scope, in_async);
+                }
                 let Type::Struct(struct_name) = base_ty else {
                     return Err(SemanticError {
                         message: "methods can only be called on class or struct values".to_string(),
