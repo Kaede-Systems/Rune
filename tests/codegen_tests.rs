@@ -548,3 +548,44 @@ fn emits_augmented_assignment() {
     assert!(asm.contains("add ") || asm.contains("add\t"));
     assert!(asm.contains("sub ") || asm.contains("sub\t"));
 }
+
+#[test]
+fn emits_for_range_loop_as_while_labels() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    for i in range(10):\n        println(i)\n    return 0\n",
+    )
+    .expect("for range loop should generate assembly");
+
+    // for range desugars to while; verify the while control-flow labels are present
+    assert!(
+        asm.contains(".L.main.while.") || asm.contains(".L.main.whileend."),
+        "expected while loop labels in asm: {}",
+        &asm[..asm.len().min(500)]
+    );
+}
+
+#[test]
+fn emits_for_range_two_args_loop() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    for i in range(2, 8):\n        println(i)\n    return 0\n",
+    )
+    .expect("for range(start, stop) loop should generate assembly");
+
+    assert!(
+        asm.contains(".L.main.while.") || asm.contains(".L.main.whileend."),
+        "expected while loop labels in asm"
+    );
+}
+
+#[test]
+fn emits_for_range_three_args_loop() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    for i in range(0, 20, 2):\n        println(i)\n    return 0\n",
+    )
+    .expect("for range(start, stop, step) loop should generate assembly");
+
+    assert!(
+        asm.contains(".L.main.while.") || asm.contains(".L.main.whileend."),
+        "expected while loop labels in asm"
+    );
+}

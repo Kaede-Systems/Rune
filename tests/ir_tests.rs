@@ -102,3 +102,38 @@ fn lowers_bitwise_not_into_ir() {
 
     assert!(ir.contains("bnot"), "missing bnot in IR: {ir}");
 }
+
+#[test]
+fn lowers_for_range_into_while_loop_ir() {
+    let program = parse_source(
+        "def main() -> unit:\n    for i in range(10):\n        println(i)\n    return\n",
+    )
+    .expect("for range should parse");
+    let ir = lower_program(&program).to_string();
+
+    // The for loop desugars to a while loop; verify control-flow labels appear
+    assert!(ir.contains("while_loop_"), "expected while_loop_ label in IR: {ir}");
+    assert!(ir.contains("branch"), "expected branch in IR: {ir}");
+}
+
+#[test]
+fn lowers_for_range_two_args_into_while_loop_ir() {
+    let program = parse_source(
+        "def main() -> unit:\n    for i in range(2, 8):\n        println(i)\n    return\n",
+    )
+    .expect("for range(start, stop) should parse");
+    let ir = lower_program(&program).to_string();
+
+    assert!(ir.contains("while_loop_"), "expected while_loop_ label in IR: {ir}");
+}
+
+#[test]
+fn lowers_for_range_three_args_into_while_loop_ir() {
+    let program = parse_source(
+        "def main() -> unit:\n    for i in range(0, 20, 2):\n        println(i)\n    return\n",
+    )
+    .expect("for range(start, stop, step) should parse");
+    let ir = lower_program(&program).to_string();
+
+    assert!(ir.contains("while_loop_"), "expected while_loop_ label in IR: {ir}");
+}
