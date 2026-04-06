@@ -123,6 +123,28 @@ while true:
 
 Dynamic truthiness is currently supported in native code paths for conditions.
 
+```rune
+for i in range(10):
+    println(i)
+
+for i in range(2, 10, 2):
+    println(i)
+```
+
+`range(stop)`, `range(start, stop)`, and `range(start, stop, step)` are supported. Step can be negative. `sum(range(...))` is also supported as a builtin shorthand.
+
+```rune
+match value:
+    case 1:
+        println("one")
+    case 2:
+        println("two")
+    case _:
+        println("other")
+```
+
+`match` desugars to if/elif/else. Patterns: integer literals (including negative), string literals, and `_` wildcard.
+
 ## Classes
 
 Concrete class declarations are now implemented for the current static slice.
