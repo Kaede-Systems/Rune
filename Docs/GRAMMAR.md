@@ -69,27 +69,43 @@ block           ::= INDENT { stmt } DEDENT
 ```ebnf
 stmt            ::= let_stmt
                   | assign_stmt
+                  | augmented_assign_stmt
+                  | field_assign_stmt
                   | return_stmt
                   | if_stmt
                   | while_stmt
+                  | for_stmt
+                  | match_stmt
                   | break_stmt
                   | continue_stmt
                   | raise_stmt
                   | panic_stmt
+                  | assert_stmt
                   | expr_stmt
 
-let_stmt        ::= "let" ident [ ":" type_ref ] "=" expr NEWLINE
-assign_stmt     ::= ident "=" expr NEWLINE
-return_stmt     ::= "return" [ expr ] NEWLINE
-if_stmt         ::= "if" expr ":" NEWLINE block
-                    { "elif" expr ":" NEWLINE block }
-                    [ "else" ":" NEWLINE block ]
-while_stmt      ::= "while" expr ":" NEWLINE block
-break_stmt      ::= "break" NEWLINE
-continue_stmt   ::= "continue" NEWLINE
-raise_stmt      ::= "raise" expr NEWLINE
-panic_stmt      ::= "panic" expr NEWLINE
-expr_stmt       ::= expr NEWLINE
+let_stmt            ::= "let" ident [ ":" type_ref ] "=" expr NEWLINE
+assign_stmt         ::= ident "=" expr NEWLINE
+augmented_assign    ::= "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
+augmented_assign_stmt ::= ident augmented_assign expr NEWLINE
+                        | ident { "." ident } augmented_assign expr NEWLINE
+field_assign_stmt   ::= ident { "." ident } "=" expr NEWLINE
+return_stmt         ::= "return" [ expr ] NEWLINE
+if_stmt             ::= "if" expr ":" NEWLINE block
+                        { "elif" expr ":" NEWLINE block }
+                        [ "else" ":" NEWLINE block ]
+while_stmt          ::= "while" expr ":" NEWLINE block
+for_stmt            ::= "for" ident "in" range_call ":" NEWLINE block
+range_call          ::= "range" "(" expr ")"
+                      | "range" "(" expr "," expr ")"
+                      | "range" "(" expr "," expr "," expr ")"
+match_stmt          ::= "match" expr ":" NEWLINE INDENT { match_arm } DEDENT
+match_arm           ::= "case" ( integer | "-" integer | string | "_" ) ":" NEWLINE block
+break_stmt          ::= "break" NEWLINE
+continue_stmt       ::= "continue" NEWLINE
+raise_stmt          ::= "raise" expr NEWLINE
+panic_stmt          ::= "panic" expr NEWLINE
+assert_stmt         ::= "assert" expr [ "," expr ] NEWLINE
+expr_stmt           ::= expr NEWLINE
 ```
 
 ## Expressions
@@ -97,21 +113,30 @@ expr_stmt       ::= expr NEWLINE
 ```ebnf
 expr            ::= or_expr
 or_expr         ::= and_expr { "or" and_expr }
-and_expr        ::= comparison { "and" comparison }
-comparison      ::= additive { comp_op additive }
+and_expr        ::= not_expr { "and" not_expr }
+not_expr        ::= "not" not_expr | comparison
+comparison      ::= bitwise_or { comp_op bitwise_or }
 comp_op         ::= "==" | "!=" | ">" | ">=" | "<" | "<="
-additive        ::= multiplicative { ("+" | "-") multiplicative }
-multiplicative  ::= unary { ("*" | "/" | "%") unary }
+bitwise_or      ::= bitwise_xor { "|" bitwise_xor }
+bitwise_xor     ::= bitwise_and { "^" bitwise_and }
+bitwise_and     ::= shift { "&" shift }
+shift           ::= additive { ( "<<" | ">>" ) additive }
+additive        ::= multiplicative { ( "+" | "-" ) multiplicative }
+multiplicative  ::= unary { ( "*" | "/" | "%" ) unary }
 unary           ::= "await" unary
                   | "-" unary
                   | "not" unary
+                  | "~" unary
                   | postfix
 postfix         ::= primary { call_suffix | field_suffix }
 call_suffix     ::= "(" [ call_args ] ")"
 field_suffix    ::= "." ident
 call_args       ::= call_arg { "," call_arg }
 call_arg        ::= ident "=" expr | expr
-primary         ::= ident | integer | string | "true" | "false" | "(" expr ")"
+primary         ::= ident | integer | string | bool_literal | fstring | "(" expr ")"
+bool_literal    ::= "true" | "false"
+integer         ::= decimal_int | "0x" hex_digits | "0o" oct_digits | "0b" bin_digits
+fstring         ::= "f\"" { fstring_literal | "{" expr "}" | "{{" | "}}" } "\""
 ```
 
 ## Current Notes
@@ -121,6 +146,13 @@ primary         ::= ident | integer | string | "true" | "false" | "(" expr ")"
 - `try` / `except` tokens exist lexically but are not parser-level language constructs yet.
 - `import module` plus `module.name(...)` namespace-qualified access is implemented.
 - import aliases such as `import module as alias` are not implemented yet.
+- `for` loops currently require `range(...)` as the iterable; iterating over strings or user-defined iterables is not yet implemented.
+- `match` desugars to if/elif/else at parse time; patterns are limited to integer literals, string literals, and `_` wildcard.
+- `assert expr` panics with a standard message; `assert expr, message` panics with the provided string.
+- Augmented assignment operators (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`) are implemented.
+- Field assignment (`obj.field = value`, `obj.a.b = value`) is implemented.
+- Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are implemented.
+- Integer literals: decimal, `0x` hex, `0o` octal, `0b` binary are all supported.
 - Struct/class declarations, constructor calls, and field reads are implemented for the current static native slice.
 - Class methods declared inside the class body are implemented for the semantic checker, native executable path, and LLVM executable path.
 - Current struct limitations:
