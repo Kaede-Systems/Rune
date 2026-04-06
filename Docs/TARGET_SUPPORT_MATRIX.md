@@ -30,21 +30,26 @@ This document separates implemented support from planned support.
 | `thumbv6m-none-eabi` | Implemented for freestanding object/static-lib output | Suitable for Cortex-M0/M0+ style targets |
 | `thumbv7em-none-eabihf` | Implemented for freestanding object/static-lib output | Suitable for Cortex-M4/M7 style targets |
 | `riscv32-unknown-elf` | Implemented for freestanding object/static-lib output | Covers the current packaged `riscv32` LLVM backend slice |
-| `avr-atmega328p-arduino-uno` | Implemented for current Arduino Uno embedded slice | Produces `.hex` and sibling `.elf` through the packaged Arduino AVR core plus packaged `avr-gcc`/`avr-g++`/`objcopy`; when `llvm-cbe` is available the Uno path is `Rune -> LLVM IR -> llvm-cbe -> transient C -> AVR GCC/G++`; current scope includes top-level scripts or `main` / `setup()` / `loop()`, locals, control flow, serial output/input, UART helpers, concrete class/object methods, board constants, and pin/timing operations |
+| `avr-atmega328p-arduino-uno` | Implemented | Arduino Uno (ATmega328P, 32 KB flash, 2 KB SRAM) — produces `.hex` + sibling `.elf` through packaged Arduino AVR core + `avr-gcc`/`avr-g++`/`objcopy`; when `llvm-cbe` is available the path is `Rune → LLVM IR → llvm-cbe → transient C → AVR GCC/G++`; scope: `main` / `setup()` / `loop()`, locals, control flow, serial I/O, UART, concrete classes, board constants, pin/timing |
+| `avr-atmega2560-arduino-mega` | Implemented | Arduino Mega 2560 (ATmega2560, 248 KB flash, 8 KB SRAM) — same pipeline as Uno; board-specific variant and avrdude parameters applied automatically |
+| `avr-atmega328p-arduino-nano` | Implemented | Arduino Nano (ATmega328P, 30 KB flash, 2 KB SRAM) — same pipeline as Uno; 57600 baud flash rate applied automatically |
 
 ### Not Yet Implemented
 
 | Target/Family | Status | Notes |
 |---|---|---|
-| Arduino Uno / AVR through direct LLVM AVR backend | Not implemented | The packaged LLVM toolchain in this repo does not currently ship an AVR backend, so Uno uses the packaged Arduino AVR core plus `llvm-cbe` + AVR GCC/G++ instead |
+| Arduino AVR through direct LLVM AVR backend | Not implemented | The packaged LLVM toolchain in this repo does not currently ship an AVR backend, so AVR boards use the packaged Arduino AVR core plus `llvm-cbe` + AVR GCC/G++ instead |
 | Xtensa ESP32 | Not implemented | The packaged LLVM toolchain in this repo does not currently ship an Xtensa backend |
 
 ### Notes
 
 - Embedded support currently means freestanding `--object` and `--static-lib` output for LLVM-backed embedded targets
-- Arduino Uno is the current packaged-AVR exception: `rune build file.rn --target avr-atmega328p-arduino-uno` produces a real `.hex`; with packaged `llvm-cbe` available it compiles `Rune -> LLVM IR -> llvm-cbe -> transient C -> ArduinoCore-avr + AVR GCC/G++`, and `--flash --port COMx` flashes it through packaged `avrdude`
-- The Arduino Uno surface now resolves `from arduino import ...` from the packaged stdlib root and supports parenthesized multiline imports
-- Top-level/script-style Rune programs also work on Uno, so board examples can use normal top-level initialization plus `while true:` loops without requiring explicit `setup()` / `loop()`
+- Three Arduino AVR boards are now supported: Uno (`avr-atmega328p-arduino-uno`), Mega 2560 (`avr-atmega2560-arduino-mega`), and Nano (`avr-atmega328p-arduino-nano`)
+- All three boards produce a real `.hex`; with packaged `llvm-cbe` available the pipeline is `Rune → LLVM IR → llvm-cbe → transient C → ArduinoCore-avr + AVR GCC/G++`, and `--flash --port COMx` flashes through packaged `avrdude`
+- Board-specific parameters (MCU, variant, clock speed, flash/SRAM sizes, avrdude programmer/baud) are applied automatically from the target triple
+- `from arduino import ...` resolves from the packaged stdlib root; parenthesized multiline imports are supported
+- Top-level/script-style Rune programs work on all AVR boards — `while true:` loops do not require explicit `setup()` / `loop()`
+- The post-build size report uses the actual flash and SRAM limits of the selected board
 - Raspberry Pi support stays under native Linux ARM64 where applicable, not under the freestanding embedded slice
 
 ## WASM Targets

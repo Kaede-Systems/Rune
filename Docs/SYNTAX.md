@@ -192,6 +192,24 @@ Current implemented operator surface:
 - arithmetic: `+`, `-`, `*`, `/`, `%`
 - comparison: `==`, `!=`, `>`, `>=`, `<`, `<=`
 - boolean: `and`, `or`, `not`
+- bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`
+
+Augmented assignment operators:
+
+```rune
+x += 1
+x -= 1
+x *= 2
+x /= 2
+x %= 3
+x &= 0xFF
+x |= 0x01
+x ^= mask
+x <<= 4
+x >>= 4
+```
+
+Augmented assignment is implemented for plain names (`x op= rhs`) and field paths (`obj.field op= rhs`).
 
 Current dynamic behavior:
 
@@ -199,6 +217,28 @@ Current dynamic behavior:
 - dynamic `-`, `*`, `/`, `%` support numeric-like values
 - dynamic comparisons are runtime-dispatched
 - dynamic truthiness is runtime-dispatched
+
+## Integer Literals
+
+Decimal, hexadecimal, octal, and binary integer literals are all supported:
+
+```rune
+let a = 42
+let b = 0xFF
+let c = 0o77
+let d = 0b1010_1010
+```
+
+Underscore separators are allowed inside any integer literal for readability.
+
+## Assert
+
+```rune
+assert x > 0
+assert x > 0, "x must be positive"
+```
+
+`assert` desugars to `if not <cond>: panic(<msg>)`. Without a message the panic text is `"assertion failed"`.
 
 ## Calls
 
@@ -562,13 +602,21 @@ Current exported functions:
 - `uart_write_byte(value: i64) -> unit`
 - `uart_write(text: String) -> unit`
 
-Arduino Uno target notes:
+Arduino AVR target notes:
 
-- `main()` is supported
-- Arduino-style `setup()` and `loop()` entrypoints are also supported on the Uno target
-- `print`, `println`, and `input()` stay the preferred high-level serial I/O surface on Uno
+Supported target triples:
+
+| Triple | Board | MCU | Flash | SRAM |
+|---|---|---|---|---|
+| `avr-atmega328p-arduino-uno` | Arduino Uno | ATmega328P | 32 KB | 2 KB |
+| `avr-atmega2560-arduino-mega` | Arduino Mega 2560 | ATmega2560 | 248 KB | 8 KB |
+| `avr-atmega328p-arduino-nano` | Arduino Nano | ATmega328P | 30 KB | 2 KB |
+
+- `main()` is supported on all AVR boards
+- Arduino-style `setup()` and `loop()` entrypoints are also supported on all AVR boards
+- `print`, `println`, and `input()` stay the preferred high-level serial I/O surface
 - `uart_*` helpers remain available for lower-level byte-by-byte serial control
-- serial calculator style programs now build and flash through the packaged AVR path
+- size reporting after build reflects the actual flash/SRAM limits of the selected board
 
 `json`
 - `parse(text: String) -> Json`
@@ -610,12 +658,12 @@ Still not fully complete for native release scope:
 - complete OOP/ABC surface
 - full HTTP / WS / server APIs
 - full `raise` / exception propagation model
-On Arduino Uno targets, the ordinary Rune I/O surface stays available:
 
-```rune
-print("left> ")
-let left: i64 = int(input())
-println(left)
+## Build Optimization Flags
+
+```text
+rune build file.rn -o output              # default: O3 (full optimization)
+rune build file.rn --size -o output       # Oz (minimize binary size)
 ```
 
-That keeps ordinary programs closer to native Rune syntax while `uart_*` remains available for lower-level hardware-oriented serial work.
+`--size` passes `default<Oz>` through the LLVM opt and codegen pipeline. Without `--size`, the default is `default<O3>`. On AVR targets, size optimization (`Oz`) is always used regardless of this flag.
