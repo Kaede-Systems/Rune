@@ -139,6 +139,23 @@ integer         ::= decimal_int | "0x" hex_digits | "0o" oct_digits | "0b" bin_d
 fstring         ::= "f\"" { fstring_literal | "{" expr "}" | "{{" | "}}" } "\""
 ```
 
+## String Methods
+
+String method calls are resolved via the `postfix` rule when the receiver has type `String`:
+
+```ebnf
+string_method  ::= expr "." string_method_name "(" [ call_args ] ")"
+string_method_name ::= "len" | "upper" | "lower" | "strip" | "trim_start" | "trim_end"
+                     | "repeat" | "contains" | "starts_with" | "ends_with"
+                     | "find" | "replace" | "slice"
+```
+
+Return types:
+- `len` → `i64`
+- `upper`, `lower`, `strip`, `trim_start`, `trim_end`, `replace`, `repeat`, `slice` → `String`
+- `contains`, `starts_with`, `ends_with` → `bool`
+- `find` → `i64` (byte index of first occurrence, or `-1`)
+
 ## Current Notes
 
 - `await` parses, but async native backend support is still incomplete.
@@ -153,6 +170,7 @@ fstring         ::= "f\"" { fstring_literal | "{" expr "}" | "{{" | "}}" } "\""
 - Field assignment (`obj.field = value`, `obj.a.b = value`) is implemented.
 - Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are implemented.
 - Integer literals: decimal, `0x` hex, `0o` octal, `0b` binary are all supported.
+- String methods: `len`, `upper`, `lower`, `strip`, `trim_start`, `trim_end`, `repeat`, `contains`, `starts_with`, `ends_with`, `find`, `replace`, `slice` are all implemented across all backends.
 - Struct/class declarations, constructor calls, and field reads are implemented for the current static native slice.
 - Class methods declared inside the class body are implemented for the semantic checker, native executable path, and LLVM executable path.
 - Current struct limitations:

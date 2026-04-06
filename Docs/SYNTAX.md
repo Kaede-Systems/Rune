@@ -220,6 +220,44 @@ Mixed:
 add(10, rhs=32)
 ```
 
+## String Methods
+
+The following methods are available on `String` values:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `len` | `() -> i64` | byte length |
+| `upper` | `() -> String` | ASCII uppercase |
+| `lower` | `() -> String` | ASCII lowercase |
+| `strip` | `() -> String` | strip leading and trailing whitespace |
+| `trim_start` | `() -> String` | strip leading whitespace only |
+| `trim_end` | `() -> String` | strip trailing whitespace only |
+| `repeat` | `(count: i64) -> String` | repeat string `count` times |
+| `contains` | `(needle: String) -> bool` | true if needle is a substring |
+| `starts_with` | `(prefix: String) -> bool` | true if starts with prefix |
+| `ends_with` | `(suffix: String) -> bool` | true if ends with suffix |
+| `find` | `(needle: String) -> i64` | byte index of first occurrence, or -1 |
+| `replace` | `(from: String, to: String) -> String` | replace all occurrences |
+| `slice` | `(start: i64, end: i64) -> String` | substring at byte range `[start, end)` |
+
+All string methods are implemented on native, LLVM, WASM, and AVR backends.
+
+Example:
+
+```rune
+let s: String = "  Hello World  "
+println(s.strip())         # "Hello World"
+println(s.trim_start())    # "Hello World  "
+println(s.upper())         # "  HELLO WORLD  "
+let n: i64 = 3
+println("ab".repeat(n))   # "ababab"
+let haystack: String = "hello world"
+println(haystack.find("world"))  # 6
+let start: i64 = 6
+let end: i64 = 11
+println(haystack.slice(start, end))  # "world"
+```
+
 ## Imports
 
 Local imports:
