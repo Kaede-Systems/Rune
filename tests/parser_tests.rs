@@ -511,3 +511,55 @@ fn parses_bitwise_not_unary() {
         other => panic!("expected Unary(BitwiseNot), got {other:?}"),
     }
 }
+
+#[test]
+fn parses_for_range_one_arg_desugars_to_block() {
+    // for i in range(10): ... desugars to a Block containing let bindings + while
+    let program = parse_source(
+        "def f() -> unit:\n    for i in range(10):\n        println(i)\n",
+    )
+    .expect("for range(stop) should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    // The for loop desugars to a Block at the top level
+    let Stmt::Block(_block) = &func.body.statements[0] else {
+        panic!("for loop should desugar to a Block, got {:?}", func.body.statements[0]);
+    };
+}
+
+#[test]
+fn parses_for_range_two_args() {
+    let program = parse_source(
+        "def f() -> unit:\n    for i in range(2, 8):\n        println(i)\n",
+    )
+    .expect("for range(start, stop) should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    let Stmt::Block(_) = &func.body.statements[0] else {
+        panic!("for range(start, stop) should desugar to Block");
+    };
+}
+
+#[test]
+fn parses_for_range_three_args() {
+    let program = parse_source(
+        "def f() -> unit:\n    for i in range(0, 20, 2):\n        println(i)\n",
+    )
+    .expect("for range(start, stop, step) should parse");
+
+    let Item::Function(func) = &program.items[0] else { panic!() };
+    let Stmt::Block(_) = &func.body.statements[0] else {
+        panic!("for range(start, stop, step) should desugar to Block");
+    };
+}
+
+#[test]
+fn rejects_for_with_non_range_iterable() {
+    let err = parse_source("def f() -> unit:\n    for i in items:\n        println(i)\n")
+        .expect_err("for with non-range iterable should fail");
+    assert!(
+        err.message.contains("range"),
+        "error should mention range, got: {}",
+        err.message
+    );
+}

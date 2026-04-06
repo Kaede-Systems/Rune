@@ -186,3 +186,36 @@ fn emits_llvm_ir_for_class_method_calls() {
     assert!(ir.contains("extractvalue { i32, i32 }"));
     assert!(ir.contains("call i32 @Point__sum({ i32, i32 }"));
 }
+
+#[test]
+fn emits_llvm_ir_for_for_range_loop() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i64:\n    for i in range(10):\n        println(i)\n    return 0\n",
+    )
+    .expect("llvm ir should generate for for-range loop");
+
+    // for range desugars to while; verify while basic blocks appear
+    assert!(ir.contains("while_loop_"), "expected while_loop_ block in LLVM IR: {ir}");
+    assert!(ir.contains("br i1"), "expected conditional branch in LLVM IR");
+    assert!(ir.contains("icmp"), "expected integer compare in LLVM IR");
+}
+
+#[test]
+fn emits_llvm_ir_for_for_range_two_args() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i64:\n    for i in range(2, 8):\n        println(i)\n    return 0\n",
+    )
+    .expect("llvm ir should generate for for-range(start, stop)");
+
+    assert!(ir.contains("while_loop_"), "expected while_loop_ block in LLVM IR");
+}
+
+#[test]
+fn emits_llvm_ir_for_for_range_three_args() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i64:\n    for i in range(0, 20, 2):\n        println(i)\n    return 0\n",
+    )
+    .expect("llvm ir should generate for for-range(start, stop, step)");
+
+    assert!(ir.contains("while_loop_"), "expected while_loop_ block in LLVM IR");
+}
