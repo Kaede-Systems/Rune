@@ -52,3 +52,9 @@ tools/*.zip
 
 # Generated headers from local experiments
 calculator_riscv32.h
+
+# RAD Studio / Embarcadero project files
+*.gpr
+*.rep/
+Kurox.rep/
+Kurox.gpr
