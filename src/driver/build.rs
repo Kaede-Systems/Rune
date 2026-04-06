@@ -1363,6 +1363,9 @@ fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> AvrRuntimeProfile {
         "rune_rt_string_ends_with",
         "rune_rt_string_replace",
         "rune_rt_string_strip",
+        "rune_rt_string_trim_start",
+        "rune_rt_string_trim_end",
+        "rune_rt_string_repeat",
         "rune_rt_string_find",
         "rune_rt_string_slice",
     ]
@@ -2796,6 +2799,15 @@ function createHost(options = {{}}) {{
       rune_rt_string_strip(ptr, len) {{
         return allocString(readString(ptr, len).trim());
       }},
+      rune_rt_string_trim_start(ptr, len) {{
+        return allocString(readString(ptr, len).trimStart());
+      }},
+      rune_rt_string_trim_end(ptr, len) {{
+        return allocString(readString(ptr, len).trimEnd());
+      }},
+      rune_rt_string_repeat(ptr, len, count) {{
+        return allocString(readString(ptr, len).repeat(Math.max(0, Number(count))));
+      }},
       rune_rt_string_find(ptr, len, needlePtr, needleLen) {{
         return BigInt(readString(ptr, len).indexOf(readString(needlePtr, needleLen)));
       }},
@@ -3078,6 +3090,161 @@ function createHost(options = {{}}) {{
           return BigInt(fs.statSync(readString(ptr, len)).size);
         }} catch {{
           return 0n;
+        }}
+      }},
+      rune_rt_fs_remove(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          const p = readString(ptr, len);
+          const stat = fs.statSync(p);
+          if (stat.isDirectory()) {{
+            fs.rmSync(p, {{ recursive: true, force: true }});
+          }} else {{
+            fs.unlinkSync(p);
+          }}
+          return true;
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_rename(fromPtr, fromLen, toPtr, toLen) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          fs.renameSync(readString(fromPtr, fromLen), readString(toPtr, toLen));
+          return true;
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_copy(fromPtr, fromLen, toPtr, toLen) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          fs.copyFileSync(readString(fromPtr, fromLen), readString(toPtr, toLen));
+          return true;
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_create_dir(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          fs.mkdirSync(readString(ptr, len));
+          return true;
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_fs_create_dir_all(ptr, len) {{
+        if (!isNode || !fs) {{
+          throw new Error("Rune fs builtins require a Node host for wasm32-unknown-unknown");
+        }}
+        try {{
+          fs.mkdirSync(readString(ptr, len), {{ recursive: true }});
+          return true;
+        }} catch {{
+          return false;
+        }}
+      }},
+      rune_rt_print_dynamic(tag, payload, extra) {{
+        writeText("stdout", readString(runeDynamicToString(tag, payload, extra), BigInt(lastStringLen)));
+      }},
+      rune_rt_eprint_dynamic(tag, payload, extra) {{
+        writeText("stderr", readString(runeDynamicToString(tag, payload, extra), BigInt(lastStringLen)));
+      }},
+      rune_rt_dynamic_binary(leftPtr, rightPtr, outPtr, op) {{
+        refreshMemory();
+        const dv = new DataView(memory.buffer);
+        const lp = Number(leftPtr);
+        const rp = Number(rightPtr);
+        const wp = Number(outPtr);
+        const opNum = Number(op);
+        const ltag = dv.getBigInt64(lp, true);
+        const lpay = dv.getBigInt64(lp + 8, true);
+        const lext = dv.getBigInt64(lp + 16, true);
+        const rtag = dv.getBigInt64(rp, true);
+        const rpay = dv.getBigInt64(rp + 8, true);
+        const rext = dv.getBigInt64(rp + 16, true);
+        if (opNum === 0 && (Number(ltag) === 4 || Number(rtag) === 4)) {{
+          const lstr = readString(runeDynamicToString(ltag, lpay, lext), BigInt(lastStringLen));
+          const rstr = readString(runeDynamicToString(rtag, rpay, rext), BigInt(lastStringLen));
+          const joined = allocString(lstr + rstr);
+          dv.setBigInt64(wp, 4n, true);
+          dv.setBigInt64(wp + 8, BigInt(joined), true);
+          dv.setBigInt64(wp + 16, BigInt(lastStringLen), true);
+          return;
+        }}
+        function dynToI64(tag, pay) {{
+          switch (Number(tag)) {{
+            case 1: return pay !== 0n ? 1n : 0n;
+            case 2: case 3: return BigInt(pay);
+            default: return 0n;
+          }}
+        }}
+        const lnum = dynToI64(ltag, lpay);
+        const rnum = dynToI64(rtag, rpay);
+        let result;
+        switch (opNum) {{
+          case 0: result = lnum + rnum; break;
+          case 1: result = lnum - rnum; break;
+          case 2: result = lnum * rnum; break;
+          case 3:
+            if (rnum === 0n) {{ writeText("stderr", "Rune error E1001: division by zero\n"); throw new Error("division by zero"); }}
+            result = lnum / rnum; break;
+          case 4:
+            if (rnum === 0n) {{ writeText("stderr", "Rune error E1002: modulo by zero\n"); throw new Error("modulo by zero"); }}
+            result = lnum % rnum; break;
+          default: throw new Error(`unknown dynamic binary op ${{opNum}}`);
+        }}
+        dv.setBigInt64(wp, 3n, true);
+        dv.setBigInt64(wp + 8, result, true);
+        dv.setBigInt64(wp + 16, 0n, true);
+      }},
+      rune_rt_dynamic_compare(leftPtr, rightPtr, op) {{
+        refreshMemory();
+        const dv = new DataView(memory.buffer);
+        const lp = Number(leftPtr);
+        const rp = Number(rightPtr);
+        const ltag = dv.getBigInt64(lp, true);
+        const lpay = dv.getBigInt64(lp + 8, true);
+        const lext = dv.getBigInt64(lp + 16, true);
+        const rtag = dv.getBigInt64(rp, true);
+        const rpay = dv.getBigInt64(rp + 8, true);
+        const rext = dv.getBigInt64(rp + 16, true);
+        const op_ = Number(op);
+        if (op_ === 0 || op_ === 1) {{
+          let equal;
+          if (Number(ltag) === 4 || Number(rtag) === 4) {{
+            const lstr = readString(runeDynamicToString(ltag, lpay, lext), BigInt(lastStringLen));
+            const rstr = readString(runeDynamicToString(rtag, rpay, rext), BigInt(lastStringLen));
+            equal = lstr === rstr;
+          }} else {{
+            equal = ltag === rtag && lpay === rpay && lext === rext;
+          }}
+          return op_ === 0 ? equal : !equal;
+        }}
+        function dynToI64(tag, pay) {{
+          switch (Number(tag)) {{
+            case 1: return Number(pay) !== 0 ? 1 : 0;
+            case 2: case 3: return Number(pay);
+            default: return 0;
+          }}
+        }}
+        const lnum = dynToI64(ltag, lpay);
+        const rnum = dynToI64(rtag, rpay);
+        switch (op_) {{
+          case 2: return lnum > rnum;
+          case 3: return lnum >= rnum;
+          case 4: return lnum < rnum;
+          case 5: return lnum <= rnum;
+          default: throw new Error(`unknown dynamic compare op ${{op_}}`);
         }}
       }},
       rune_rt_terminal_clear() {{
@@ -3596,6 +3763,42 @@ char* rune_rt_string_strip(const char* ptr, int64_t len) {
     }
     memcpy(out, ptr + start, new_len);
     return rune_rt_store_heap_string(out, new_len);
+}
+char* rune_rt_string_trim_start(const char* ptr, int64_t len) {
+    int64_t start = 0;
+    while (start < len && ((unsigned char)ptr[start] == ' ' || (unsigned char)ptr[start] == '\t' || (unsigned char)ptr[start] == '\n' || (unsigned char)ptr[start] == '\r')) {
+        start++;
+    }
+    size_t new_len = (size_t)(len - start);
+    char* out = (char*)malloc(new_len + 1);
+    if (!out) { fprintf(stderr, "Rune runtime: failed to allocate string trim_start buffer\n"); exit(111); }
+    memcpy(out, ptr + start, new_len);
+    return rune_rt_store_heap_string(out, new_len);
+}
+char* rune_rt_string_trim_end(const char* ptr, int64_t len) {
+    int64_t end = len;
+    while (end > 0 && ((unsigned char)ptr[end - 1] == ' ' || (unsigned char)ptr[end - 1] == '\t' || (unsigned char)ptr[end - 1] == '\n' || (unsigned char)ptr[end - 1] == '\r')) {
+        end--;
+    }
+    size_t new_len = (size_t)end;
+    char* out = (char*)malloc(new_len + 1);
+    if (!out) { fprintf(stderr, "Rune runtime: failed to allocate string trim_end buffer\n"); exit(111); }
+    memcpy(out, ptr, new_len);
+    return rune_rt_store_heap_string(out, new_len);
+}
+char* rune_rt_string_repeat(const char* ptr, int64_t len, int64_t count) {
+    if (count <= 0 || len == 0) {
+        char* out = (char*)malloc(1);
+        if (!out) { fprintf(stderr, "Rune runtime: failed to allocate string repeat buffer\n"); exit(111); }
+        return rune_rt_store_heap_string(out, 0);
+    }
+    size_t total = (size_t)len * (size_t)count;
+    char* out = (char*)malloc(total + 1);
+    if (!out) { fprintf(stderr, "Rune runtime: failed to allocate string repeat buffer\n"); exit(111); }
+    for (int64_t i = 0; i < count; i++) {
+        memcpy(out + (size_t)i * (size_t)len, ptr, (size_t)len);
+    }
+    return rune_rt_store_heap_string(out, total);
 }
 int64_t rune_rt_string_find(const char* ptr, int64_t len, const char* needle_ptr, int64_t needle_len) {
     if (needle_len == 0) return 0;
@@ -5652,6 +5855,28 @@ pub extern "C" fn rune_rt_string_strip(ptr: *const u8, len: i64) -> *const u8 {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
     rune_rt_store_string(text.trim().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_trim_start(ptr: *const u8, len: i64) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    rune_rt_store_string(text.trim_start().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_trim_end(ptr: *const u8, len: i64) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    rune_rt_store_string(text.trim_end().to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_string_repeat(ptr: *const u8, len: i64, count: i64) -> *const u8 {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let text = std::str::from_utf8(bytes).expect("Rune string must be valid UTF-8");
+    let n = count.max(0) as usize;
+    rune_rt_store_string(text.repeat(n))
 }
 
 #[unsafe(no_mangle)]

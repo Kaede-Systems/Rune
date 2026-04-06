@@ -1371,3 +1371,63 @@ fn builds_and_runs_string_slice_program() {
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "world\nhello\n");
 }
+
+#[test]
+fn builds_and_runs_string_trim_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("string_trim.rn");
+    let exe_path = dir.join("string_trim.exe");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "  hello  "
+    println(s.trim_start())
+    println(s.trim_end())
+    let leading: String = "   world"
+    println(leading.trim_start())
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("string trim program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run string trim executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "hello  \n  hello\nworld\n");
+}
+
+#[test]
+fn builds_and_runs_string_repeat_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("string_repeat.rn");
+    let exe_path = dir.join("string_repeat.exe");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "ab"
+    let n: i64 = 3
+    println(s.repeat(n))
+    let zero: i64 = 0
+    println(s.repeat(zero))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("string repeat program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run string repeat executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "ababab\n\n");
+}
