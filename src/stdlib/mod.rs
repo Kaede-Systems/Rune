@@ -176,6 +176,15 @@ fn env_program() -> Program {
                 ))],
             )),
             Item::Function(function(
+                "exists",
+                vec![param("name", "String")],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_env_exists",
+                    vec![pos(ident("name"))],
+                ))],
+            )),
+            Item::Function(function(
                 "get_i32",
                 vec![param("name", "String"), param("default", "i32")],
                 "i32",

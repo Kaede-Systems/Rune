@@ -701,3 +701,243 @@ fn wasm_build_runs_dynamic_arithmetic_in_node() {
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "13\n7\n30\nfalse\ntrue\n");
 }
+
+#[test]
+fn wasi_build_runs_string_methods_in_packaged_wasmtime() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("string_methods_wasi.rn");
+    let wasm_path = dir.join("string_methods_wasi.wasm");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "  Hello World  "
+    println(s.strip())
+    println(s.trim_start())
+    println(s.trim_end())
+    let n: i64 = 2
+    let base: String = "xy"
+    println(base.repeat(n))
+    let haystack: String = "hello world"
+    println(haystack.find("world"))
+    println(haystack.find("nope"))
+    let start: i64 = 0
+    let end: i64 = 5
+    println(haystack.slice(start, end))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-wasip1"))
+        .expect("wasi string methods build should succeed");
+
+    let wasmtime = find_packaged_wasmtime().expect("packaged wasmtime.exe should exist");
+    let output = Command::new(wasmtime)
+        .arg("run")
+        .arg(&wasm_path)
+        .output()
+        .expect("failed to run packaged wasmtime string methods runner");
+
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "Hello World\nHello World  \n  Hello World\nxyxy\n6\n-1\nhello\n");
+}
+
+#[test]
+fn wasm_build_runs_string_predicates_and_replace_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("string_predicates.rn");
+    let wasm_path = dir.join("string_predicates.wasm");
+    let runner_path = dir.join("run_string_predicates.js");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "hello world"
+    println(s.contains("world"))
+    println(s.contains("xyz"))
+    println(s.starts_with("hello"))
+    println(s.starts_with("world"))
+    println(s.ends_with("world"))
+    println(s.ends_with("hello"))
+    println(s.replace("world", "rune"))
+    println(s.len())
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm string predicates build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node wasm string predicates runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\nfalse\ntrue\nfalse\ntrue\nfalse\nhello rune\n11\n");
+}
+
+#[test]
+fn wasm_build_runs_math_builtins_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("math_builtins.rn");
+    let wasm_path = dir.join("math_builtins.wasm");
+    let runner_path = dir.join("run_math_builtins.js");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    println(abs(-7))
+    println(abs(5))
+    println(min(3, 8))
+    println(max(3, 8))
+    println(clamp(15, 0, 10))
+    println(clamp(-5, 0, 10))
+    println(pow(2, 10))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm math builtins build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node math builtins runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "7\n5\n3\n8\n10\n0\n1024\n");
+}
+
+#[test]
+fn wasm_build_runs_chr_ord_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("chr_ord.rn");
+    let wasm_path = dir.join("chr_ord.wasm");
+    let runner_path = dir.join("run_chr_ord.js");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let n: i64 = 65
+    let s: String = chr(n)
+    println(s)
+    let code: i64 = ord(s)
+    println(code)
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm chr/ord build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node chr/ord runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "A\n65\n");
+}
+
+#[test]
+fn wasm_build_runs_json_builtins_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("json_builtins.rn");
+    let wasm_path = dir.join("json_builtins.wasm");
+    let runner_path = dir.join("run_json_builtins.js");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let doc: Json = __rune_builtin_json_parse("{\"x\": 42, \"name\": \"rune\"}")
+    let x_val: Json = __rune_builtin_json_get(doc, "x")
+    println(__rune_builtin_json_to_i64(x_val))
+    let name_val: Json = __rune_builtin_json_get(doc, "name")
+    println(__rune_builtin_json_to_string(name_val))
+    println(__rune_builtin_json_kind(x_val))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm json builtins build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node json builtins runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "42\nrune\nnumber\n");
+}

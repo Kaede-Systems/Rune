@@ -1631,6 +1631,148 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "abs" {
+            if args.len() != 1 {
+                return Err(CodegenError {
+                    message: "`abs` expects 1 argument".to_string(),
+                    span,
+                });
+            }
+            let CallArg::Positional(x_expr) = &args[0] else {
+                return Err(CodegenError {
+                    message: "`abs` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", x_expr)?;
+            out.push_str("    call rune_rt_abs_i64\n");
+            return Ok(());
+        }
+
+        if name == "min" {
+            if args.len() != 2 {
+                return Err(CodegenError {
+                    message: "`min` expects 2 arguments".to_string(),
+                    span,
+                });
+            }
+            let (CallArg::Positional(a_expr), CallArg::Positional(b_expr)) =
+                (&args[0], &args[1])
+            else {
+                return Err(CodegenError {
+                    message: "`min` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", a_expr)?;
+            self.emit_into_reg(out, "rdx", b_expr)?;
+            out.push_str("    call rune_rt_min_i64\n");
+            return Ok(());
+        }
+
+        if name == "max" {
+            if args.len() != 2 {
+                return Err(CodegenError {
+                    message: "`max` expects 2 arguments".to_string(),
+                    span,
+                });
+            }
+            let (CallArg::Positional(a_expr), CallArg::Positional(b_expr)) =
+                (&args[0], &args[1])
+            else {
+                return Err(CodegenError {
+                    message: "`max` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", a_expr)?;
+            self.emit_into_reg(out, "rdx", b_expr)?;
+            out.push_str("    call rune_rt_max_i64\n");
+            return Ok(());
+        }
+
+        if name == "pow" {
+            if args.len() != 2 {
+                return Err(CodegenError {
+                    message: "`pow` expects 2 arguments".to_string(),
+                    span,
+                });
+            }
+            let (CallArg::Positional(base_expr), CallArg::Positional(exp_expr)) =
+                (&args[0], &args[1])
+            else {
+                return Err(CodegenError {
+                    message: "`pow` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", base_expr)?;
+            self.emit_into_reg(out, "rdx", exp_expr)?;
+            out.push_str("    call rune_rt_pow_i64\n");
+            return Ok(());
+        }
+
+        if name == "clamp" {
+            if args.len() != 3 {
+                return Err(CodegenError {
+                    message: "`clamp` expects 3 arguments".to_string(),
+                    span,
+                });
+            }
+            let [
+                CallArg::Positional(x_expr),
+                CallArg::Positional(lo_expr),
+                CallArg::Positional(hi_expr),
+            ] = args
+            else {
+                return Err(CodegenError {
+                    message: "`clamp` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", x_expr)?;
+            self.emit_into_reg(out, "rdx", lo_expr)?;
+            self.emit_into_reg(out, "r8", hi_expr)?;
+            out.push_str("    call rune_rt_clamp_i64\n");
+            return Ok(());
+        }
+
+        if name == "chr" {
+            if args.len() != 1 {
+                return Err(CodegenError {
+                    message: "`chr` expects 1 argument".to_string(),
+                    span,
+                });
+            }
+            let CallArg::Positional(n_expr) = &args[0] else {
+                return Err(CodegenError {
+                    message: "`chr` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", n_expr)?;
+            out.push_str("    call rune_rt_chr\n");
+            return Ok(());
+        }
+
+        if name == "ord" {
+            if args.len() != 1 {
+                return Err(CodegenError {
+                    message: "`ord` expects 1 argument".to_string(),
+                    span,
+                });
+            }
+            let CallArg::Positional(s_expr) = &args[0] else {
+                return Err(CodegenError {
+                    message: "`ord` does not accept keyword arguments".to_string(),
+                    span,
+                });
+            };
+            self.emit_string_arg(out, s_expr, "rcx", "rdx", "`ord` argument")?;
+            out.push_str("    call rune_rt_ord\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_system_pid" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -4189,6 +4331,22 @@ impl<'a> FunctionEmitter<'a> {
 
         if let ExprKind::Call { callee, args } = &expr.kind
             && let ExprKind::Identifier(name) = &callee.kind
+            && name == "chr"
+        {
+            let [CallArg::Positional(n_expr)] = args.as_slice() else {
+                return Err(CodegenError {
+                    message: "`chr` expects 1 positional argument".into(),
+                    span: expr.span,
+                });
+            };
+            self.emit_into_reg(out, "rcx", n_expr)?;
+            out.push_str("    call rune_rt_chr\n");
+            self.capture_runtime_string_result(out, ptr_reg, len_reg);
+            return Ok(());
+        }
+
+        if let ExprKind::Call { callee, args } = &expr.kind
+            && let ExprKind::Identifier(name) = &callee.kind
             && matches!(
                 name.as_str(),
                 "__rune_builtin_env_arg"
@@ -6120,6 +6278,8 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "__rune_builtin_network_tcp_server_open"
         | "__rune_builtin_network_tcp_client_open" => Some(IrType::I32),
         "__rune_builtin_fs_file_size" => Some(IrType::I64),
+        "abs" | "min" | "max" | "pow" | "clamp" | "ord" => Some(IrType::I64),
+        "chr" => Some(IrType::String),
         _ => None,
     }
 }

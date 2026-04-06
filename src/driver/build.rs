@@ -2445,6 +2445,18 @@ function createHost(options = {{}}) {{
   const decoder = new TextDecoder("utf-8");
   const encoder = new TextEncoder();
   const browserBuffers = {{ stdout: "", stderr: "" }};
+  const jsonStore = new Map();
+  let jsonNextHandle = 1n;
+
+  function jsonAlloc(value) {{
+    const handle = jsonNextHandle++;
+    jsonStore.set(handle, value);
+    return handle;
+  }}
+
+  function jsonGet(handle) {{
+    return jsonStore.get(handle);
+  }}
 
   function setInstance(nextInstance) {{
     instance = nextInstance;
@@ -2813,6 +2825,46 @@ function createHost(options = {{}}) {{
       }},
       rune_rt_string_slice(ptr, len, start, end) {{
         return allocString(readString(ptr, len).slice(Number(start), Number(end)));
+      }},
+      rune_rt_abs_i64(x) {{
+        return x < 0n ? -x : x;
+      }},
+      rune_rt_min_i64(a, b) {{
+        return a < b ? a : b;
+      }},
+      rune_rt_max_i64(a, b) {{
+        return a > b ? a : b;
+      }},
+      rune_rt_sum_range(start, stop, step) {{
+        if (step === 0n) return 0n;
+        let total = 0n;
+        if (step > 0n) {{
+          for (let v = start; v < stop; v += step) total += v;
+        }} else {{
+          for (let v = start; v > stop; v += step) total += v;
+        }}
+        return total;
+      }},
+      rune_rt_clamp_i64(x, lo, hi) {{
+        return x < lo ? lo : (x > hi ? hi : x);
+      }},
+      rune_rt_pow_i64(base, exp) {{
+        if (exp < 0n) return 0n;
+        let result = 1n;
+        while (exp > 0n) {{
+          if (exp & 1n) result *= base;
+          base *= base;
+          exp >>= 1n;
+        }}
+        return result;
+      }},
+      rune_rt_chr(codepoint) {{
+        return allocString(String.fromCodePoint(Number(codepoint)));
+      }},
+      rune_rt_ord(ptr, len) {{
+        const s = readString(ptr, len);
+        if (s.length === 0) return 0n;
+        return BigInt(s.codePointAt(0) ?? 0);
       }},
       rune_rt_dynamic_to_string(tag, payload, extra) {{
         return runeDynamicToString(tag, payload, extra);
@@ -3276,6 +3328,69 @@ function createHost(options = {{}}) {{
           throw new Error("Rune terminal builtins require a Node host for wasm32-unknown-unknown");
         }}
         writeText("stdout", `\u001b]0;${{readString(ptr, len)}}\u0007`);
+      }},
+      rune_rt_json_parse(ptr, len) {{
+        const text = readString(ptr, len);
+        try {{ return jsonAlloc(JSON.parse(text)); }} catch {{ return 0n; }}
+      }},
+      rune_rt_json_stringify(handle) {{
+        const val = jsonGet(handle);
+        return allocString(val !== undefined ? (JSON.stringify(val) ?? "null") : "null");
+      }},
+      rune_rt_json_get(handle, keyPtr, keyLen) {{
+        const val = jsonGet(handle);
+        if (val === null || typeof val !== "object" || Array.isArray(val)) return 0n;
+        const key = readString(keyPtr, keyLen);
+        const child = val[key];
+        return child !== undefined ? jsonAlloc(child) : 0n;
+      }},
+      rune_rt_json_index(handle, idx) {{
+        const val = jsonGet(handle);
+        if (!Array.isArray(val)) return 0n;
+        const child = val[Number(idx)];
+        return child !== undefined ? jsonAlloc(child) : 0n;
+      }},
+      rune_rt_json_len(handle) {{
+        const val = jsonGet(handle);
+        if (Array.isArray(val)) return BigInt(val.length);
+        if (val !== null && typeof val === "object") return BigInt(Object.keys(val).length);
+        return 0n;
+      }},
+      rune_rt_json_kind(handle) {{
+        const val = jsonGet(handle);
+        if (val === null || val === undefined) return allocString("null");
+        if (typeof val === "boolean") return allocString("bool");
+        if (typeof val === "number") return allocString("number");
+        if (typeof val === "string") return allocString("string");
+        if (Array.isArray(val)) return allocString("array");
+        return allocString("object");
+      }},
+      rune_rt_json_to_string(handle) {{
+        const val = jsonGet(handle);
+        return allocString(typeof val === "string" ? val : "");
+      }},
+      rune_rt_json_to_i64(handle) {{
+        const val = jsonGet(handle);
+        if (typeof val === "number") return BigInt(Math.trunc(val));
+        if (typeof val === "boolean") return val ? 1n : 0n;
+        if (typeof val === "string") {{ const n = parseInt(val, 10); return isNaN(n) ? 0n : BigInt(n); }}
+        return 0n;
+      }},
+      rune_rt_json_to_bool(handle) {{
+        const val = jsonGet(handle);
+        if (typeof val === "boolean") return val;
+        if (typeof val === "number") return val !== 0;
+        if (typeof val === "string") return val.length > 0;
+        return val !== null && val !== undefined;
+      }},
+      rune_rt_json_is_null(handle) {{
+        const val = jsonGet(handle);
+        return val === null || val === undefined;
+      }},
+      rune_rt_json_equal(left, right) {{
+        const lv = jsonGet(left);
+        const rv = jsonGet(right);
+        return JSON.stringify(lv) === JSON.stringify(rv);
       }},
       rune_rt_audio_bell() {{
         if (!isNode) {{
@@ -3820,6 +3935,60 @@ char* rune_rt_string_slice(const char* ptr, int64_t len, int64_t start, int64_t 
     }
     memcpy(out, ptr + start, new_len);
     return rune_rt_store_heap_string(out, new_len);
+}
+int64_t rune_rt_abs_i64(int64_t x) { return x < 0 ? -x : x; }
+int64_t rune_rt_min_i64(int64_t a, int64_t b) { return a < b ? a : b; }
+int64_t rune_rt_max_i64(int64_t a, int64_t b) { return a > b ? a : b; }
+int64_t rune_rt_clamp_i64(int64_t x, int64_t lo, int64_t hi) {
+    if (x < lo) return lo;
+    if (x > hi) return hi;
+    return x;
+}
+int64_t rune_rt_pow_i64(int64_t base, int64_t exp) {
+    if (exp < 0) return 0;
+    int64_t result = 1;
+    while (exp > 0) {
+        if (exp & 1) result *= base;
+        base *= base;
+        exp >>= 1;
+    }
+    return result;
+}
+char* rune_rt_chr(int64_t codepoint) {
+    char buf[5];
+    size_t len = 0;
+    uint32_t cp = (uint32_t)codepoint;
+    if (cp < 0x80) {
+        buf[len++] = (char)cp;
+    } else if (cp < 0x800) {
+        buf[len++] = (char)(0xC0 | (cp >> 6));
+        buf[len++] = (char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        buf[len++] = (char)(0xE0 | (cp >> 12));
+        buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[len++] = (char)(0x80 | (cp & 0x3F));
+    } else {
+        buf[len++] = (char)(0xF0 | (cp >> 18));
+        buf[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[len++] = (char)(0x80 | (cp & 0x3F));
+    }
+    char* out = (char*)malloc(len + 1);
+    if (!out) { fprintf(stderr, "Rune runtime: chr allocation failed\n"); exit(111); }
+    memcpy(out, buf, len);
+    return rune_rt_store_heap_string(out, (int64_t)len);
+}
+int64_t rune_rt_ord(const char* ptr, int64_t len) {
+    if (len <= 0) return 0;
+    unsigned char c = (unsigned char)ptr[0];
+    if (c < 0x80) return (int64_t)c;
+    if ((c & 0xE0) == 0xC0 && len >= 2)
+        return (int64_t)(((c & 0x1F) << 6) | (((unsigned char)ptr[1]) & 0x3F));
+    if ((c & 0xF0) == 0xE0 && len >= 3)
+        return (int64_t)(((c & 0x0F) << 12) | ((((unsigned char)ptr[1]) & 0x3F) << 6) | (((unsigned char)ptr[2]) & 0x3F));
+    if ((c & 0xF8) == 0xF0 && len >= 4)
+        return (int64_t)(((c & 0x07) << 18) | ((((unsigned char)ptr[1]) & 0x3F) << 12) | ((((unsigned char)ptr[2]) & 0x3F) << 6) | (((unsigned char)ptr[3]) & 0x3F));
+    return (int64_t)c;
 }
 char* rune_rt_system_platform(void) {
 #if defined(_WIN32)
@@ -6771,6 +6940,58 @@ pub extern "C" fn rune_rt_sum_range(start: i64, stop: i64, step: i64) -> i64 {
         }
     }
     total
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_abs_i64(x: i64) -> i64 {
+    x.abs()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_min_i64(a: i64, b: i64) -> i64 {
+    a.min(b)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_max_i64(a: i64, b: i64) -> i64 {
+    a.max(b)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_clamp_i64(x: i64, lo: i64, hi: i64) -> i64 {
+    x.clamp(lo, hi)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_pow_i64(mut base: i64, mut exp: i64) -> i64 {
+    if exp < 0 {
+        return 0;
+    }
+    let mut result: i64 = 1;
+    while exp > 0 {
+        if exp & 1 != 0 {
+            result = result.wrapping_mul(base);
+        }
+        base = base.wrapping_mul(base);
+        exp >>= 1;
+    }
+    result
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_chr(codepoint: i64) -> *const u8 {
+    let cp = u32::try_from(codepoint).unwrap_or(0xFFFD);
+    let ch = char::from_u32(cp).unwrap_or('\u{FFFD}');
+    let mut buf = [0u8; 4];
+    let s = ch.encode_utf8(&mut buf);
+    rune_rt_store_string(s.to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_ord(ptr: *const u8, len: i64) -> i64 {
+    let slice = unsafe { std::slice::from_raw_parts(ptr, len.max(0) as usize) };
+    let s = std::str::from_utf8(slice).unwrap_or("");
+    s.chars().next().map_or(0, |c| c as i64)
 }
 
 #[cfg(target_os = "wasi")]
