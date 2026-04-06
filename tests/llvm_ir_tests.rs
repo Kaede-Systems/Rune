@@ -219,3 +219,21 @@ fn emits_llvm_ir_for_for_range_three_args() {
 
     assert!(ir.contains("while_loop_"), "expected while_loop_ block in LLVM IR");
 }
+
+#[test]
+fn emits_string_method_runtime_decls() {
+    let ir = emit_llvm_ir_source(
+        "def main() -> i32:\n    let s: String = \"  hello world  \"\n    let start: i64 = 6\n    let end: i64 = 11\n    println(s.upper())\n    println(s.lower())\n    println(s.strip())\n    println(s.trim_start())\n    println(s.trim_end())\n    let n: i64 = 2\n    println(s.repeat(n))\n    let idx: i64 = s.find(\"world\")\n    println(idx)\n    println(s.slice(start, end))\n    return 0\n",
+    )
+    .expect("llvm ir should generate for all string methods");
+
+    assert!(ir.contains("declare ptr @rune_rt_string_upper(ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_string_lower(ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_string_strip(ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_string_trim_start(ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_string_trim_end(ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_string_repeat(ptr, i64, i64)"));
+    assert!(ir.contains("declare i64 @rune_rt_string_find(ptr, i64, ptr, i64)"));
+    assert!(ir.contains("declare ptr @rune_rt_string_slice(ptr, i64, i64, i64)"));
+    assert!(ir.contains("declare i64 @rune_rt_last_string_len()"));
+}

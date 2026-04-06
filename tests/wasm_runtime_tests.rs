@@ -661,3 +661,43 @@ fn wasm_build_runs_fs_extended_operations_in_node() {
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\nhello\ntrue\nfalse\ntrue\ntrue\nfalse\n");
 }
+
+#[test]
+fn wasm_build_runs_dynamic_arithmetic_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("dynamic_arith.rn");
+    let wasm_path = dir.join("dynamic_arith.wasm");
+    let runner_path = dir.join("run_dynamic_arith.js");
+
+    fs::write(
+        &source_path,
+        "def main() -> i32:\n    let x: dynamic = 10\n    let y: dynamic = 3\n    println(x + y)\n    println(x - y)\n    println(x * y)\n    println(x == y)\n    println(x != y)\n    return 0\n",
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm dynamic arithmetic build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node wasm dynamic arith runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "13\n7\n30\nfalse\ntrue\n");
+}
