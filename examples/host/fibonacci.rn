@@ -1,0 +1,31 @@
+def fib(n: i64) -> i64:
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+def fib_iter(n: i64) -> i64:
+    if n <= 1:
+        return n
+    let a: i64 = 0
+    let b: i64 = 1
+    let i: i64 = 2
+    while i <= n:
+        let c: i64 = a + b
+        a = b
+        b = c
+        i = i + 1
+    return b
+
+def main() -> i32:
+    println("fibonacci (recursive):")
+    let i: i64 = 0
+    while i <= 10:
+        print("fib(")
+        print(i)
+        print(")=")
+        println(fib(i))
+        i = i + 1
+
+    println("fibonacci (iterative, large n):")
+    println(fib_iter(50))
+    return 0

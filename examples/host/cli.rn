@@ -1,0 +1,106 @@
+# Host-side CLI for talking to the Arduino
+# Startup:
+#   opens the serial port @ 115200
+#   sends PING
+#   expects PONG
+
+from env import arg_count, arg
+from io import prompt
+from serial import open, close, recv_line_timeout, send_line
+from time import sleep_ms
+
+def parse_port() -> String:
+    let index: i32 = 0
+    while index < arg_count():
+        if arg(index) == "--port" and index + 1 < arg_count():
+            return arg(index + 1)
+        elif arg(index) == "--PORT" and index + 1 < arg_count():
+            return arg(index + 1)
+        index = index + 1
+    return "COM6"
+
+def parse_baud() -> i64:
+    let index: i32 = 0
+    while index < arg_count():
+        if arg(index) == "--baud" and index + 1 < arg_count():
+            return int(arg(index + 1))
+        index = index + 1
+    return 115200
+
+def sync_board() -> bool:
+    println("Status: waiting for Arduino reset")
+    sleep_ms(1400)
+
+    let boot = recv_line_timeout(2500)
+    if boot != "":
+        println("Board: " + boot)
+    else:
+        println("Status: no boot banner received yet")
+
+    let attempt: i64 = 0
+    while attempt < 5:
+        println("Status: ping attempt " + str(attempt + 1))
+        send_line("PING")
+        let reply = recv_line_timeout(1500)
+
+        if reply == "PONG":
+            println("Status: board alive")
+            return true
+        elif reply != "":
+            println("Board: " + reply)
+        else:
+            println("Status: no reply")
+
+        sleep_ms(200)
+        attempt = attempt + 1
+
+    println("Status: board did not answer PING")
+    return false
+
+def main() -> i32:
+    let port = parse_port()
+    let baud: i64 = parse_baud()
+
+    println("Status: opening " + port + " @ " + str(baud))
+    let ok = open(port, baud)
+    if not ok:
+        println("Status: open failed")
+        return 1
+
+    println("Status: serial open ok")
+    if not sync_board():
+        close()
+        return 2
+
+    println("Status: calculator ready")
+
+    while true:
+        println("")
+        println("Choose operation: ADD, SUB, MUL, DIV, QUIT")
+        let cmd = prompt("> ")
+
+        if cmd == "QUIT":
+            send_line("QUIT")
+            let bye = recv_line_timeout(1000)
+            println("Board: " + bye)
+            close()
+            return 0
+
+        if cmd != "ADD" and cmd != "SUB" and cmd != "MUL" and cmd != "DIV":
+            println("Invalid command")
+            continue
+
+        let a = prompt("First number: ")
+        let b = prompt("Second number: ")
+
+        send_line(cmd)
+        send_line(a)
+        send_line(b)
+
+        let result = recv_line_timeout(2000)
+        if result == "":
+            println("Status: calculator did not respond")
+            continue
+        println("Result: " + result)
+
+    return 0

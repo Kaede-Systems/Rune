@@ -1,0 +1,21 @@
+from arduino import delay_ms, digital_write, led_builtin, mode_output, pin_mode, uart_begin
+
+def setup() -> unit:
+    uart_begin(115200)
+    pin_mode(led_builtin(), mode_output())
+    println("counter ready")
+    return
+
+def loop() -> unit:
+    let i: i64 = 0
+    while i < 10:
+        print("count=")
+        println(i)
+        digital_write(led_builtin(), true)
+        delay_ms(200)
+        digital_write(led_builtin(), false)
+        delay_ms(200)
+        i = i + 1
+    println("done")
+    delay_ms(2000)
+    return

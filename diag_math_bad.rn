@@ -1,2 +1,0 @@
-def bad() -> i32:
-    return "oops"
