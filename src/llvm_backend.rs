@@ -75,6 +75,7 @@ fn emit_codegen_artifact_from_ir(
 ) -> Result<(), LlvmBackendError> {
     let temp_dir = create_temp_dir()?;
     let input_path = temp_dir.join("rune.ll");
+    let optimized_path = temp_dir.join("rune.opt.ll");
     fs::write(&input_path, llvm_ir).map_err(|error| LlvmBackendError {
         message: format!("failed to write temporary LLVM IR file: {error}"),
     })?;
@@ -89,19 +90,21 @@ fn emit_codegen_artifact_from_ir(
     }
 
     let input_arg = input_path.to_string_lossy().into_owned();
+    let optimized_arg = optimized_path.to_string_lossy().into_owned();
     let output_arg = output_path.to_string_lossy().into_owned();
     run_llvm_tool(
         target_triple,
         "opt",
-        vec!["-passes=verify".to_string(), input_arg.clone()],
+        llvm_opt_args(target_triple, &input_arg, &optimized_arg),
     )?;
     run_llvm_tool(
         target_triple,
         "llc",
-        llvm_codegen_args(target_triple, filetype, &input_arg, &output_arg),
+        llvm_codegen_args(target_triple, filetype, &optimized_arg, &output_arg),
     )?;
 
     let _ = fs::remove_file(input_path);
+    let _ = fs::remove_file(optimized_path);
     let _ = fs::remove_dir(temp_dir);
     Ok(())
 }
@@ -156,11 +159,28 @@ fn llvm_codegen_args(
         _ => vec![format!("-mtriple={target_triple}")],
     };
     args.push(format!("-filetype={filetype}"));
-    args.push("-O3".to_string());
+    args.push(match target_triple {
+        "avr-atmega328p-arduino-uno" => "-O2".to_string(),
+        _ => "-O3".to_string(),
+    });
     args.push(input_arg.to_string());
     args.push("-o".to_string());
     args.push(output_arg.to_string());
     args
+}
+
+fn llvm_opt_args(target_triple: &str, input_arg: &str, output_arg: &str) -> Vec<String> {
+    let pipeline = match target_triple {
+        "avr-atmega328p-arduino-uno" => "default<Oz>,verify",
+        _ => "verify",
+    };
+    vec![
+        "-S".to_string(),
+        format!("-passes={pipeline}"),
+        input_arg.to_string(),
+        "-o".to_string(),
+        output_arg.to_string(),
+    ]
 }
 
 fn create_temp_dir() -> Result<PathBuf, LlvmBackendError> {
@@ -178,4 +198,28 @@ fn create_temp_dir() -> Result<PathBuf, LlvmBackendError> {
         ),
     })?;
     Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{llvm_codegen_args, llvm_opt_args};
+
+    #[test]
+    fn avr_codegen_args_use_exact_cpu_and_size_optimization() {
+        let args = llvm_codegen_args(
+            "avr-atmega328p-arduino-uno",
+            "obj",
+            "input.ll",
+            "output.o",
+        );
+        assert!(args.contains(&"-mtriple=avr".to_string()));
+        assert!(args.contains(&"-mcpu=atmega328p".to_string()));
+        assert!(args.contains(&"-O2".to_string()));
+    }
+
+    #[test]
+    fn avr_opt_args_use_size_pipeline() {
+        let args = llvm_opt_args("avr-atmega328p-arduino-uno", "input.ll", "output.ll");
+        assert!(args.contains(&"-passes=default<Oz>,verify".to_string()));
+    }
 }
