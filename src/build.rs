@@ -6473,13 +6473,16 @@ fn portable_runtime_source() -> &'static str {
 #include <inttypes.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #ifdef _WIN32
 #include <direct.h>
 #include <fcntl.h>
 #include <io.h>
 #include <malloc.h>
+#include <windows.h>
 #else
 #include <limits.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -6671,6 +6674,75 @@ _Bool rune_rt_system_is_wasm(void) {
     return 1;
 #else
     return 0;
+#endif
+}
+_Bool rune_rt_time_has_wall_clock(void) {
+    return 1;
+}
+int64_t rune_rt_time_now_unix(void) {
+    return (int64_t)time(NULL);
+}
+int64_t rune_rt_time_monotonic_ms(void) {
+#ifdef _WIN32
+    static LARGE_INTEGER frequency;
+    static int initialized = 0;
+    LARGE_INTEGER counter;
+    if (!initialized) {
+        QueryPerformanceFrequency(&frequency);
+        initialized = 1;
+    }
+    QueryPerformanceCounter(&counter);
+    return (int64_t)((counter.QuadPart * 1000LL) / frequency.QuadPart);
+#elif defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000LL + (int64_t)ts.tv_nsec / 1000000LL;
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000LL + (int64_t)tv.tv_usec / 1000LL;
+#endif
+}
+int64_t rune_rt_time_monotonic_us(void) {
+#ifdef _WIN32
+    static LARGE_INTEGER frequency;
+    static int initialized = 0;
+    LARGE_INTEGER counter;
+    if (!initialized) {
+        QueryPerformanceFrequency(&frequency);
+        initialized = 1;
+    }
+    QueryPerformanceCounter(&counter);
+    return (int64_t)((counter.QuadPart * 1000000LL) / frequency.QuadPart);
+#elif defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000LL + (int64_t)ts.tv_nsec / 1000LL;
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
+#endif
+}
+void rune_rt_time_sleep_ms(int64_t ms) {
+    if (ms <= 0) {
+        return;
+    }
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    usleep((useconds_t)(ms * 1000));
+#endif
+}
+void rune_rt_time_sleep_us(int64_t us) {
+    if (us <= 0) {
+        return;
+    }
+#ifdef _WIN32
+    DWORD millis = (DWORD)((us + 999) / 1000);
+    Sleep(millis);
+#else
+    usleep((useconds_t)us);
 #endif
 }
 int64_t rune_rt_string_to_i64(const char* ptr, int64_t len) {
