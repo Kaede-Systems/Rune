@@ -47,6 +47,24 @@ let value = 10
 
 Untyped locals currently default to `dynamic`.
 
+## Strings and F-Strings
+
+Regular string:
+
+```rune
+let name: String = "world"
+```
+
+F-string with `{expr}` interpolation:
+
+```rune
+let x: i64 = 42
+println(f"value is {x}")
+println(f"sum is {x + 1}")
+```
+
+Use `{{` and `}}` to emit a literal brace inside an f-string.
+
 ## Functions
 
 ```rune
@@ -416,12 +434,27 @@ Current native runtime behavior:
 
 Language-level builtins currently recognized:
 
-- `print(...)`
-- `println(...)`
-- `input()`
-- `str(value)`
-- `int(value)`
-- `panic(...)`
+- `print(...)` — print to stdout (no newline)
+- `println(...)` — print to stdout with newline
+- `eprint(...)` — print to stderr (no newline)
+- `eprintln(...)` — print to stderr with newline
+- `flush()` — flush stdout
+- `eflush()` — flush stderr
+- `input()` — read a line from stdin, returns `String`
+- `str(value)` — convert value to `String`; calls `__str__(self)` on objects
+- `repr(value)` — convert value to debug `String`; calls `__repr__(self)` on objects
+- `int(value)` — parse `String` to `i64`, or convert numeric value
+- `len(value)` — length of `String` (byte count) or collection
+- `abs(x: i64) -> i64`
+- `min(a: i64, b: i64) -> i64`
+- `max(a: i64, b: i64) -> i64`
+- `pow(base: i64, exp: i64) -> i64`
+- `clamp(x: i64, lo: i64, hi: i64) -> i64`
+- `chr(n: i64) -> String` — UTF-8 string from codepoint
+- `ord(s: String) -> i64` — first codepoint of string
+- `range(stop)`, `range(start, stop)`, `range(start, stop, step)` — used in `for` loops and `sum()`
+- `sum(range(...))` — sum of a range; equivalent to Σ over the range arguments
+- `panic(...)` — print message and exit with code `101`
 
 ## Current Standard Library Surface
 
@@ -429,7 +462,7 @@ These top-level stdlib modules are available through Rune's default stdlib loade
 
 Current implementation detail:
 - `env`, `time`, `sys`, `system`, `io`, `terminal`, `fs`, `json`, `audio`, `network`, `serial`, `gpio`, `pwm`, and `adc` are loaded from the Rust-side built-in module registry.
-- the remaining stdlib modules currently still load from [`stdlib/`](C:\Users\kaededevkentohinode\KUROX\stdlib) until they are migrated.
+- the remaining stdlib modules currently still load from [`stdlib/`](../stdlib) until they are migrated.
 
 Current stdlib surface:
 
