@@ -111,3 +111,58 @@ fn lexes_fstrings() {
     let tokens = kinds("def main() -> unit:\n    println(f\"hello {42}\")\n");
     assert!(tokens.contains(&TokenKind::FString("hello {42}".into())));
 }
+
+#[test]
+fn lexes_augmented_assignment_operators() {
+    let tokens = kinds("def f() -> unit:\n    x += 1\n    y -= 2\n    z *= 3\n    w /= 4\n    r %= 5\n");
+    assert!(tokens.contains(&TokenKind::PlusEqual));
+    assert!(tokens.contains(&TokenKind::MinusEqual));
+    assert!(tokens.contains(&TokenKind::StarEqual));
+    assert!(tokens.contains(&TokenKind::SlashEqual));
+    assert!(tokens.contains(&TokenKind::PercentEqual));
+}
+
+#[test]
+fn lexes_bitwise_augmented_assignment_operators() {
+    let tokens = kinds("def f() -> unit:\n    a &= 1\n    b |= 2\n    c ^= 3\n");
+    assert!(tokens.contains(&TokenKind::AmpersandEqual));
+    assert!(tokens.contains(&TokenKind::PipeEqual));
+    assert!(tokens.contains(&TokenKind::CaretEqual));
+}
+
+#[test]
+fn lexes_bitwise_operators() {
+    let tokens = kinds("def f() -> unit:\n    let a = x & y | z ^ w\n    let b = ~x\n    let c = x << 2\n    let d = x >> 1\n");
+    assert!(tokens.contains(&TokenKind::Ampersand));
+    assert!(tokens.contains(&TokenKind::Pipe));
+    assert!(tokens.contains(&TokenKind::Caret));
+    assert!(tokens.contains(&TokenKind::Tilde));
+    assert!(tokens.contains(&TokenKind::ShiftLeft));
+    assert!(tokens.contains(&TokenKind::ShiftRight));
+}
+
+#[test]
+fn lexes_hex_integer_literals() {
+    let tokens = kinds("def f() -> unit:\n    let x = 0xFF\n    let y = 0x1A2B\n");
+    assert!(tokens.contains(&TokenKind::Integer("0xFF".into())));
+    assert!(tokens.contains(&TokenKind::Integer("0x1A2B".into())));
+}
+
+#[test]
+fn lexes_octal_and_binary_literals() {
+    let tokens = kinds("def f() -> unit:\n    let x = 0o17\n    let y = 0b1010\n");
+    assert!(tokens.contains(&TokenKind::Integer("0o17".into())));
+    assert!(tokens.contains(&TokenKind::Integer("0b1010".into())));
+}
+
+#[test]
+fn lexes_integer_with_digit_separators() {
+    let tokens = kinds("def f() -> unit:\n    let x = 1_000_000\n");
+    assert!(tokens.contains(&TokenKind::Integer("1_000_000".into())));
+}
+
+#[test]
+fn lexes_assert_keyword() {
+    let tokens = kinds("def f() -> unit:\n    assert x > 0\n");
+    assert!(tokens.contains(&TokenKind::Assert));
+}

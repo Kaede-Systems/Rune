@@ -382,3 +382,47 @@ fn rejects_unsupported_extern_types() {
         .expect_err("unsupported extern params should fail");
     assert!(error.message.contains("must use bool, i32, i64, String, or unit"));
 }
+
+#[test]
+fn checks_bitwise_ops_on_integers() {
+    let checked = check_source(
+        "def f(a: i64, b: i64) -> i64:\n    return a & b\n",
+    )
+    .expect("bitwise and on integers should check");
+    assert_eq!(checked.functions[0].return_type, Type::I64);
+}
+
+#[test]
+fn checks_bitwise_or_and_xor() {
+    let checked = check_source(
+        "def f(a: i64, b: i64) -> i64:\n    let x: i64 = a | b\n    let y: i64 = a ^ b\n    return x\n",
+    )
+    .expect("bitwise or/xor should check");
+    assert_eq!(checked.functions[0].return_type, Type::I64);
+}
+
+#[test]
+fn checks_shift_ops_on_integers() {
+    let checked = check_source(
+        "def f(a: i64) -> i64:\n    return a << 2\n",
+    )
+    .expect("shift on integer should check");
+    assert_eq!(checked.functions[0].return_type, Type::I64);
+}
+
+#[test]
+fn rejects_bitwise_ops_on_non_integers() {
+    let error = check_source(
+        "def f(a: String, b: String) -> String:\n    return a & b\n",
+    )
+    .expect_err("bitwise and on strings should fail");
+    assert!(error.message.contains("requires integer") || error.message.contains("integer"));
+}
+
+#[test]
+fn checks_field_assignment_on_struct() {
+    check_source(
+        "struct Point:\n    x: i64\n    y: i64\n\ndef move_x(p: Point, dx: i64) -> unit:\n    p.x = dx\n",
+    )
+    .expect("field assignment should check on struct");
+}

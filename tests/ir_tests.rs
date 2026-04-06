@@ -66,3 +66,39 @@ fn lowers_modulo_into_ir() {
 
     assert!(ir.contains("Modulo"));
 }
+
+#[test]
+fn lowers_bitwise_ops_into_ir() {
+    let program = parse_source(
+        "def f(a: i64, b: i64) -> i64:\n    let x: i64 = a & b\n    let y: i64 = a | b\n    let z: i64 = a ^ b\n    return x\n",
+    )
+    .expect("program should parse");
+    let ir = lower_program(&program).to_string();
+
+    assert!(ir.contains("BitwiseAnd"), "missing BitwiseAnd in IR: {ir}");
+    assert!(ir.contains("BitwiseOr"), "missing BitwiseOr in IR");
+    assert!(ir.contains("BitwiseXor"), "missing BitwiseXor in IR");
+}
+
+#[test]
+fn lowers_shift_ops_into_ir() {
+    let program = parse_source(
+        "def f(a: i64) -> i64:\n    let x: i64 = a << 2\n    let y: i64 = a >> 1\n    return x\n",
+    )
+    .expect("program should parse");
+    let ir = lower_program(&program).to_string();
+
+    assert!(ir.contains("ShiftLeft"), "missing ShiftLeft in IR: {ir}");
+    assert!(ir.contains("ShiftRight"), "missing ShiftRight in IR");
+}
+
+#[test]
+fn lowers_bitwise_not_into_ir() {
+    let program = parse_source(
+        "def f(a: i64) -> i64:\n    let x: i64 = ~a\n    return x\n",
+    )
+    .expect("program should parse");
+    let ir = lower_program(&program).to_string();
+
+    assert!(ir.contains("bnot"), "missing bnot in IR: {ir}");
+}

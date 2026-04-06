@@ -9,6 +9,7 @@ pub struct Span {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     And,
+    Assert,
     Async,
     Await,
     Break,
@@ -67,6 +68,19 @@ pub enum TokenKind {
     Less,
     LessEqual,
     Ampersand,
+    Pipe,
+    Caret,
+    Tilde,
+    ShiftLeft,
+    ShiftRight,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    PercentEqual,
+    AmpersandEqual,
+    PipeEqual,
+    CaretEqual,
     Arrow,
     Eof,
 }
@@ -278,8 +292,58 @@ impl<'a> Lexer<'a> {
                 '0'..='9' => {
                     let start = offset;
                     let mut end = offset + ch.len_utf8();
+                    // Detect 0x / 0o / 0b prefixes
+                    if ch == '0' {
+                        if let Some((_, prefix_ch)) = chars.peek().copied() {
+                            match prefix_ch {
+                                'x' | 'X' => {
+                                    chars.next();
+                                    end += prefix_ch.len_utf8();
+                                    while let Some((next_offset, next_ch)) = chars.peek().copied() {
+                                        if next_ch.is_ascii_hexdigit() || next_ch == '_' {
+                                            chars.next();
+                                            end = next_offset + next_ch.len_utf8();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    self.push(TokenKind::Integer(content[start..end].to_string()), column);
+                                    continue;
+                                }
+                                'o' | 'O' => {
+                                    chars.next();
+                                    end += prefix_ch.len_utf8();
+                                    while let Some((next_offset, next_ch)) = chars.peek().copied() {
+                                        if matches!(next_ch, '0'..='7') || next_ch == '_' {
+                                            chars.next();
+                                            end = next_offset + next_ch.len_utf8();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    self.push(TokenKind::Integer(content[start..end].to_string()), column);
+                                    continue;
+                                }
+                                'b' | 'B' => {
+                                    chars.next();
+                                    end += prefix_ch.len_utf8();
+                                    while let Some((next_offset, next_ch)) = chars.peek().copied() {
+                                        if matches!(next_ch, '0' | '1') || next_ch == '_' {
+                                            chars.next();
+                                            end = next_offset + next_ch.len_utf8();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    self.push(TokenKind::Integer(content[start..end].to_string()), column);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     while let Some((next_offset, next_ch)) = chars.peek().copied() {
-                        if next_ch.is_ascii_digit() {
+                        if next_ch.is_ascii_digit() || next_ch == '_' {
                             chars.next();
                             end = next_offset + next_ch.len_utf8();
                         } else {
@@ -300,15 +364,70 @@ impl<'a> Lexer<'a> {
                 ',' => self.push(TokenKind::Comma, column),
                 '.' => self.push(TokenKind::Dot, column),
                 ':' => self.push(TokenKind::Colon, column),
-                '+' => self.push(TokenKind::Plus, column),
-                '%' => self.push(TokenKind::Percent, column),
-                '*' => self.push(TokenKind::Star, column),
-                '/' => self.push(TokenKind::Slash, column),
-                '&' => self.push(TokenKind::Ampersand, column),
+                '+' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::PlusEqual, column);
+                    } else {
+                        self.push(TokenKind::Plus, column);
+                    }
+                }
+                '%' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::PercentEqual, column);
+                    } else {
+                        self.push(TokenKind::Percent, column);
+                    }
+                }
+                '*' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::StarEqual, column);
+                    } else {
+                        self.push(TokenKind::Star, column);
+                    }
+                }
+                '/' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::SlashEqual, column);
+                    } else {
+                        self.push(TokenKind::Slash, column);
+                    }
+                }
+                '&' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::AmpersandEqual, column);
+                    } else {
+                        self.push(TokenKind::Ampersand, column);
+                    }
+                }
+                '|' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::PipeEqual, column);
+                    } else {
+                        self.push(TokenKind::Pipe, column);
+                    }
+                }
+                '^' => {
+                    if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::CaretEqual, column);
+                    } else {
+                        self.push(TokenKind::Caret, column);
+                    }
+                }
+                '~' => self.push(TokenKind::Tilde, column),
                 '-' => {
                     if let Some((_, '>')) = chars.peek().copied() {
                         chars.next();
                         self.push(TokenKind::Arrow, column);
+                    } else if let Some((_, '=')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::MinusEqual, column);
                     } else {
                         self.push(TokenKind::Minus, column);
                     }
@@ -333,6 +452,9 @@ impl<'a> Lexer<'a> {
                     if let Some((_, '=')) = chars.peek().copied() {
                         chars.next();
                         self.push(TokenKind::GreaterEqual, column);
+                    } else if let Some((_, '>')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::ShiftRight, column);
                     } else {
                         self.push(TokenKind::Greater, column);
                     }
@@ -341,6 +463,9 @@ impl<'a> Lexer<'a> {
                     if let Some((_, '=')) = chars.peek().copied() {
                         chars.next();
                         self.push(TokenKind::LessEqual, column);
+                    } else if let Some((_, '<')) = chars.peek().copied() {
+                        chars.next();
+                        self.push(TokenKind::ShiftLeft, column);
                     } else {
                         self.push(TokenKind::Less, column);
                     }
@@ -463,6 +588,7 @@ impl<'a> Lexer<'a> {
 fn keyword_or_ident(text: &str) -> TokenKind {
     match text {
         "and" => TokenKind::And,
+        "assert" => TokenKind::Assert,
         "async" => TokenKind::Async,
         "await" => TokenKind::Await,
         "break" => TokenKind::Break,

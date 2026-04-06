@@ -543,6 +543,65 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str(&format!("  br label %{label}\n"));
                 self.block_terminated = true;
             }
+            IrInst::UnaryBitwiseNot { dst, src } => {
+                let ty = self.temp_types.get(dst).ok_or_else(|| LlvmIrError {
+                    message: format!("missing temp type for `{dst}`"),
+                })?;
+                let src_val = self.resolve_value(src, ty, out)?;
+                let reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {reg} = xor {} {src_val}, -1\n",
+                    llvm_scalar_type(ty)?
+                ));
+                self.value_map.insert(dst.clone(), reg);
+            }
+            IrInst::SetField { base, field, src } => {
+                let base_ty = self.local_types.get(base).cloned().ok_or_else(|| LlvmIrError {
+                    message: format!("missing local type for `{base}` in SetField"),
+                })?;
+                let IrType::Struct(struct_name) = &base_ty else {
+                    return Err(LlvmIrError {
+                        message: format!("`{base}` is not a struct in SetField"),
+                    });
+                };
+                let struct_name = struct_name.clone();
+                let layout = self
+                    .struct_layouts
+                    .get(&struct_name)
+                    .cloned()
+                    .ok_or_else(|| LlvmIrError {
+                        message: format!("missing struct layout for `{struct_name}` in SetField"),
+                    })?;
+                let (field_index, field_ty) = layout
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (name, _))| name == field)
+                    .map(|(i, (_, ty))| (i, ty.clone()))
+                    .ok_or_else(|| LlvmIrError {
+                        message: format!("field `{field}` not found in struct `{struct_name}`"),
+                    })?;
+                let struct_llvm_ty =
+                    llvm_internal_type(&base_ty, self.struct_layouts)?;
+                // Load current struct value
+                let cur_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {cur_reg} = load {struct_llvm_ty}, ptr %{base}.addr\n"
+                ));
+                // Resolve the new field value
+                let src_val = self.resolve_value(src, &field_ty, out)?;
+                // Insert the new field value
+                let new_reg = self.next_reg();
+                let field_llvm_ty = llvm_internal_type(&field_ty, self.struct_layouts)?;
+                out.push_str(&format!(
+                    "  {new_reg} = insertvalue {struct_llvm_ty} {cur_reg}, {field_llvm_ty} {src_val}, {field_index}\n"
+                ));
+                // Store updated struct back
+                out.push_str(&format!(
+                    "  store {struct_llvm_ty} {new_reg}, ptr %{base}.addr\n"
+                ));
+                // Update value_map for base
+                self.value_map.insert(base.clone(), new_reg);
+            }
             IrInst::Return(value) => match value {
                 Some(value) => {
                     let ret_ty = expected_return;
@@ -848,6 +907,26 @@ impl<'a> FunctionEmitter<'a> {
             ),
             BinaryOp::And => format!("  {reg} = and i1 {left_val}, {right_val}\n"),
             BinaryOp::Or => format!("  {reg} = or i1 {left_val}, {right_val}\n"),
+            BinaryOp::BitwiseAnd => format!(
+                "  {reg} = and {} {left_val}, {right_val}\n",
+                llvm_scalar_type(&op_ty)?
+            ),
+            BinaryOp::BitwiseOr => format!(
+                "  {reg} = or {} {left_val}, {right_val}\n",
+                llvm_scalar_type(&op_ty)?
+            ),
+            BinaryOp::BitwiseXor => format!(
+                "  {reg} = xor {} {left_val}, {right_val}\n",
+                llvm_scalar_type(&op_ty)?
+            ),
+            BinaryOp::ShiftLeft => format!(
+                "  {reg} = shl {} {left_val}, {right_val}\n",
+                llvm_scalar_type(&op_ty)?
+            ),
+            BinaryOp::ShiftRight => format!(
+                "  {reg} = ashr {} {left_val}, {right_val}\n",
+                llvm_scalar_type(&op_ty)?
+            ),
         };
         out.push_str(&line);
         self.value_map.insert(dst.to_string(), reg);
@@ -4153,6 +4232,17 @@ fn infer_temp_types(
             IrInst::UnaryNot { dst, .. } => {
                 temp_types.insert(dst.clone(), IrType::Bool);
             }
+            IrInst::UnaryBitwiseNot { dst, src } => {
+                let ty = temp_types
+                    .get(src)
+                    .or_else(|| local_types.get(src))
+                    .cloned()
+                    .ok_or_else(|| LlvmIrError {
+                        message: format!("missing type for bitwise-not operand `{src}`"),
+                    })?;
+                temp_types.insert(dst.clone(), ty);
+            }
+            IrInst::SetField { .. } => {}
             IrInst::Binary { dst, op, left, .. } => {
                 let ty = match op {
                     BinaryOp::EqualEqual

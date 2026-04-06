@@ -7,9 +7,9 @@ use crate::builtin_modules::{BuiltinModuleBody, builtin_module, builtin_module_f
 use crate::diagnostics::render_file_diagnostic;
 use crate::lexer::Span;
 use crate::parser::{
-    AssignStmt, Block, CallArg, ElifBlock, ExceptionDecl, Expr, ExprKind, ExprStmt, Function,
-    IfStmt, ImportDecl, Item, LetStmt, PanicStmt, Param, Program, RaiseStmt, ReturnStmt, Stmt,
-    StructDecl, StructField, TypeRef, WhileStmt, parse_source,
+    AssignStmt, Block, CallArg, ElifBlock, ExceptionDecl, Expr, ExprKind, ExprStmt,
+    FieldAssignStmt, Function, IfStmt, ImportDecl, Item, LetStmt, PanicStmt, Param, Program,
+    RaiseStmt, ReturnStmt, Stmt, StructDecl, StructField, TypeRef, WhileStmt, parse_source,
 };
 
 #[derive(Debug)]
@@ -736,6 +736,18 @@ fn rewrite_stmt(
         }
         Stmt::Assign(assign) => Stmt::Assign(AssignStmt {
             name: assign.name.clone(),
+            value: rewrite_expr(
+                &assign.value,
+                locals,
+                own_exports,
+                direct_imports,
+                namespace_imports,
+            ),
+            span: assign.span,
+        }),
+        Stmt::FieldAssign(assign) => Stmt::FieldAssign(FieldAssignStmt {
+            base: assign.base.clone(),
+            fields: assign.fields.clone(),
             value: rewrite_expr(
                 &assign.value,
                 locals,

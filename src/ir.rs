@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::parser::{
-    BinaryOp, Block, CallArg, Expr, ExprKind, Function, Item, Program, Stmt, StructDecl, TypeRef,
-    UnaryOp,
+    BinaryOp, Block, CallArg, Expr, ExprKind, Function, Item, Program, Stmt,
+    StructDecl, TypeRef, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +60,16 @@ pub enum IrInst {
     },
     UnaryNot {
         dst: String,
+        src: String,
+    },
+    UnaryBitwiseNot {
+        dst: String,
+        src: String,
+    },
+    /// Mutate a field on a local struct: `base.field = src`
+    SetField {
+        base: String,
+        field: String,
         src: String,
     },
     Binary {
@@ -271,6 +281,10 @@ fn collect_local_infos(
             Stmt::While(stmt) => {
                 collect_local_infos(&stmt.body, struct_layouts, struct_methods, function_returns, infos)
             }
+            Stmt::FieldAssign(_) => {
+                // Field assignment doesn't introduce new locals; the base variable
+                // already exists and its type stays the same (struct mutation).
+            }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(_) | Stmt::Raise(_) | Stmt::Panic(_) | Stmt::Expr(_) => {}
         }
     }
@@ -326,6 +340,10 @@ fn infer_expr_type(
         ExprKind::Unary {
             op: UnaryOp::Not, ..
         } => Some(IrType::Bool),
+        ExprKind::Unary {
+            op: UnaryOp::BitwiseNot,
+            expr,
+        } => infer_expr_type(expr, infos, struct_layouts, struct_methods, function_returns),
         ExprKind::Binary { left, op, right } => {
             let left_ty = infer_expr_type(left, infos, struct_layouts, struct_methods, function_returns)?;
             let right_ty = infer_expr_type(right, infos, struct_layouts, struct_methods, function_returns)?;
@@ -389,6 +407,17 @@ fn infer_expr_type(
                 | BinaryOp::GreaterEqual
                 | BinaryOp::Less
                 | BinaryOp::LessEqual => Some(IrType::Bool),
+                BinaryOp::BitwiseAnd
+                | BinaryOp::BitwiseOr
+                | BinaryOp::BitwiseXor
+                | BinaryOp::ShiftLeft
+                | BinaryOp::ShiftRight => {
+                    if left_ty == right_ty && matches!(left_ty, IrType::I32 | IrType::I64) {
+                        Some(left_ty)
+                    } else {
+                        Some(IrType::I64)
+                    }
+                }
             }
         }
         ExprKind::Call { callee, .. } => match &callee.kind {
@@ -613,6 +642,57 @@ impl Lowerer {
                     .expect("semantic analysis should reject `continue` outside a loop");
                 self.instructions.push(IrInst::Jump(continue_label.clone()));
             }
+            Stmt::FieldAssign(stmt) => {
+                let src = self.lower_expr(&stmt.value);
+                // For multi-level paths (a.b.c = v), emit a chain of SetField.
+                // The IR models this as sequential field mutations on the base.
+                // For a single field this is: SetField { base, field, src }.
+                // For nested fields, the intermediate struct must be treated as
+                // a mutable local — emit a SetField chain bottom-up.
+                if stmt.fields.len() == 1 {
+                    self.instructions.push(IrInst::SetField {
+                        base: stmt.base.clone(),
+                        field: stmt.fields[0].clone(),
+                        src,
+                    });
+                } else {
+                    // For a.b.c = v: create temp for each level, insertvalue from inside out.
+                    // Emit as nested SetField pairs resolved by backend.
+                    // Simple approach: emit one SetField per level; backends handle nesting.
+                    let last_field = stmt.fields.last().unwrap().clone();
+                    let inner_base = if stmt.fields.len() > 1 {
+                        // read the intermediate struct into a temp
+                        let mut read_expr = crate::parser::Expr {
+                            kind: ExprKind::Identifier(stmt.base.clone()),
+                            span: crate::lexer::Span { line: 1, column: 1 },
+                        };
+                        for f in &stmt.fields[..stmt.fields.len() - 1] {
+                            read_expr = crate::parser::Expr {
+                                kind: ExprKind::Field {
+                                    base: Box::new(read_expr),
+                                    name: f.clone(),
+                                },
+                                span: crate::lexer::Span { line: 1, column: 1 },
+                            };
+                        }
+                        self.lower_expr(&read_expr)
+                    } else {
+                        stmt.base.clone()
+                    };
+                    // Just set the inner field on whatever struct the path resolves to.
+                    // For now collapse to single-level SetField on the immediate parent.
+                    let parent = if stmt.fields.len() > 1 {
+                        inner_base
+                    } else {
+                        stmt.base.clone()
+                    };
+                    self.instructions.push(IrInst::SetField {
+                        base: parent,
+                        field: last_field,
+                        src,
+                    });
+                }
+            }
             Stmt::Raise(stmt) => {
                 let value = self.lower_expr(&stmt.value);
                 self.instructions.push(IrInst::Call {
@@ -679,6 +759,10 @@ impl Lowerer {
                         src,
                     }),
                     UnaryOp::Not => self.instructions.push(IrInst::UnaryNot {
+                        dst: dst.clone(),
+                        src,
+                    }),
+                    UnaryOp::BitwiseNot => self.instructions.push(IrInst::UnaryBitwiseNot {
                         dst: dst.clone(),
                         src,
                     }),
@@ -837,6 +921,8 @@ impl fmt::Display for IrInst {
             IrInst::Copy { dst, src } => write!(f, "{dst} = copy {src}"),
             IrInst::UnaryNeg { dst, src } => write!(f, "{dst} = neg {src}"),
             IrInst::UnaryNot { dst, src } => write!(f, "{dst} = not {src}"),
+            IrInst::UnaryBitwiseNot { dst, src } => write!(f, "{dst} = bnot {src}"),
+            IrInst::SetField { base, field, src } => write!(f, "{base}.{field} = {src}"),
             IrInst::Binary {
                 dst,
                 op,

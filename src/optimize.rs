@@ -343,6 +343,16 @@ fn collect_stmt_deps(
             reachable_exceptions,
             queue,
         ),
+        Stmt::FieldAssign(stmt) => collect_expr_deps(
+            &stmt.value,
+            function_map,
+            struct_map,
+            exception_names,
+            reachable_functions,
+            reachable_structs,
+            reachable_exceptions,
+            queue,
+        ),
         Stmt::Break(_) | Stmt::Continue(_) => {}
     }
 }
@@ -567,6 +577,10 @@ fn collect_reads_stmt(stmt: &Stmt, reads: &mut HashSet<String>) {
         }
         Stmt::Let(s) => collect_reads_expr(&s.value, reads),
         Stmt::Assign(s) => collect_reads_expr(&s.value, reads),
+        Stmt::FieldAssign(s) => {
+            reads.insert(s.base.clone());
+            collect_reads_expr(&s.value, reads);
+        }
         Stmt::Return(s) => {
             if let Some(v) = &s.value {
                 collect_reads_expr(v, reads);
@@ -646,6 +660,7 @@ fn optimize_stmt(stmt: &mut Stmt) {
         Stmt::Block(stmt) => optimize_block(&mut stmt.block),
         Stmt::Let(LetStmt { value, .. }) => optimize_expr(value),
         Stmt::Assign(stmt) => optimize_expr(&mut stmt.value),
+        Stmt::FieldAssign(stmt) => optimize_expr(&mut stmt.value),
         Stmt::Return(ReturnStmt { value, .. }) => {
             if let Some(expr) = value {
                 optimize_expr(expr);
@@ -769,6 +784,23 @@ fn fold_expr(expr: &mut Expr) {
                     BinaryOp::GreaterEqual => Some(ExprKind::Bool(lhs >= rhs)),
                     BinaryOp::Less => Some(ExprKind::Bool(lhs < rhs)),
                     BinaryOp::LessEqual => Some(ExprKind::Bool(lhs <= rhs)),
+                    BinaryOp::BitwiseAnd => Some(ExprKind::Integer((lhs & rhs).to_string())),
+                    BinaryOp::BitwiseOr => Some(ExprKind::Integer((lhs | rhs).to_string())),
+                    BinaryOp::BitwiseXor => Some(ExprKind::Integer((lhs ^ rhs).to_string())),
+                    BinaryOp::ShiftLeft => {
+                        if rhs >= 0 && rhs < 64 {
+                            Some(ExprKind::Integer((lhs << rhs).to_string()))
+                        } else {
+                            None
+                        }
+                    }
+                    BinaryOp::ShiftRight => {
+                        if rhs >= 0 && rhs < 64 {
+                            Some(ExprKind::Integer((lhs >> rhs).to_string()))
+                        } else {
+                            None
+                        }
+                    }
                 };
 
                 if let Some(kind) = folded {
