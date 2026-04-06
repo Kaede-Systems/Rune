@@ -1456,7 +1456,7 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(Type::I64)
             }
-            "upper" | "lower" | "strip" => {
+            "upper" | "lower" | "strip" | "trim_start" | "trim_end" => {
                 if !args.is_empty() {
                     return Err(SemanticError {
                         message: format!("`String.{method}` takes no arguments"),
@@ -1505,6 +1505,23 @@ impl<'a> Analyzer<'a> {
                 self.expect_type(&from_ty, &Type::String, from_expr.span, "String.replace `from` argument")?;
                 let to_ty = self.check_expr(to_expr, scope, in_async)?;
                 self.expect_type(&to_ty, &Type::String, to_expr.span, "String.replace `to` argument")?;
+                Ok(Type::String)
+            }
+            "repeat" => {
+                if args.len() != 1 {
+                    return Err(SemanticError {
+                        message: "`String.repeat` expects 1 argument".to_string(),
+                        span,
+                    });
+                }
+                let CallArg::Positional(arg_expr) = &args[0] else {
+                    return Err(SemanticError {
+                        message: "`String.repeat` does not accept keyword arguments".to_string(),
+                        span,
+                    });
+                };
+                let arg_ty = self.check_expr(arg_expr, scope, in_async)?;
+                self.expect_type(&arg_ty, &Type::I64, arg_expr.span, "String.repeat count argument")?;
                 Ok(Type::String)
             }
             "find" => {

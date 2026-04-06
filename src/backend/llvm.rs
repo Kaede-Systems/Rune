@@ -3413,7 +3413,11 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
-            "rune_rt_string_upper" | "rune_rt_string_lower" | "rune_rt_string_strip" => {
+            "rune_rt_string_upper"
+            | "rune_rt_string_lower"
+            | "rune_rt_string_strip"
+            | "rune_rt_string_trim_start"
+            | "rune_rt_string_trim_end" => {
                 if args.len() != 1 {
                     return Err(LlvmIrError {
                         message: format!("`{callee}` expects 1 argument"),
@@ -3427,6 +3431,33 @@ impl<'a> FunctionEmitter<'a> {
                     .insert("declare i64 @rune_rt_last_string_len()\n".into());
                 let ptr_reg = self.next_reg();
                 out.push_str(&format!("  {ptr_reg} = call ptr @{callee}({ptr}, {len})\n"));
+                let len_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
+                ));
+                if let Some(dst) = dst {
+                    self.value_map
+                        .insert(dst.clone(), format!("ptr {ptr_reg}, i64 {len_reg}"));
+                }
+                return Ok(());
+            }
+            "rune_rt_string_repeat" => {
+                if args.len() != 2 {
+                    return Err(LlvmIrError {
+                        message: "`rune_rt_string_repeat` expects 2 arguments".into(),
+                    });
+                }
+                let s = self.resolve_value(&args[0].value, &IrType::String, out)?;
+                let (s_ptr, s_len) = split_string_value(&s)?;
+                let count = self.resolve_value(&args[1].value, &IrType::I64, out)?;
+                self.declared_runtime
+                    .insert("declare ptr @rune_rt_string_repeat(ptr, i64, i64)\n".into());
+                self.declared_runtime
+                    .insert("declare i64 @rune_rt_last_string_len()\n".into());
+                let ptr_reg = self.next_reg();
+                out.push_str(&format!(
+                    "  {ptr_reg} = call ptr @rune_rt_string_repeat({s_ptr}, {s_len}, i64 {count})\n"
+                ));
                 let len_reg = self.next_reg();
                 out.push_str(&format!(
                     "  {len_reg} = call i64 @rune_rt_last_string_len()\n"
@@ -3497,7 +3528,7 @@ impl<'a> FunctionEmitter<'a> {
                     .insert("declare i64 @rune_rt_last_string_len()\n".into());
                 let ptr_reg = self.next_reg();
                 out.push_str(&format!(
-                    "  {ptr_reg} = call ptr @rune_rt_string_slice({s_ptr}, {s_len}, {start}, {end})\n"
+                    "  {ptr_reg} = call ptr @rune_rt_string_slice({s_ptr}, {s_len}, i64 {start}, i64 {end})\n"
                 ));
                 let len_reg = self.next_reg();
                 out.push_str(&format!(
@@ -4474,6 +4505,9 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "rune_rt_string_lower"
         | "rune_rt_string_replace"
         | "rune_rt_string_strip"
+        | "rune_rt_string_trim_start"
+        | "rune_rt_string_trim_end"
+        | "rune_rt_string_repeat"
         | "rune_rt_string_slice" => Some(IrType::String),
         "rune_rt_string_contains"
         | "rune_rt_string_starts_with"

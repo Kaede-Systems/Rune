@@ -545,3 +545,119 @@ fn wasi_build_runs_fs_terminal_and_audio_program_in_packaged_wasmtime() {
     let file_contents = fs::read_to_string(dir.join("note.txt")).expect("wasi should write file");
     assert_eq!(file_contents, "hello wasi");
 }
+
+#[test]
+fn wasm_build_runs_string_methods_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("string_methods.rn");
+    let wasm_path = dir.join("string_methods.wasm");
+    let runner_path = dir.join("run_string_methods.js");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "  Hello World  "
+    println(s.upper())
+    println(s.lower())
+    println(s.strip())
+    println(s.trim_start())
+    println(s.trim_end())
+    let base: String = "ab"
+    let n: i64 = 3
+    println(base.repeat(n))
+    let haystack: String = "hello world"
+    let idx: i64 = haystack.find("world")
+    println(idx)
+    let miss: i64 = haystack.find("xyz")
+    println(miss)
+    let sub: String = haystack.slice(6, 11)
+    println(sub)
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm string methods build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node wasm string methods runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "  HELLO WORLD  \n  hello world  \nHello World\nHello World  \n  Hello World\nababab\n6\n-1\nworld\n");
+}
+
+#[test]
+fn wasm_build_runs_fs_extended_operations_in_node() {
+    let _guard = wasm_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let dir = temp_dir();
+    let source_path = dir.join("fs_extended.rn");
+    let wasm_path = dir.join("fs_extended.wasm");
+    let runner_path = dir.join("run_fs_extended.js");
+    let work_dir = dir.join("wasm_work");
+    fs::create_dir_all(&work_dir).expect("failed to create work dir");
+    let work_dir_str = work_dir.display().to_string().replace('\\', "/");
+
+    fs::write(
+        &source_path,
+        format!(
+            r#"def main() -> i32:
+    println(__rune_builtin_fs_create_dir_all("{0}/sub"))
+    println(__rune_builtin_fs_is_dir("{0}/sub"))
+    println(__rune_builtin_fs_write_string("{0}/a.txt", "hello"))
+    println(__rune_builtin_fs_copy("{0}/a.txt", "{0}/b.txt"))
+    println(__rune_builtin_fs_read_string("{0}/b.txt"))
+    println(__rune_builtin_fs_rename("{0}/b.txt", "{0}/c.txt"))
+    println(__rune_builtin_fs_exists("{0}/b.txt"))
+    println(__rune_builtin_fs_exists("{0}/c.txt"))
+    println(__rune_builtin_fs_remove("{0}/c.txt"))
+    println(__rune_builtin_fs_exists("{0}/c.txt"))
+    return 0
+"#,
+            work_dir_str
+        ),
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &wasm_path, Some("wasm32-unknown-unknown"))
+        .expect("wasm fs extended build should succeed");
+
+    let loader_path = wasm_path.with_extension("js");
+    fs::write(
+        &runner_path,
+        format!(
+            "const {{ instantiateRuneWasm }} = require({:?});\n(async () => {{\n  const runtime = await instantiateRuneWasm({:?});\n  runtime.runMain();\n}})().catch((error) => {{ console.error(error.stack || String(error)); process.exit(1); }});\n",
+            loader_path.to_string_lossy().to_string(),
+            wasm_path.to_string_lossy().to_string(),
+        ),
+    )
+    .expect("failed to write runner");
+
+    let output = Command::new("node")
+        .arg(&runner_path)
+        .output()
+        .expect("failed to run node wasm fs extended runner");
+
+    assert!(output.status.success(), "node stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\nhello\ntrue\nfalse\ntrue\ntrue\nfalse\n");
+}

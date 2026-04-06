@@ -653,6 +653,33 @@ fn accepts_same_name_let_in_loop_body() {
 }
 
 #[test]
+fn emits_string_trim_start_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"  hello  \"\n    println(s.trim_start())\n    return 0\n",
+    )
+    .expect("String.trim_start() should generate assembly");
+    assert!(asm.contains("rune_rt_string_trim_start"));
+}
+
+#[test]
+fn emits_string_trim_end_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"  hello  \"\n    println(s.trim_end())\n    return 0\n",
+    )
+    .expect("String.trim_end() should generate assembly");
+    assert!(asm.contains("rune_rt_string_trim_end"));
+}
+
+#[test]
+fn emits_string_repeat_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"ab\"\n    let n: i64 = 3\n    println(s.repeat(n))\n    return 0\n",
+    )
+    .expect("String.repeat() should generate assembly");
+    assert!(asm.contains("rune_rt_string_repeat"));
+}
+
+#[test]
 fn emits_string_find_call() {
     let asm = emit_asm_source(
         "def main() -> i64:\n    let s: String = \"hello world\"\n    let idx: i64 = s.find(\"world\")\n    return idx\n",

@@ -527,6 +527,31 @@ fn rejects_unknown_string_method() {
 }
 
 #[test]
+fn accepts_string_trim_start_returns_string() {
+    check_source("def f(s: String) -> String:\n    return s.trim_start()\n")
+        .expect("String.trim_start should type-check");
+}
+
+#[test]
+fn accepts_string_trim_end_returns_string() {
+    check_source("def f(s: String) -> String:\n    return s.trim_end()\n")
+        .expect("String.trim_end should type-check");
+}
+
+#[test]
+fn accepts_string_repeat_returns_string() {
+    check_source("def f(s: String, n: i64) -> String:\n    return s.repeat(n)\n")
+        .expect("String.repeat should type-check");
+}
+
+#[test]
+fn rejects_string_repeat_non_i64_count() {
+    let error = check_source("def f(s: String) -> String:\n    return s.repeat(\"3\")\n")
+        .expect_err("String.repeat with string count should fail");
+    assert!(error.message.contains("repeat") || error.message.contains("i64"));
+}
+
+#[test]
 fn accepts_string_find_returns_i64() {
     check_source(
         "def f(s: String) -> i64:\n    return s.find(\"lo\")\n",

@@ -3593,7 +3593,7 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str("    call rune_rt_string_len\n");
                 Ok(())
             }
-            "upper" | "lower" | "strip" => {
+            "upper" | "lower" | "strip" | "trim_start" | "trim_end" => {
                 if !args.is_empty() {
                     return Err(CodegenError {
                         message: format!("`String.{method}` takes no arguments"),
@@ -3602,6 +3602,19 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 self.emit_string_arg(out, base, "rcx", "rdx", &format!("String.{method} receiver"))?;
                 out.push_str(&format!("    call rune_rt_string_{method}\n"));
+                Ok(())
+            }
+            "repeat" => {
+                let [CallArg::Positional(count_expr)] = args else {
+                    return Err(CodegenError {
+                        message: "`String.repeat` expects 1 positional argument".to_string(),
+                        span,
+                    });
+                };
+                self.emit_string_arg(out, base, "rcx", "rdx", "String.repeat receiver")?;
+                self.emit_expr(out, count_expr)?;
+                out.push_str("    mov r8, rax\n");
+                out.push_str("    call rune_rt_string_repeat\n");
                 Ok(())
             }
             "contains" | "starts_with" | "ends_with" => {
@@ -4641,13 +4654,13 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
-        // String method calls that return String (upper, lower, replace, strip, slice).
+        // String method calls that return String.
         if let ExprKind::Call { callee, args } = &expr.kind
             && let ExprKind::Field { base, name } = &callee.kind
             && self.infer_expr_type(base) == Some(IrType::String)
             && matches!(
                 name.as_str(),
-                "upper" | "lower" | "strip" | "replace" | "slice"
+                "upper" | "lower" | "strip" | "trim_start" | "trim_end" | "replace" | "slice" | "repeat"
             )
         {
             self.emit_string_method_call(out, base, name, args, expr.span)?;
@@ -5954,6 +5967,9 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "rune_rt_string_lower"
         | "rune_rt_string_replace"
         | "rune_rt_string_strip"
+        | "rune_rt_string_trim_start"
+        | "rune_rt_string_trim_end"
+        | "rune_rt_string_repeat"
         | "rune_rt_string_slice" => Some(IrType::String),
         "rune_rt_string_contains"
         | "rune_rt_string_starts_with"

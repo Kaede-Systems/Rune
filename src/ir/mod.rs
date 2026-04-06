@@ -1076,6 +1076,9 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "rune_rt_string_lower"
         | "rune_rt_string_replace"
         | "rune_rt_string_strip"
+        | "rune_rt_string_trim_start"
+        | "rune_rt_string_trim_end"
+        | "rune_rt_string_repeat"
         | "rune_rt_string_slice" => Some(IrType::String),
         "rune_rt_string_contains"
         | "rune_rt_string_starts_with"
