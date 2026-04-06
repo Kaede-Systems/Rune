@@ -3625,7 +3625,15 @@ impl<'a> Analyzer<'a> {
                 Type::Bool | Type::Dynamic | Type::I32 | Type::I64 | Type::Json | Type::String
             )
         };
-        supported(left) && supported(right) && (*left == Type::Dynamic || *right == Type::Dynamic)
+        // Allow: dynamic+anything, anything+dynamic, and mixed types involving String
+        // (e.g. i64 + String → "42!" at runtime via dynamic dispatch).
+        // Same-type and String+String cases are handled before this is called.
+        supported(left)
+            && supported(right)
+            && (*left == Type::Dynamic
+                || *right == Type::Dynamic
+                || *left == Type::String
+                || *right == Type::String)
     }
 
     fn is_dynamic_equality_supported(&self, left: &Type, right: &Type) -> bool {

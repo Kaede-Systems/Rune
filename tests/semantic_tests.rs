@@ -291,10 +291,16 @@ fn rejects_modulo_by_zero_literal() {
 
 #[test]
 fn rejects_bad_string_concat_types() {
+    // String + integer is now valid dynamic addition (returns Dynamic).
+    // Check that it compiles without error.
+    check_source("def main() -> unit:\n    let value = \"x\" + 1\n    return\n")
+        .expect("String + integer should compile as dynamic add");
+
+    // Truly unsupported: bool + bool has no defined + semantics.
     let error =
-        check_source("def main() -> unit:\n    let value: String = \"x\" + 1\n    return\n")
-            .expect_err("mixed concat should fail");
-    assert!(error.message.contains("String + String"));
+        check_source("def main() -> unit:\n    let a = true\n    let b = true\n    let c = a + b\n    return\n")
+            .expect_err("bool + bool addition should fail");
+    assert!(error.message.contains("binary `+` requires"));
 }
 
 #[test]
