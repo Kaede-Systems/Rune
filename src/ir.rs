@@ -945,6 +945,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         "panic" => Some(IrType::Unit),
         "str" => Some(IrType::String),
         "int" => Some(IrType::I64),
+        "__rune_builtin_time_has_wall_clock" => Some(IrType::Bool),
         "__rune_builtin_time_now_unix" | "__rune_builtin_time_monotonic_ms" => Some(IrType::I64),
         "__rune_builtin_gpio_mode_input"
         | "__rune_builtin_gpio_mode_output"

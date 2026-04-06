@@ -1470,6 +1470,17 @@ impl<'a> FunctionEmitter<'a> {
             return Ok(());
         }
 
+        if name == "__rune_builtin_time_has_wall_clock" {
+            if !args.is_empty() {
+                return Err(CodegenError {
+                    message: "`__rune_builtin_time_has_wall_clock` takes no arguments".to_string(),
+                    span,
+                });
+            }
+            out.push_str("    call rune_rt_time_has_wall_clock\n");
+            return Ok(());
+        }
+
         if name == "__rune_builtin_time_monotonic_ms" {
             if !args.is_empty() {
                 return Err(CodegenError {
@@ -5702,6 +5713,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_json_to_bool"
         | "__rune_builtin_gpio_digital_read"
         | "__rune_builtin_arduino_digital_read"
+        | "__rune_builtin_time_has_wall_clock"
         | "__rune_builtin_system_is_embedded"
         | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
         "__rune_builtin_json_len"

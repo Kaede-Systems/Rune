@@ -351,6 +351,7 @@ Current stdlib surface:
 Current exported functions:
 
 `time`
+- `has_wall_clock() -> bool`
 - `unix_now() -> i64`
 - `monotonic_ms() -> i64`
 - `monotonic_us() -> i64`
@@ -361,6 +362,7 @@ Current exported functions:
 - `sleep_until_us(deadline_us: i64) -> unit`
 
 `clock`
+- `has_wall_clock() -> bool`
 - `ticks_ms() -> i64`
 - `ticks_us() -> i64`
 - `monotonic_ms() -> i64`

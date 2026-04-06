@@ -1529,6 +1529,17 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 return Ok(());
             }
+            "__rune_builtin_time_has_wall_clock" => {
+                self.expect_plain_arity(callee, args, 0)?;
+                let reg = self.next_reg();
+                self.declared_runtime
+                    .insert("declare i1 @rune_rt_time_has_wall_clock()\n".into());
+                out.push_str(&format!("  {reg} = call i1 @rune_rt_time_has_wall_clock()\n"));
+                if let Some(dst) = dst {
+                    self.value_map.insert(dst.clone(), reg);
+                }
+                return Ok(());
+            }
             "__rune_builtin_time_monotonic_ms" => {
                 self.expect_plain_arity(callee, args, 0)?;
                 let reg = self.next_reg();
@@ -4254,6 +4265,7 @@ fn builtin_return_type(name: &str) -> Option<IrType> {
         | "__rune_builtin_gpio_digital_read"
         | "__rune_builtin_arduino_servo_attach"
         | "__rune_builtin_arduino_digital_read"
+        | "__rune_builtin_time_has_wall_clock"
         | "__rune_builtin_system_is_embedded"
         | "__rune_builtin_system_is_wasm" => Some(IrType::Bool),
         "__rune_builtin_json_len"

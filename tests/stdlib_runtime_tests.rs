@@ -628,8 +628,8 @@ fn builds_and_runs_clock_module_program() {
 
     fs::write(
         &source_path,
-        "from clock import ticks_ms, ticks_us, elapsed_ms, elapsed_us, sleep_ms, sleep_us, wait_until_ms, wait_until_us\n\n\
-def main() -> i32:\n    let start_ms: i64 = ticks_ms()\n    let start_us: i64 = ticks_us()\n    sleep_ms(1)\n    sleep_us(100)\n    wait_until_ms(start_ms)\n    wait_until_us(start_us)\n    println(elapsed_ms(start_ms) >= 0)\n    println(elapsed_us(start_us) >= 0)\n    return 0\n",
+        "from clock import has_wall_clock, ticks_ms, ticks_us, elapsed_ms, elapsed_us, sleep_ms, sleep_us, wait_until_ms, wait_until_us\n\n\
+def main() -> i32:\n    let start_ms: i64 = ticks_ms()\n    let start_us: i64 = ticks_us()\n    sleep_ms(1)\n    sleep_us(100)\n    wait_until_ms(start_ms)\n    wait_until_us(start_us)\n    println(has_wall_clock())\n    println(elapsed_ms(start_ms) >= 0)\n    println(elapsed_us(start_us) >= 0)\n    return 0\n",
     )
     .expect("failed to write source");
 
@@ -641,7 +641,7 @@ def main() -> i32:\n    let start_ms: i64 = ticks_ms()\n    let start_us: i64 = 
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    assert_eq!(stdout, "true\ntrue\n");
+    assert_eq!(stdout, "true\ntrue\ntrue\n");
 }
 
 #[test]

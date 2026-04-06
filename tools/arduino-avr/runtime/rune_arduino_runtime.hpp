@@ -714,6 +714,10 @@ extern "C" int64_t rune_rt_time_now_unix(void) {
     return 0;
 }
 
+extern "C" bool rune_rt_time_has_wall_clock(void) {
+    return false;
+}
+
 extern "C" int64_t rune_rt_time_monotonic_ms(void) {
     return (int64_t)millis();
 }
@@ -795,6 +799,10 @@ extern "C" void rune_rt_arduino_delay_us(int64_t us) {
 extern "C" int64_t rune_rt_time_now_unix(void) {
     rune_rt_fail(1100);
     return 0;
+}
+
+extern "C" bool rune_rt_time_has_wall_clock(void) {
+    return false;
 }
 
 extern "C" int64_t rune_rt_time_monotonic_ms(void) {

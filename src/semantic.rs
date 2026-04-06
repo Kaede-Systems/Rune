@@ -1570,6 +1570,16 @@ impl<'a> Analyzer<'a> {
                     }
                     Ok(Type::I64)
                 }
+                "__rune_builtin_time_has_wall_clock" => {
+                    if !args.is_empty() {
+                        return Err(SemanticError {
+                            message: "`__rune_builtin_time_has_wall_clock` takes no arguments"
+                                .to_string(),
+                            span,
+                        });
+                    }
+                    Ok(Type::Bool)
+                }
                 "__rune_builtin_time_monotonic_ms" => {
                     if !args.is_empty() {
                         return Err(SemanticError {
@@ -3755,6 +3765,7 @@ fn builtin_function_type(name: &str) -> Option<Type> {
         "str" => Some(Type::Unknown("builtin".to_string())),
         "int" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_now_unix" => Some(Type::Unknown("builtin".to_string())),
+        "__rune_builtin_time_has_wall_clock" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_monotonic_ms" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_monotonic_us" => Some(Type::Unknown("builtin".to_string())),
         "__rune_builtin_time_sleep_ms" => Some(Type::Unknown("builtin".to_string())),

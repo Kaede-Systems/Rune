@@ -284,6 +284,15 @@ fn time_program() -> Program {
                 vec![return_stmt(call_name("__rune_builtin_time_now_unix", vec![]))],
             )),
             Item::Function(function(
+                "has_wall_clock",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_time_has_wall_clock",
+                    vec![],
+                ))],
+            )),
+            Item::Function(function(
                 "monotonic_ms",
                 vec![],
                 "i64",
@@ -390,6 +399,15 @@ fn clock_program() -> Program {
                 vec![],
                 "i64",
                 vec![return_stmt(call_name("monotonic_ms", vec![]))],
+            )),
+            Item::Function(function(
+                "has_wall_clock",
+                vec![],
+                "bool",
+                vec![return_stmt(call_name(
+                    "__rune_builtin_time_has_wall_clock",
+                    vec![],
+                ))],
             )),
             Item::Function(function(
                 "ticks_us",

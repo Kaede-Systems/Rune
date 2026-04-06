@@ -487,6 +487,7 @@ from time import unix_now, monotonic_ms, monotonic_us, sleep_ms, sleep_us, sleep
 
 Exports:
 
+- `has_wall_clock() -> bool`
 - `unix_now() -> i64`
 - `monotonic_ms() -> i64`
 - `monotonic_us() -> i64`
@@ -510,6 +511,7 @@ from clock import ticks_ms, ticks_us, monotonic_ms, monotonic_us, elapsed_ms, el
 
 Exports:
 
+- `has_wall_clock() -> bool`
 - `ticks_ms() -> i64`
 - `ticks_us() -> i64`
 - `monotonic_ms() -> i64`

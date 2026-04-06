@@ -86,6 +86,7 @@ Timing note:
 
 - `time` includes wall-clock and monotonic helpers.
 - `clock` is the portable monotonic/tick timing surface for pacing, elapsed time, and embedded timing.
+- `time.has_wall_clock()` and `clock.has_wall_clock()` expose whether a real wall clock exists on the current target.
 - On bare embedded targets without an RTC, use `clock` or `time.monotonic_*`; do not expect a real wall clock.
 
 Current import note:

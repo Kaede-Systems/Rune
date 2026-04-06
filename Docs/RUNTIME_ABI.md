@@ -89,6 +89,7 @@ Current runtime error codes:
 
 ### Time
 
+- `rune_rt_time_has_wall_clock`
 - `rune_rt_time_now_unix`
 - `rune_rt_time_monotonic_ms`
 - `rune_rt_time_monotonic_us`

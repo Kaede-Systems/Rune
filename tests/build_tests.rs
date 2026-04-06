@@ -563,9 +563,9 @@ fn builds_arduino_uno_with_builtin_time_and_clock_modules() {
 
     fs::write(
         &source_path,
-        "from time import monotonic_ms, monotonic_us, sleep_ms, sleep_us\n\
+        "from time import has_wall_clock, monotonic_ms, monotonic_us, sleep_ms, sleep_us\n\
 from clock import ticks_ms, ticks_us, elapsed_ms, elapsed_us, wait_until_ms, wait_until_us\n\n\
-def main() -> i32:\n    let start_ms: i64 = monotonic_ms()\n    let start_us: i64 = monotonic_us()\n    sleep_ms(1)\n    sleep_us(10)\n    wait_until_ms(start_ms)\n    wait_until_us(start_us)\n    println(ticks_ms() >= start_ms)\n    println(ticks_us() >= start_us)\n    println(elapsed_ms(start_ms) >= 0)\n    println(elapsed_us(start_us) >= 0)\n    return 0\n",
+def main() -> i32:\n    let start_ms: i64 = monotonic_ms()\n    let start_us: i64 = monotonic_us()\n    sleep_ms(1)\n    sleep_us(10)\n    wait_until_ms(start_ms)\n    wait_until_us(start_us)\n    println(has_wall_clock())\n    println(ticks_ms() >= start_ms)\n    println(ticks_us() >= start_us)\n    println(elapsed_ms(start_ms) >= 0)\n    println(elapsed_us(start_us) >= 0)\n    return 0\n",
     )
     .expect("failed to write source");
 

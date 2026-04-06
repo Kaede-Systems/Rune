@@ -1494,6 +1494,9 @@ static int64_t rune_rt_time_now_unix(void) {{\n\
     rune_rt_fail(1100);\n\
     return 0;\n\
 }}\n\n\
+static bool rune_rt_time_has_wall_clock(void) {{\n\
+    return false;\n\
+}}\n\n\
 static int64_t rune_checked_div_i64(int64_t left, int64_t right) {{\n\
     if (right == 0) {{\n\
         rune_rt_fail(1001);\n\
@@ -3185,6 +3188,15 @@ fn emit_arduino_uno_expr(
                     }
                     Ok(("rune_rt_time_now_unix()".into(), ArduinoUnoType::I64))
                 }
+                "has_wall_clock" => {
+                    if !args.is_empty() {
+                        return Err(CodegenError {
+                            message: "`has_wall_clock` takes no arguments on the Arduino Uno target".into(),
+                            span: expr.span,
+                        });
+                    }
+                    Ok(("rune_rt_time_has_wall_clock()".into(), ArduinoUnoType::Bool))
+                }
                 "random_i64" => {
                     let [CallArg::Positional(max_expr)] = args.as_slice() else {
                         return Err(CodegenError {
@@ -3718,7 +3730,7 @@ fn emit_arduino_uno_expr(
                     Ok(("false".into(), ArduinoUnoType::Bool))
                 }
                 _ => Err(CodegenError {
-                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `unix_now`, `monotonic_ms`, `monotonic_us`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `read_byte_timeout`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
+                    message: "current Arduino Uno target supports `digital_read`, `analog_read`, `pulse_in`, `shift_in`, `servo_attach`, `millis`, `micros`, `unix_now`, `has_wall_clock`, `monotonic_ms`, `monotonic_us`, `random_i64`, `random_range`, `input`, `read_line`, `open`, `is_open`, `available`, `read_byte`, `read_byte_timeout`, `recv_line`, `send`, `send_line`, `uart_available`, `uart_read_byte`, `uart_peek_byte`, `mode_input`, `mode_output`, `mode_input_pullup`, `led_builtin`, `high`, `low`, `bit_order_lsb_first`, `bit_order_msb_first`, `analog_ref_default`, `analog_ref_internal`, `analog_ref_external`, `platform`, `arch`, `target`, `board`, `is_embedded`, and `is_wasm` expressions".into(),
                     span: expr.span,
                 }),
             }
@@ -4883,6 +4895,7 @@ fn arduino_uno_builtin_alias(name: &str) -> &str {
         "__rune_builtin_gpio_pwm_duty_max" => "gpio_pwm_duty_max",
         "__rune_builtin_gpio_analog_max" => "gpio_analog_max",
         "__rune_builtin_time_now_unix" => "unix_now",
+        "__rune_builtin_time_has_wall_clock" => "has_wall_clock",
         "__rune_builtin_time_monotonic_ms" => "millis",
         "__rune_builtin_time_monotonic_us" => "micros",
         "__rune_builtin_time_sleep_ms" => "delay_ms",
@@ -5913,6 +5926,7 @@ function createHost(options = {{}}) {{
         const known = new Map([
           [1001, "division by zero"],
           [1002, "modulo by zero"],
+          [1100, "wall clock unavailable on current target"],
         ]);
         const message = known.get(numericCode) || "runtime failure";
         writeText("stderr", `Rune error E${{numericCode}}: ${{message}}\n`);
@@ -5920,6 +5934,9 @@ function createHost(options = {{}}) {{
       }},
       rune_rt_time_now_unix() {{
         return BigInt(Math.floor(Date.now() / 1000));
+      }},
+      rune_rt_time_has_wall_clock() {{
+        return true;
       }},
       rune_rt_time_monotonic_ms() {{
         const now = (perf && typeof perf.now === "function") ? perf.now() : Date.now();
@@ -9260,6 +9277,11 @@ pub extern "C" fn rune_rt_time_now_unix() -> i64 {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_secs() as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rune_rt_time_has_wall_clock() -> bool {
+    true
 }
 
 #[unsafe(no_mangle)]
