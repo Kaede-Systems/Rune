@@ -53,6 +53,7 @@ pub use backend::native as codegen;
 pub use backend::llvm as llvm_ir;
 pub use backend::llvm as llvm_backend;
 pub use backend::llvm as avr_cbe_opt;
+pub use backend::obfuscate;
 pub use stdlib as builtin_modules;
 pub use stdlib as module_loader;
 pub use driver::build;

@@ -285,9 +285,13 @@ impl<'a> Emitter<'a> {
             emitter.emit_inst(&mut out, inst, &sig.ret)?;
         }
 
-        if sig.ret == IrType::Unit {
-            if !emitter.block_terminated {
+        if !emitter.block_terminated {
+            if sig.ret == IrType::Unit {
                 out.push_str("  ret void\n");
+            } else {
+                // Unreachable paths (missing return in a non-void function, or
+                // dead merge blocks from if-chains where all branches return).
+                out.push_str("  unreachable\n");
             }
         }
         out.push_str("}\n");
@@ -540,8 +544,10 @@ impl<'a> FunctionEmitter<'a> {
                 self.block_terminated = true;
             }
             IrInst::Jump(label) => {
-                out.push_str(&format!("  br label %{label}\n"));
-                self.block_terminated = true;
+                if !self.block_terminated {
+                    out.push_str(&format!("  br label %{label}\n"));
+                    self.block_terminated = true;
+                }
             }
             IrInst::UnaryBitwiseNot { dst, src } => {
                 let ty = self.temp_types.get(dst).ok_or_else(|| LlvmIrError {
