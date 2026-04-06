@@ -1642,3 +1642,46 @@ def main() -> i32:
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "true\npong\n\ntrue\n");
 }
+
+#[test]
+fn llvm_backend_builds_and_runs_string_methods_on_windows() {
+    let dir = temp_dir();
+    let source_path = dir.join("llvm_string_methods.rn");
+    let exe_path = dir.join("llvm_string_methods.exe");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "  Hello World  "
+    println(s.upper())
+    println(s.lower())
+    println(s.strip())
+    println(s.trim_start())
+    println(s.trim_end())
+    let n: i64 = 3
+    let base: String = "ab"
+    println(base.repeat(n))
+    let haystack: String = "hello world"
+    let idx: i64 = haystack.find("world")
+    println(idx)
+    let miss: i64 = haystack.find("xyz")
+    println(miss)
+    let start: i64 = 6
+    let end: i64 = 11
+    println(haystack.slice(start, end))
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable_llvm(&source_path, &exe_path, Some("x86_64-pc-windows-gnu"))
+        .expect("llvm string methods program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run llvm string methods executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "  HELLO WORLD  \n  hello world  \nHello World\nHello World  \n  Hello World\nababab\n6\n-1\nworld\n");
+}
