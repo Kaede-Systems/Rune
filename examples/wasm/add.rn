@@ -1,0 +1,9 @@
+// Build: rune build add.rn --target wasm32-wasip1 -o add.wasm
+// Run:   rune run-wasm add.wasm --host wasmtime
+
+def add(a: i64, b: i64) -> i64:
+    return a + b
+
+def main() -> i32:
+    println(add(21, 21))
+    return 0

@@ -1,0 +1,25 @@
+from arduino import delay_ms, digital_read, digital_write, led_builtin, mode_input_pullup, mode_output, pin_mode, uart_begin
+
+def setup() -> unit:
+    uart_begin(115200)
+    pin_mode(led_builtin(), mode_output())
+    pin_mode(2, mode_input_pullup())
+    println("button counter on D2")
+    return
+
+def loop() -> unit:
+    let count: i64 = 0
+    let last_state: bool = true
+
+    while true:
+        let state: bool = digital_read(2)
+        if state == false and last_state == true:
+            count = count + 1
+            digital_write(led_builtin(), true)
+            print("presses=")
+            println(count)
+            delay_ms(50)
+            digital_write(led_builtin(), false)
+        last_state = state
+        delay_ms(10)
+    return

@@ -1,0 +1,19 @@
+from arduino import analog_read, delay_ms, uart_begin
+
+def voltage_to_celsius(raw: i64) -> i64:
+    let millivolts: i64 = (raw * 5000) / 1024
+    return (millivolts - 500) / 10
+
+def setup() -> unit:
+    uart_begin(115200)
+    println("temperature sensor ready (LM35 on A0)")
+    return
+
+def loop() -> unit:
+    let raw: i64 = analog_read(0)
+    let celsius: i64 = voltage_to_celsius(raw)
+    print("temp=")
+    print(celsius)
+    println("C")
+    delay_ms(1000)
+    return

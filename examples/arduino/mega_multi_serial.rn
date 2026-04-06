@@ -1,0 +1,14 @@
+# Arduino Mega: dual UART demo
+# Build: rune build mega_multi_serial.rn --target avr-atmega2560-arduino-mega -o mega_multi_serial.hex
+from arduino import delay_ms, uart_begin
+
+def setup() -> unit:
+    uart_begin(115200)
+    println("mega dual UART ready")
+    println("Serial0=USB debug  Serial1=D18/D19")
+    return
+
+def loop() -> unit:
+    println("ping via Serial0")
+    delay_ms(500)
+    return

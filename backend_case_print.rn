@@ -1,3 +1,0 @@
-def main() -> i32:
-    println(40 + 2)
-    return 0

@@ -1,0 +1,20 @@
+from arduino import analog_write, delay_ms, uart_begin
+
+def setup() -> unit:
+    uart_begin(115200)
+    println("LED fade on D9 (PWM)")
+    return
+
+def loop() -> unit:
+    let brightness: i64 = 0
+    while brightness <= 255:
+        analog_write(9, brightness)
+        delay_ms(8)
+        brightness = brightness + 5
+
+    while brightness >= 0:
+        analog_write(9, brightness)
+        delay_ms(8)
+        brightness = brightness - 5
+
+    return

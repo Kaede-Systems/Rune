@@ -2545,3 +2545,70 @@ fn builds_and_runs_c_program_against_rune_static_library_on_windows() {
         .expect("failed to run c consumer");
     assert_eq!(output.status.code(), Some(42));
 }
+
+// --- AVR module constraint tests ---
+// These tests do NOT require the AVR toolchain: check_avr_constraints runs
+// before any tool lookup, so forbidden-module errors fire unconditionally.
+
+fn avr_constraint_error(source: &str, target: &str) -> String {
+    let dir = temp_dir();
+    let src = dir.join("avr_constraint.rn");
+    fs::write(&src, source).expect("failed to write source");
+    let out = dir.join("avr_constraint.hex");
+    match build_executable(&src, &out, Some(target)) {
+        Err(BuildError::Codegen(e)) => e.message,
+        Err(other) => panic!("expected Codegen error, got {other:?}"),
+        Ok(()) => panic!("expected an error but build succeeded"),
+    }
+}
+
+#[test]
+fn avr_rejects_env_import_on_uno() {
+    let msg = avr_constraint_error(
+        "from env import get\ndef main() -> i32:\n    return 0\n",
+        "avr-atmega328p-arduino-uno",
+    );
+    assert!(
+        msg.contains("import `env`") && msg.contains("arduino-uno"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn avr_rejects_network_import_on_uno() {
+    let msg = avr_constraint_error(
+        "from network import tcp_connect\ndef main() -> i32:\n    return 0\n",
+        "avr-atmega328p-arduino-uno",
+    );
+    assert!(
+        msg.contains("import `network`") && msg.contains("arduino-uno"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn avr_rejects_network_import_on_nano() {
+    let msg = avr_constraint_error(
+        "from network import tcp_connect\ndef main() -> i32:\n    return 0\n",
+        "avr-atmega328p-arduino-nano",
+    );
+    assert!(
+        msg.contains("import `network`") && msg.contains("arduino-nano"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn avr_rejects_terminal_and_audio_imports() {
+    let msg = avr_constraint_error(
+        "from terminal import clear\ndef main() -> i32:\n    return 0\n",
+        "avr-atmega328p-arduino-uno",
+    );
+    assert!(msg.contains("import `terminal`"), "unexpected error: {msg}");
+
+    let msg2 = avr_constraint_error(
+        "from audio import play\ndef main() -> i32:\n    return 0\n",
+        "avr-atmega328p-arduino-uno",
+    );
+    assert!(msg2.contains("import `audio`"), "unexpected error: {msg2}");
+}

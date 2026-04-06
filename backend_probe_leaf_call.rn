@@ -1,5 +1,0 @@
-def inc(x: i32) -> i32:
-    return x + 1
-
-def main() -> i32:
-    return inc(41)

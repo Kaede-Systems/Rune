@@ -1,6 +1,0 @@
-class Mixer:
-    base: i32
-    def combine(self, left: i32, right: i32) -> i32:
-        return self.base + left + right
-
-println(Mixer(base=10).combine(right=8, left=4))

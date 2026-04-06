@@ -291,6 +291,8 @@ pub struct AvrBoardSpec {
     pub board_name: &'static str,
     /// Full target triple string (e.g. `"avr-atmega328p-arduino-uno"`)
     pub triple: &'static str,
+    /// Whether this board has built-in network hardware (WiFi/Ethernet)
+    pub has_network: bool,
 }
 
 const KNOWN_AVR_BOARDS: &[AvrBoardSpec] = &[
@@ -306,6 +308,7 @@ const KNOWN_AVR_BOARDS: &[AvrBoardSpec] = &[
         avrdude_baud: 115_200,
         board_name: "arduino-uno",
         triple: "avr-atmega328p-arduino-uno",
+        has_network: false,
     },
     AvrBoardSpec {
         mcu: "atmega2560",
@@ -319,6 +322,7 @@ const KNOWN_AVR_BOARDS: &[AvrBoardSpec] = &[
         avrdude_baud: 115_200,
         board_name: "arduino-mega",
         triple: "avr-atmega2560-arduino-mega",
+        has_network: false,
     },
     AvrBoardSpec {
         mcu: "atmega328p",
@@ -332,6 +336,7 @@ const KNOWN_AVR_BOARDS: &[AvrBoardSpec] = &[
         avrdude_baud: 57_600,
         board_name: "arduino-nano",
         triple: "avr-atmega328p-arduino-nano",
+        has_network: false,
     },
 ];
 
@@ -453,6 +458,7 @@ pub fn emit_avr_precode(source_path: &Path, target: Option<&str>) -> Result<Stri
             KNOWN_AVR_BOARDS.iter().map(|b| b.triple).collect::<Vec<_>>().join(", ")
         ))
     })?;
+    check_avr_source_imports(source_path, board_spec)?;
 
     let mut program = load_program_from_path(source_path)
         .map_err(|error| BuildError::ModuleLoad(error.to_string()))?;
@@ -494,6 +500,12 @@ fn build_executable_with_backend(
     options: &BuildOptions,
 ) -> Result<(), BuildError> {
     let target_spec = target_spec(target)?;
+    // For AVR targets, check for incompatible module imports before the
+    // expensive module-loading step. Import nodes are stripped during loading,
+    // so we parse the entry source file directly to inspect them.
+    if let Some(board_spec) = avr_board_spec_for_triple(target_spec.triple) {
+        check_avr_source_imports(source_path, board_spec)?;
+    }
     let mut program = load_program_from_path(source_path)
         .map_err(|error| BuildError::ModuleLoad(error.to_string()))?;
     check_program(&program).map_err(|error| {
@@ -580,6 +592,62 @@ fn build_executable_via_native_asm(
     Ok(())
 }
 
+/// Parses the entry source file and errors on any imports that are
+/// incompatible with AVR targets. Must be called before `load_program_from_path`
+/// because the module loader strips all `Item::Import` nodes during loading.
+fn check_avr_source_imports(source_path: &Path, board_spec: &AvrBoardSpec) -> Result<(), BuildError> {
+    const ALWAYS_FORBIDDEN: &[(&str, &str)] = &[
+        ("env",      "no environment variables on AVR microcontrollers"),
+        ("terminal", "no terminal/TTY on AVR microcontrollers"),
+        ("audio",    "no audio subsystem on AVR microcontrollers"),
+    ];
+
+    let source = fs::read_to_string(source_path).map_err(|source| BuildError::Io {
+        context: format!("failed to read `{}`", source_path.display()),
+        source,
+    })?;
+    let tokens = crate::frontend::lexer::lex(&source).map_err(|e| {
+        BuildError::Codegen(CodegenError {
+            message: e.to_string(),
+            span: crate::frontend::lexer::Span { line: 1, column: 1 },
+        })
+    })?;
+    let program = crate::frontend::parser::parse_tokens(tokens).map_err(|e| {
+        BuildError::Codegen(CodegenError {
+            message: e.message,
+            span: e.span,
+        })
+    })?;
+
+    let mut errors: Vec<String> = Vec::new();
+    for item in &program.items {
+        if let Item::Import(decl) = item {
+            let top = decl.module.first().map(|s| s.as_str()).unwrap_or("");
+            if let Some((_, reason)) = ALWAYS_FORBIDDEN.iter().find(|(name, _)| *name == top) {
+                errors.push(format!(
+                    "import `{}` is not supported on {} ({})",
+                    decl.module.join("."),
+                    board_spec.board_name,
+                    reason,
+                ));
+            } else if top == "network" && !board_spec.has_network {
+                errors.push(format!(
+                    "import `{}` is not supported on {} (no network hardware; use a board with built-in WiFi/Ethernet such as ESP32)",
+                    decl.module.join("."),
+                    board_spec.board_name,
+                ));
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return Err(BuildError::Codegen(CodegenError {
+            message: errors.join("\n"),
+            span: crate::frontend::lexer::Span { line: 1, column: 1 },
+        }));
+    }
+    Ok(())
+}
+
 fn check_avr_constraints(program: &Program, board_spec: &AvrBoardSpec) -> Result<(), BuildError> {
     let ir = lower_program(program);
     let mut errors: Vec<String> = Vec::new();
@@ -608,9 +676,9 @@ fn check_avr_constraints(program: &Program, board_spec: &AvrBoardSpec) -> Result
         }
     }
     if !errors.is_empty() {
-        return Err(BuildError::Codegen(crate::codegen::CodegenError {
+        return Err(BuildError::Codegen(crate::backend::native::CodegenError {
             message: errors.join("\n"),
-            span: crate::lexer::Span { line: 1, column: 1 },
+            span: crate::frontend::lexer::Span { line: 1, column: 1 },
         }));
     }
     Ok(())

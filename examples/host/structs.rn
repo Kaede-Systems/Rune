@@ -1,0 +1,45 @@
+struct Point:
+    x: i64
+    y: i64
+
+    def distance_squared(self) -> i64:
+        return self.x * self.x + self.y * self.y
+
+    def translate(self, dx: i64, dy: i64) -> Point:
+        return Point(x=self.x + dx, y=self.y + dy)
+
+struct Rect:
+    origin: Point
+    width: i64
+    height: i64
+
+    def area(self) -> i64:
+        return self.width * self.height
+
+    def contains(self, p: Point) -> bool:
+        let in_x: bool = p.x >= self.origin.x and p.x < self.origin.x + self.width
+        let in_y: bool = p.y >= self.origin.y and p.y < self.origin.y + self.height
+        return in_x and in_y
+
+def main() -> i32:
+    let p: Point = Point(x=3, y=4)
+    print("dist_squared=")
+    println(p.distance_squared())
+
+    let p2: Point = p.translate(1, 2)
+    print("translated: x=")
+    print(p2.x)
+    print(" y=")
+    println(p2.y)
+
+    let r: Rect = Rect(origin=Point(x=0, y=0), width=10, height=5)
+    print("area=")
+    println(r.area())
+
+    let inside: Point = Point(x=5, y=3)
+    let outside: Point = Point(x=11, y=3)
+    print("contains(5,3)=")
+    println(r.contains(inside))
+    print("contains(11,3)=")
+    println(r.contains(outside))
+    return 0

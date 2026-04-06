@@ -1,0 +1,26 @@
+# Arduino Nano: analog IMU axis reader
+# Build: rune build nano_imu_reader.rn --target avr-atmega328p-arduino-nano -o nano_imu.hex
+from arduino import analog_read, delay_ms, uart_begin
+
+def to_signed(raw: i64) -> i64:
+    if raw >= 32768:
+        return raw - 65536
+    return raw
+
+def setup() -> unit:
+    uart_begin(57600)
+    println("Nano IMU reader ready")
+    return
+
+def loop() -> unit:
+    let ax: i64 = to_signed(analog_read(0))
+    let ay: i64 = to_signed(analog_read(1))
+    let az: i64 = to_signed(analog_read(2))
+    print("ax=")
+    print(ax)
+    print(" ay=")
+    print(ay)
+    print(" az=")
+    println(az)
+    delay_ms(100)
+    return

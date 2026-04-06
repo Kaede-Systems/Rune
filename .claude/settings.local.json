@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs basename:*)",
+      "Bash(cargo check:*)",
+      "Bash(cmd:*)",
+      "Bash(sed:*)"
+    ]
+  }
+}

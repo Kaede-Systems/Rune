@@ -1,0 +1,14 @@
+from arduino import delay_ms, digital_write, led_builtin, mode_output, pin_mode, uart_begin
+
+def setup() -> unit:
+    uart_begin(9600)
+    pin_mode(led_builtin(), mode_output())
+    println("blink started")
+    return
+
+def loop() -> unit:
+    digital_write(led_builtin(), true)
+    delay_ms(1000)
+    digital_write(led_builtin(), false)
+    delay_ms(1000)
+    return
