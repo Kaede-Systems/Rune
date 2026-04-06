@@ -651,3 +651,23 @@ fn accepts_same_name_let_in_loop_body() {
 
     assert!(asm.contains(".globl main"));
 }
+
+#[test]
+fn emits_string_find_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"hello world\"\n    let idx: i64 = s.find(\"world\")\n    return idx\n",
+    )
+    .expect("String.find() should generate assembly");
+
+    assert!(asm.contains("rune_rt_string_find"), "expected call to rune_rt_string_find");
+}
+
+#[test]
+fn emits_string_slice_call() {
+    let asm = emit_asm_source(
+        "def main() -> i64:\n    let s: String = \"hello world\"\n    let start: i64 = 0\n    let end: i64 = 5\n    let sub: String = s.slice(start, end)\n    println(sub)\n    return 0\n",
+    )
+    .expect("String.slice() should generate assembly");
+
+    assert!(asm.contains("rune_rt_string_slice"), "expected call to rune_rt_string_slice");
+}

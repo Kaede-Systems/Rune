@@ -1307,3 +1307,67 @@ def main() -> i32:
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\nabcdef\n6\ntrue\ntrue\ntrue\ntrue\ntrue\n");
 }
+
+#[test]
+fn builds_and_runs_string_find_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("string_find.rn");
+    let exe_path = dir.join("string_find.exe");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "hello world"
+    let idx: i64 = s.find("world")
+    println(idx)
+    let miss: i64 = s.find("xyz")
+    println(miss)
+    let empty: i64 = s.find("")
+    println(empty)
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("string find program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run string find executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "6\n-1\n0\n");
+}
+
+#[test]
+fn builds_and_runs_string_slice_program() {
+    let dir = temp_dir();
+    let source_path = dir.join("string_slice.rn");
+    let exe_path = dir.join("string_slice.exe");
+
+    fs::write(
+        &source_path,
+        r#"def main() -> i32:
+    let s: String = "hello world"
+    let start: i64 = 6
+    let end: i64 = 11
+    let sub: String = s.slice(start, end)
+    println(sub)
+    let prefix: String = s.slice(0, 5)
+    println(prefix)
+    return 0
+"#,
+    )
+    .expect("failed to write source");
+
+    build_executable(&source_path, &exe_path, None).expect("string slice program should build");
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("failed to run string slice executable");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "world\nhello\n");
+}
