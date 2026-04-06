@@ -970,7 +970,7 @@ def main() -> i32:
         };
         let value = ret.value.as_ref().expect("return should have a value");
         assert_eq!(
-            format!("{value:?}"),
+            format!("{:?}", value.kind),
             format!("{:?}", crate::parser::ExprKind::Integer("42".to_string())),
             "42 / 1 should fold to 42"
         );

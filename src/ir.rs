@@ -237,8 +237,26 @@ fn collect_local_infos(
                 );
             }
             Stmt::Assign(stmt) => {
+                // Infer the rhs type first (immutable borrow) before taking &mut.
+                let rhs_ty = infer_expr_type(
+                    &stmt.value,
+                    infos,
+                    struct_layouts,
+                    struct_methods,
+                    function_returns,
+                );
                 if let Some(info) = infos.get_mut(&stmt.name) {
-                    info.reassigned = true;
+                    // If the rhs type is consistent with the current candidate, the
+                    // variable's type is stable across reassignment and we can keep the
+                    // candidate.  If types diverge, fall back to Dynamic.
+                    let candidate_ty = info.ty.specialized(true);
+                    let type_consistent = match &rhs_ty {
+                        Some(rhs) => *rhs == candidate_ty || candidate_ty == IrType::Dynamic,
+                        None => false,
+                    };
+                    if !type_consistent {
+                        info.reassigned = true;
+                    }
                 }
             }
             Stmt::If(stmt) => {

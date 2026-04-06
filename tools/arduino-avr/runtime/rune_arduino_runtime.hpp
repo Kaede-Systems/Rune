@@ -65,6 +65,14 @@
 #define RUNE_ARDUINO_ENABLE_UART_PEEK_RUNTIME 1
 #endif
 
+#ifndef RUNE_AVR_TARGET_TRIPLE
+#define RUNE_AVR_TARGET_TRIPLE "avr-atmega328p-arduino-uno"
+#endif
+
+#ifndef RUNE_AVR_BOARD_NAME
+#define RUNE_AVR_BOARD_NAME "arduino-uno"
+#endif
+
 static char rune_input_buffer[RUNE_INPUT_BUFFER_SIZE];
 static uint16_t rune_last_string_len = 0;
 static bool rune_serial_is_open_flag = false;
@@ -330,12 +338,12 @@ extern "C" void* rune_rt_dynamic_to_string(int64_t tag, int64_t payload, int64_t
 }
 
 extern "C" void rune_rt_print_dynamic(int64_t tag, int64_t payload, int64_t extra) {
-    void* text = rune_rt_dynamic_to_string(tag, payload, extra);
+    const char* text = (const char*)rune_rt_dynamic_to_string(tag, payload, extra);
     rune_rt_print_str(text, (uint64_t)rune_last_string_len);
 }
 
 extern "C" void rune_rt_eprint_dynamic(int64_t tag, int64_t payload, int64_t extra) {
-    void* text = rune_rt_dynamic_to_string(tag, payload, extra);
+    const char* text = (const char*)rune_rt_dynamic_to_string(tag, payload, extra);
     rune_rt_eprint_str(text, (uint64_t)rune_last_string_len);
 }
 #endif
@@ -345,6 +353,11 @@ extern "C" bool rune_rt_system_is_embedded(void) {
     return true;
 }
 
+extern "C" bool rune_rt_system_is_wasm(void) {
+    return false;
+}
+
+#if RUNE_ARDUINO_ENABLE_STRING_RUNTIME
 extern "C" void* rune_rt_system_platform(void) {
     return (void*)rune_store_string_literal("embedded");
 }
@@ -354,16 +367,13 @@ extern "C" void* rune_rt_system_arch(void) {
 }
 
 extern "C" void* rune_rt_system_target(void) {
-    return (void*)rune_store_string_literal("avr-atmega328p-arduino-uno");
+    return (void*)rune_store_string_literal(RUNE_AVR_TARGET_TRIPLE);
 }
 
 extern "C" void* rune_rt_system_board(void) {
-    return (void*)rune_store_string_literal("arduino-uno");
+    return (void*)rune_store_string_literal(RUNE_AVR_BOARD_NAME);
 }
-
-extern "C" bool rune_rt_system_is_wasm(void) {
-    return false;
-}
+#endif
 #endif
 
 #if RUNE_ARDUINO_ENABLE_ENV_RUNTIME
@@ -384,7 +394,6 @@ extern "C" void* rune_rt_env_arg(int32_t index) {
 }
 #endif
 
-#if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" int64_t rune_rt_sum_range(int64_t start, int64_t stop, int64_t step) {
     if (step == 0) {
         return 0;
@@ -402,6 +411,7 @@ extern "C" int64_t rune_rt_sum_range(int64_t start, int64_t stop, int64_t step) 
     return total;
 }
 
+#if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" void rune_rt_dynamic_binary(const int64_t* left, const int64_t* right, int64_t* out, int64_t op) {
     int64_t left_tag = left[0];
     int64_t left_payload = left[1];
@@ -432,10 +442,10 @@ extern "C" void rune_rt_dynamic_binary(const int64_t* left, const int64_t* right
         return;
     }
 
-    int64_t left_value = (left_tag == 4) ? rune_rt_string_to_i64((void*)(intptr_t)left_payload, (uint64_t)left_extra) :
+    int64_t left_value = (left_tag == 4) ? rune_rt_string_to_i64((const char*)(intptr_t)left_payload, (uint64_t)left_extra) :
                         (left_tag == 1 ? (left_payload != 0 ? 1 : 0) :
                         (left_tag == 2 ? (int32_t)left_payload : left_payload));
-    int64_t right_value = (right_tag == 4) ? rune_rt_string_to_i64((void*)(intptr_t)right_payload, (uint64_t)right_extra) :
+    int64_t right_value = (right_tag == 4) ? rune_rt_string_to_i64((const char*)(intptr_t)right_payload, (uint64_t)right_extra) :
                          (right_tag == 1 ? (right_payload != 0 ? 1 : 0) :
                          (right_tag == 2 ? (int32_t)right_payload : right_payload));
     out[0] = 3;
@@ -459,9 +469,9 @@ extern "C" bool rune_rt_dynamic_compare(const int64_t* left, const int64_t* righ
     int64_t right_extra = right[2];
 
     if (left_tag == 4 || right_tag == 4) {
-        void* left_text = rune_rt_dynamic_to_string(left_tag, left_payload, left_extra);
+        const char* left_text = (const char*)rune_rt_dynamic_to_string(left_tag, left_payload, left_extra);
         uint64_t left_len = (uint64_t)rune_rt_last_string_len();
-        void* right_text = rune_rt_dynamic_to_string(right_tag, right_payload, right_extra);
+        const char* right_text = (const char*)rune_rt_dynamic_to_string(right_tag, right_payload, right_extra);
         uint64_t right_len = (uint64_t)rune_rt_last_string_len();
         int cmp = rune_rt_string_compare(left_text, left_len, right_text, right_len);
         switch (op) {
@@ -622,6 +632,27 @@ extern "C" void* rune_rt_serial_read_line(void) {
 extern "C" void rune_rt_serial_close(void) {
     Serial.flush();
 }
+
+// Serial module bridge: non-embedded API names that are emitted even on AVR
+// due to the system_is_embedded() branches not being constant-folded by LLVM.
+extern "C" int64_t rune_rt_serial_available(void) {
+    return (int64_t)Serial.available();
+}
+
+extern "C" int64_t rune_rt_serial_read_byte(void) {
+    while (Serial.available() <= 0) {}
+    return (int64_t)Serial.read();
+}
+
+extern "C" int64_t rune_rt_serial_read_byte_timeout(int64_t timeout_ms) {
+    int64_t deadline = (int64_t)millis() + timeout_ms;
+    while ((int64_t)millis() < deadline) {
+        if (Serial.available() > 0) {
+            return (int64_t)Serial.read();
+        }
+    }
+    return -1;
+}
 #endif
 
 #if RUNE_ARDUINO_ENABLE_GPIO_RUNTIME
@@ -766,14 +797,6 @@ extern "C" int64_t rune_rt_arduino_low(void) {
     return LOW;
 }
 
-extern "C" int64_t rune_rt_arduino_bit_order_lsb_first(void) {
-    return LSBFIRST;
-}
-
-extern "C" int64_t rune_rt_arduino_bit_order_msb_first(void) {
-    return MSBFIRST;
-}
-
 extern "C" int64_t rune_rt_arduino_analog_ref_default(void) {
     return DEFAULT;
 }
@@ -785,7 +808,43 @@ extern "C" int64_t rune_rt_arduino_analog_ref_internal(void) {
 extern "C" int64_t rune_rt_arduino_analog_ref_external(void) {
     return EXTERNAL;
 }
+
+// GPIO module bridge functions (used by the builtin gpio/pwm/adc modules)
+extern "C" void rune_rt_gpio_pin_mode(int64_t pin, int64_t mode) {
+    rune_rt_arduino_pin_mode(pin, mode);
+}
+
+extern "C" void rune_rt_gpio_digital_write(int64_t pin, bool value) {
+    rune_rt_arduino_digital_write(pin, value);
+}
+
+extern "C" bool rune_rt_gpio_digital_read(int64_t pin) {
+    return rune_rt_arduino_digital_read(pin);
+}
+
+extern "C" void rune_rt_gpio_pwm_write(int64_t pin, int64_t value) {
+    rune_rt_arduino_analog_write(pin, value);
+}
+
+extern "C" int64_t rune_rt_gpio_analog_read(int64_t pin) {
+    return rune_rt_arduino_analog_read(pin);
+}
+
+extern "C" int64_t rune_rt_gpio_mode_input(void) { return INPUT; }
+extern "C" int64_t rune_rt_gpio_mode_output(void) { return OUTPUT; }
+extern "C" int64_t rune_rt_gpio_mode_input_pullup(void) { return INPUT_PULLUP; }
+extern "C" int64_t rune_rt_gpio_pwm_duty_max(void) { return 255; }
+extern "C" int64_t rune_rt_gpio_analog_max(void) { return 1023; }
 #endif
+
+// Bit-order constants — needed by both GPIO and shift operations
+extern "C" int64_t rune_rt_arduino_bit_order_lsb_first(void) {
+    return LSBFIRST;
+}
+
+extern "C" int64_t rune_rt_arduino_bit_order_msb_first(void) {
+    return MSBFIRST;
+}
 
 #if !RUNE_ARDUINO_ENABLE_GPIO_RUNTIME
 extern "C" void rune_rt_arduino_delay_ms(int64_t ms) {

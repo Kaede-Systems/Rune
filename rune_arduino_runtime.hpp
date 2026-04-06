@@ -371,7 +371,6 @@ extern "C" void* rune_rt_env_arg(int32_t index) {
 }
 #endif
 
-#if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" int64_t rune_rt_sum_range(int64_t start, int64_t stop, int64_t step) {
     if (step == 0) {
         return 0;
@@ -389,6 +388,7 @@ extern "C" int64_t rune_rt_sum_range(int64_t start, int64_t stop, int64_t step) 
     return total;
 }
 
+#if RUNE_ARDUINO_ENABLE_DYNAMIC_RUNTIME
 extern "C" void rune_rt_dynamic_binary(const int64_t* left, const int64_t* right, int64_t* out, int64_t op) {
     int64_t left_tag = left[0];
     int64_t left_payload = left[1];

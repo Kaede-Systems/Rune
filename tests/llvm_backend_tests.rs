@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rune::llvm_backend::{emit_assembly_file, emit_object_file};
+use rune::llvm_backend::{emit_assembly_file, emit_object_file, LlvmOptLevel};
 use rune::module_loader::load_program_from_path;
 use rune::optimize::optimize_program;
 use rune::semantic::check_program;
@@ -31,7 +31,7 @@ fn emits_linux_object_file_via_inkwell_backend() {
     let mut program = load_program_from_path(&source_path).expect("program should load");
     check_program(&program).expect("program should type check");
     optimize_program(&mut program);
-    emit_object_file(&program, "x86_64-unknown-linux-gnu", &output_path)
+    emit_object_file(&program, "x86_64-unknown-linux-gnu", &output_path, LlvmOptLevel::Full)
         .expect("inkwell object emission should succeed");
 
     let bytes = fs::read(&output_path).expect("object file should exist");
@@ -52,7 +52,7 @@ fn emits_linux_assembly_file_via_llvm_backend() {
     let mut program = load_program_from_path(&source_path).expect("program should load");
     check_program(&program).expect("program should type check");
     optimize_program(&mut program);
-    emit_assembly_file(&program, "x86_64-unknown-linux-gnu", &output_path)
+    emit_assembly_file(&program, "x86_64-unknown-linux-gnu", &output_path, LlvmOptLevel::Full)
         .expect("llvm assembly emission should succeed");
 
     let asm = fs::read_to_string(&output_path).expect("assembly file should exist");
@@ -70,7 +70,7 @@ fn emits_linux_assembly_file_for_script_style_source() {
     let mut program = load_program_from_path(&source_path).expect("script should load");
     check_program(&program).expect("script should type check");
     optimize_program(&mut program);
-    emit_assembly_file(&program, "x86_64-unknown-linux-gnu", &output_path)
+    emit_assembly_file(&program, "x86_64-unknown-linux-gnu", &output_path, LlvmOptLevel::Full)
         .expect("llvm assembly emission should succeed for script source");
 
     let asm = fs::read_to_string(&output_path).expect("assembly file should exist");

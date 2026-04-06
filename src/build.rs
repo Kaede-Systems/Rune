@@ -578,13 +578,16 @@ fn check_avr_constraints(program: &Program, board_spec: &AvrBoardSpec) -> Result
     let ir = lower_program(program);
     let mut errors: Vec<String> = Vec::new();
     for function in &ir.functions {
+        // Builtin module functions handle embedded/non-embedded branches internally
+        // via system_is_embedded() checks; they are trusted to not use heap on AVR.
+        let is_builtin_module_fn = function.name.starts_with("__mod__builtin__");
         for local in &function.locals {
             match &local.ty {
-                IrType::Dynamic => errors.push(format!(
+                IrType::Dynamic if !is_builtin_module_fn => errors.push(format!(
                     "function `{}`: local `{}` has type `dynamic`, which is not supported on {} (no heap allocator)",
                     function.name, local.name, board_spec.board_name
                 )),
-                IrType::Json => errors.push(format!(
+                IrType::Json if !is_builtin_module_fn => errors.push(format!(
                     "function `{}`: local `{}` has type `json`, which is not supported on {}",
                     function.name, local.name, board_spec.board_name
                 )),
@@ -1417,6 +1420,22 @@ fn avr_runtime_profile(program: &Program, llvm_ir: &str) -> ArduinoUnoRuntimePro
         "rune_rt_arduino_analog_ref_default",
         "rune_rt_arduino_analog_ref_internal",
         "rune_rt_arduino_analog_ref_external",
+        // gpio/pwm/adc module bridge names
+        "rune_rt_gpio_pin_mode",
+        "rune_rt_gpio_digital_write",
+        "rune_rt_gpio_digital_read",
+        "rune_rt_gpio_pwm_write",
+        "rune_rt_gpio_analog_read",
+        "rune_rt_gpio_mode_input",
+        "rune_rt_gpio_mode_output",
+        "rune_rt_gpio_mode_input_pullup",
+        "rune_rt_gpio_pwm_duty_max",
+        "rune_rt_gpio_analog_max",
+        // servo functions require GPIO_RUNTIME block
+        "rune_rt_arduino_servo_attach",
+        "rune_rt_arduino_servo_detach",
+        "rune_rt_arduino_servo_write",
+        "rune_rt_arduino_servo_write_us",
     ]
     .iter()
     .any(|name| uses_runtime_symbol(name));

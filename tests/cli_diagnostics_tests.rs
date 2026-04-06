@@ -173,7 +173,7 @@ fn check_reports_multiple_semantic_errors_in_one_run() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("function argument expected `String`, found `dynamic`"));
+    assert!(stderr.contains("function argument expected `String`, found `i32`"));
     assert!(stderr.contains("return value expected `i32`, found `String`"));
     assert!(stderr.contains("multi_error.rn:5:"));
     assert!(stderr.contains("multi_error.rn:8:"));
